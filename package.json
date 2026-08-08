@@ -16,10 +16,10 @@
     "turbo:build": "turbo run build",
     "turbo:typecheck": "turbo run typecheck",
     "eval": "tsx evals/run.ts",
-    "ext:build": "pnpm --filter @setu/extension build",
-    "ext:zip": "pnpm ext:build && node scripts/zip-extension.mjs",
-    "edge:dev": "pnpm --filter @setu/web dev",
-    "edge:build": "pnpm --filter @setu/web build"
+    "ext:build": "node scripts/workspace.mjs build --filter @setu/extension",
+    "ext:zip": "node scripts/workspace.mjs build --filter @setu/extension && node scripts/zip-extension.mjs",
+    "edge:dev": "node scripts/workspace.mjs dev --filter @setu/web",
+    "edge:build": "node scripts/workspace.mjs build --filter @setu/web"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
