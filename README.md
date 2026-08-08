@@ -267,7 +267,3 @@ apps/web/src/
 ```
 
 ---
-
-*Built against the SETU Master Build Bible v1.0. Capgemini Tech4Positive Futures 2026.*
-#   s e t u  
- 
