@@ -1,0 +1,327 @@
+/**
+ * All injected styles, layer-scoped.
+ *
+ * @layer setu sits BELOW the host page's unlayered styles in the cascade, so
+ * SETU never accidentally wins a specificity fight it should lose. Where we
+ * genuinely must win — hiding noise, killing motion — we use !important
+ * explicitly and visibly, rather than escalating selector weight and hoping.
+ *
+ * Design tokens are Appendix A. They are compliance, not decoration:
+ * every pair is >= 4.5:1, the reading measure is 66ch, focus rings are 3px.
+ */
+
+@layer setu {
+  :root {
+    --setu-bg: #fbfaf7;
+    --setu-bg-raised: #ffffff;
+    --setu-fg: #1b1d21;
+    --setu-fg-muted: #4e535c;
+    --setu-accent: #2f6fed;
+    --setu-calm: #2e7d6b;
+    --setu-warn: #a8600b;
+    --setu-line: #e3e0d9;
+    --setu-radius: 12px;
+    --setu-shadow: 0 10px 40px rgba(0, 0, 0, 0.18);
+    --setu-z: 2147483600;
+  }
+
+  /* ── bionic ─────────────────────────────────────────────────────────── */
+
+  .setu-fix {
+    font-weight: 700;
+  }
+
+  /* ── DNA typography, applied to the host page ───────────────────────── */
+
+  html[data-setu-font='atkinson'] body {
+    font-family: 'Atkinson Hyperlegible', system-ui, sans-serif !important;
+  }
+  html[data-setu-font='lexend'] body {
+    font-family: 'Lexend', system-ui, sans-serif !important;
+  }
+  html[data-setu-font='opendyslexic'] body {
+    font-family: 'OpenDyslexic', 'Atkinson Hyperlegible', system-ui, sans-serif !important;
+  }
+
+  html[data-setu-motion='none'] *,
+  html[data-setu-motion='none'] *::before,
+  html[data-setu-motion='none'] *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* ── focus mode: constrain the measure to 60-75 characters ──────────── */
+
+  html[data-setu-focus='on'] body {
+    background: var(--setu-bg) !important;
+    color: var(--setu-fg) !important;
+  }
+  html[data-setu-focus='on'] main,
+  html[data-setu-focus='on'] article,
+  html[data-setu-focus='on'] [role='main'] {
+    max-width: 66ch !important;
+    margin-inline: auto !important;
+    float: none !important;
+    line-height: 1.75 !important;
+    letter-spacing: 0.012em !important;
+    word-spacing: 0.16em !important;
+    font-size: 1.05rem !important;
+  }
+  html[data-setu-focus='on'] img,
+  html[data-setu-focus='on'] video,
+  html[data-setu-focus='on'] figure {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+  html[data-setu-focus='on'][data-setu-density='minimal'] main,
+  html[data-setu-focus='on'][data-setu-density='minimal'] article {
+    max-width: 58ch !important;
+    line-height: 2.05 !important;
+  }
+
+  /* ── line guide ─────────────────────────────────────────────────────── */
+
+  .setu-line-guide {
+    position: fixed;
+    left: 0;
+    right: 0;
+    height: 2.2rem;
+    pointer-events: none;
+    z-index: calc(var(--setu-z) - 1);
+    border-top: 2px solid var(--setu-accent);
+    border-bottom: 2px solid var(--setu-accent);
+    background: color-mix(in srgb, var(--setu-accent) 8%, transparent);
+  }
+
+  /* ── shared surface for every overlay we mount ──────────────────────── */
+
+  .setu-root,
+  .setu-root * {
+    box-sizing: border-box;
+    font-family: 'Atkinson Hyperlegible', system-ui, -apple-system, sans-serif;
+  }
+
+  .setu-root {
+    position: fixed;
+    z-index: var(--setu-z);
+    color: var(--setu-fg);
+    font-size: 16px;
+    line-height: 1.6;
+  }
+
+  .setu-root :focus-visible {
+    outline: 3px solid var(--setu-accent) !important;
+    outline-offset: 2px !important;
+  }
+
+  .setu-card {
+    background: var(--setu-bg-raised);
+    border: 1px solid var(--setu-line);
+    border-radius: var(--setu-radius);
+    box-shadow: var(--setu-shadow);
+    padding: 20px;
+  }
+
+  .setu-btn {
+    font: inherit;
+    padding: 10px 16px;
+    min-height: 44px;
+    border-radius: 10px;
+    border: 1px solid var(--setu-line);
+    background: var(--setu-bg-raised);
+    color: var(--setu-fg);
+    cursor: pointer;
+  }
+  .setu-btn:hover {
+    background: #f2f1ee;
+  }
+  .setu-btn--primary {
+    background: var(--setu-accent);
+    border-color: var(--setu-accent);
+    color: #fff;
+    font-weight: 600;
+  }
+  .setu-btn--primary:hover {
+    background: #2a63d4;
+  }
+  .setu-btn--quiet {
+    background: transparent;
+    border-color: transparent;
+    color: var(--setu-fg-muted);
+    text-decoration: underline;
+  }
+
+  /* ── the Breathe overlay ────────────────────────────────────────────────
+     The emotional peak of the pitch. Dim, one breath cycle, THEN the offer.
+     Never the other way round — leading with a question is what every other
+     nudge product does, and it is exactly the wrong order for someone at the
+     edge of overwhelm.
+     ─────────────────────────────────────────────────────────────────────── */
+
+  .setu-breathe {
+    inset: 0;
+    display: grid;
+    place-items: center;
+    background: rgba(12, 14, 18, 0.55);
+    backdrop-filter: blur(3px);
+    animation: setu-fade 600ms ease-out;
+  }
+
+  .setu-breathe__circle {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--setu-calm) 35%, transparent);
+    border: 2px solid var(--setu-calm);
+    margin: 0 auto 20px;
+    animation: setu-breath 12s ease-in-out 1 forwards;
+  }
+
+  .setu-breathe__word {
+    text-align: center;
+    color: #fff;
+    font-size: 1.3rem;
+    letter-spacing: 0.08em;
+    min-height: 2em;
+  }
+
+  .setu-breathe__offer {
+    margin-top: 24px;
+    max-width: 460px;
+    text-align: left;
+    opacity: 0;
+    animation: setu-fade 400ms ease-out 12s forwards;
+  }
+
+  .setu-breathe__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 16px;
+  }
+
+  @keyframes setu-breath {
+    0% {
+      transform: scale(0.7);
+    }
+    33% {
+      transform: scale(1.15);
+    }
+    66% {
+      transform: scale(1.15);
+    }
+    100% {
+      transform: scale(0.7);
+    }
+  }
+
+  @keyframes setu-fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  /* ── the Panic card (§42.12) ────────────────────────────────────────────
+     The crudest feature in the product and possibly the most loved. When
+     someone is at the edge of overwhelm they cannot navigate a menu of
+     helpful features. One key. Everything stops.
+     ─────────────────────────────────────────────────────────────────────── */
+
+  .setu-panic {
+    inset: 0;
+    display: grid;
+    place-items: center;
+    background: var(--setu-bg);
+  }
+
+  .setu-panic__card {
+    max-width: 34rem;
+    text-align: left;
+  }
+
+  .setu-panic__where {
+    font-size: 1.35rem;
+    line-height: 1.5;
+    margin: 0 0 24px;
+  }
+
+  /* ── the corner suggestion ──────────────────────────────────────────── */
+
+  .setu-toast {
+    right: 20px;
+    bottom: 20px;
+    max-width: 22rem;
+    animation: setu-fade 300ms ease-out;
+  }
+  .setu-toast__row {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+  }
+
+  /* ── COMMANDER: the highlight that lets the user watch and abort ────── */
+
+  .setu-spotlight {
+    position: absolute;
+    pointer-events: none;
+    border: 3px solid var(--setu-accent);
+    border-radius: 8px;
+    box-shadow: 0 0 0 9999px rgba(12, 14, 18, 0.45);
+    z-index: calc(var(--setu-z) - 2);
+    transition: all 200ms ease-out;
+  }
+  .setu-spotlight__label {
+    position: absolute;
+    left: 0;
+    top: -34px;
+    background: var(--setu-accent);
+    color: #fff;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  .setu-meta {
+    color: var(--setu-fg-muted);
+    font-size: 13px;
+  }
+
+  .setu-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .setu-breathe,
+    .setu-breathe__circle,
+    .setu-breathe__offer,
+    .setu-toast,
+    .setu-spotlight {
+      animation: none !important;
+      transition: none !important;
+      opacity: 1 !important;
+    }
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --setu-bg: #15171a;
+      --setu-bg-raised: #1d2024;
+      --setu-fg: #eceef1;
+      --setu-fg-muted: #a8aeb8;
+      --setu-line: #2c3036;
+    }
+    .setu-btn:hover {
+      background: #262a30;
+    }
+  }
+}

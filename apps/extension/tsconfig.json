@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "types": ["chrome", "vite/client"],
+    // Re-declared because `baseUrl` in an extended config resolves relative to
+    // the BASE file's directory, not this one.
+    "baseUrl": ".",
+    "paths": {
+      "@setu/core": ["../../packages/core/src/index.ts"],
+      "@setu/core/*": ["../../packages/core/src/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts", "vite.content.config.ts"]
+}
