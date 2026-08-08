@@ -32,6 +32,14 @@ app (ingest, mind maps, Memory Vault, Rewind) and SETU Go (Android) come next.
 > authentication, rate limits, consent, PII redaction, schema validation and cost
 > accounting. `apps/web` today is that door and nothing else.
 
+### Documentation
+
+| Document | For |
+|---|---|
+| [`docs/IMPLEMENTATION.md`](docs/IMPLEMENTATION.md) | **The full reference.** Every feature, how it works, every data flow, the complete file inventory, the verification log. Start here. |
+| [`docs/DEMO_RUNBOOK.md`](docs/DEMO_RUNBOOK.md) | The 2:45 demo, beat by beat, plus what to do when it breaks |
+| [`docs/JUDGE_QA.md`](docs/JUDGE_QA.md) | Q&A, every answer pointing at a file you can open |
+
 ---
 
 ## Three commands to run it
