@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NeuroBridge One</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="nb-app" id="nb-app">
+    <!-- Top Branding Header -->
+    <header class="nb-header">
+      <div class="nb-brand">
+        <div class="nb-logo-badge">⌁</div>
+        <div class="nb-brand-title">
+          <h1>NeuroBridge One</h1>
+          <span class="nb-kernel-tag">powered by SETU</span>
+        </div>
+      </div>
+      <div class="nb-header-controls">
+        <label class="nb-sensory-switch" title="Toggle Sensory Calm Mode (Lower contrast, larger spacing, reduced motion)">
+          <input type="checkbox" id="sensory-toggle">
+          <span class="nb-sensory-slider"></span>
+          <span class="nb-sensory-label">🌱 Calm</span>
+        </label>
+      </div>
+    </header>
+
+    <!-- Navigation Tabs for the 7 Cognitive Accessibility Modes -->
+    <nav class="nb-nav-tabs" aria-label="Cognitive Modes">
+      <button class="nb-tab active" data-tab="start">🚀 Start</button>
+      <button class="nb-tab" data-tab="simplify">✨ Simplify</button>
+      <button class="nb-tab" data-tab="learn">🧠 Learn</button>
+      <button class="nb-tab" data-tab="meet">🎙️ Meet</button>
+      <button class="nb-tab" data-tab="practice">💬 Practice</button>
+      <button class="nb-tab" data-tab="write">✍️ Write</button>
+      <button class="nb-tab" data-tab="guide">📍 Guide</button>
+    </nav>
+
+    <!-- MAIN CONTAINER -->
+    <main class="nb-main">
+
+      <!-- MODE 1: START MODE (Hero Flow - Wall of Awful Task Initiation) -->
+      <section class="nb-tab-content active" id="tab-start">
+        <div class="nb-card nb-hero-card">
+          <div class="nb-card-header">
+            <h2>Break the Wall of Awful</h2>
+            <button class="nb-autopilot-btn" id="btn-autopilot" title="Autopilot: Propose immediate safe next action">
+              ⚡ I am stuck!
+            </button>
+          </div>
+          <p class="nb-card-desc">Staring at a task and frozen? Tell NeuroBridge what you are avoiding.</p>
+          
+          <div class="nb-form-group">
+            <input type="text" id="start-task-input" placeholder="e.g. Write chapter 1 of my thesis project" class="nb-input" />
+            <button class="nb-btn nb-btn-primary" id="btn-run-start">Get First Action</button>
+          </div>
+
+          <div class="nb-output-box" id="start-output" style="display:none;">
+            <!-- Confidence Meter Badges -->
+            <div class="nb-confidence-meter" id="start-confidence">
+              <span class="nb-badge effort" id="badge-effort">Effort: Low</span>
+              <span class="nb-badge anxiety" id="badge-anxiety">Anxiety: Low</span>
+              <span class="nb-badge time" id="badge-time">⏱️ 10 mins</span>
+            </div>
+
+            <div class="nb-supportive-prompt" id="start-supportive"></div>
+
+            <div class="nb-question-box">
+              <strong>Clarifying Question:</strong>
+              <p id="start-question"></p>
+            </div>
+
+            <div class="nb-action-highlight">
+              <strong>Immediate 10-Minute Path:</strong>
+              <p id="start-action"></p>
+              <button class="nb-btn nb-btn-accent" id="btn-start-timer">⏱️ Start 10-Min Timer</button>
+            </div>
+
+            <div class="nb-micro-steps">
+              <strong>Next Micro-Steps:</strong>
+              <ol id="start-steps-list"></ol>
+            </div>
+
+            <div class="nb-artifact-actions">
+              <button class="nb-btn nb-btn-ghost" id="btn-export-start">📥 Export Markdown</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- MODE 2: SIMPLIFY MODE -->
+      <section class="nb-tab-content" id="tab-simplify">
+        <div class="nb-card">
+          <h2>Simplify & Clutter Reduction</h2>
+          <p class="nb-card-desc">Transform dense text or web page into 6th-grade plain language.</p>
+          <button class="nb-btn nb-btn-primary" id="btn-run-simplify">✨ Simplify Active Page</button>
+          
+          <div class="nb-output-box" id="simplify-output" style="display:none;">
+            <div class="nb-grade-tag" id="simplify-grade">Grade 6.0 Plain Language</div>
+            <div class="nb-content-block" id="simplify-text"></div>
+            <h3>Key Takeaways</h3>
+            <ul id="simplify-takeaways"></ul>
+            <div class="nb-artifact-actions">
+              <button class="nb-btn nb-btn-ghost" id="btn-export-simplify">📥 Export Markdown</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- MODE 3: LEARN MODE -->
+      <section class="nb-tab-content" id="tab-learn">
+        <div class="nb-card">
+          <h2>Mind Map & Quiz Generator</h2>
+          <p class="nb-card-desc">Convert articles or material into a clean visual mind map and self-quiz.</p>
+          <button class="nb-btn nb-btn-primary" id="btn-run-learn">🧠 Generate Mind Map & Quiz</button>
+
+          <div class="nb-output-box" id="learn-output" style="display:none;">
+            <h3>Mind Map Overview</h3>
+            <div class="nb-mindmap-view" id="learn-mindmap"></div>
+
+            <h3>Comprehension Quick Quiz</h3>
+            <div id="learn-quiz-box"></div>
+
+            <div class="nb-artifact-actions">
+              <button class="nb-btn nb-btn-ghost" id="btn-export-learn">📥 Export Mind Map</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- MODE 4: MEET MODE -->
+      <section class="nb-tab-content" id="tab-meet">
+        <div class="nb-card">
+          <h2>Meeting Transcript Rescue</h2>
+          <p class="nb-card-desc">Extract action items, owners, deadlines, and decode corporate jargon.</p>
+          <textarea id="meet-transcript-input" class="nb-textarea" placeholder="Paste meeting transcript here..."></textarea>
+          <button class="nb-btn nb-btn-primary" id="btn-run-meet">🎙️ Process Transcript</button>
+
+          <div class="nb-output-box" id="meet-output" style="display:none;">
+            <h3>Action Items & Owners</h3>
+            <div id="meet-actions-list"></div>
+
+            <h3>Corporate Jargon Decoded</h3>
+            <div id="meet-jargon-list"></div>
+
+            <div class="nb-artifact-actions">
+              <button class="nb-btn nb-btn-ghost" id="btn-export-meet">📥 Export Summary</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- MODE 5: PRACTICE MODE -->
+      <section class="nb-tab-content" id="tab-practice">
+        <div class="nb-card">
+          <h2>Social Scripting Rehearsal</h2>
+          <p class="nb-card-desc">Practice difficult conversations, phone calls, or interview questions.</p>
+          <input type="text" id="practice-topic-input" class="nb-input" placeholder="e.g. Asking boss for a deadline extension" />
+          <button class="nb-btn nb-btn-primary" id="btn-run-practice">💬 Start Rehearsal</button>
+
+          <div class="nb-output-box" id="practice-output" style="display:none;">
+            <div class="nb-roleplay-partner" id="practice-partner-line"></div>
+            <h3>Choose your response:</h3>
+            <div class="nb-response-options" id="practice-options"></div>
+            <div class="nb-coaching-tip" id="practice-tip"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- MODE 6: WRITE MODE -->
+      <section class="nb-tab-content" id="tab-write">
+        <div class="nb-card">
+          <h2>Accessible Authoring Assistant</h2>
+          <p class="nb-card-desc">Check your draft for passive voice, sentence complexity, and readability.</p>
+          <textarea id="write-draft-input" class="nb-textarea" placeholder="Type or paste your draft here..."></textarea>
+          <button class="nb-btn nb-btn-primary" id="btn-run-write">✍️ Analyze & Improve</button>
+
+          <div class="nb-output-box" id="write-output" style="display:none;">
+            <div class="nb-grade-tag" id="write-grade">Readability Score</div>
+            <h3>Suggested Plain Language Fixes</h3>
+            <div id="write-fixes"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- MODE 7: GUIDE MODE -->
+      <section class="nb-tab-content" id="tab-guide">
+        <div class="nb-card">
+          <h2>Step-by-Step Software Guide</h2>
+          <p class="nb-card-desc">Get step-by-step instructions for any webpage form or software workflow.</p>
+          <input type="text" id="guide-goal-input" class="nb-input" placeholder="e.g. Submit a leave request on this portal" />
+          <button class="nb-btn nb-btn-primary" id="btn-run-guide">📍 Build Step Guide</button>
+
+          <div class="nb-output-box" id="guide-output" style="display:none;">
+            <div id="guide-steps-container"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- QUICK READING TOOLS & CONTROLS -->
+      <section class="nb-tools-section">
+        <h3>⚡ On-Page Reading Supports</h3>
+        <div class="nb-tools-grid">
+          <button class="nb-tool-btn" id="tool-bionic" data-mode="bionic">👁️ Bionic</button>
+          <button class="nb-tool-btn" id="tool-focus" data-mode="focus">🎯 Focus</button>
+          <button class="nb-tool-btn" id="tool-tts" data-feature="tts">🔊 Audio</button>
+          <button class="nb-tool-btn" id="tool-dyslexia" data-feature="dyslexia">🔤 Dyslexia Font</button>
+        </div>
+      </section>
+    </main>
+
+    <!-- FOOTER & THEME CONTROLS -->
+    <footer class="nb-footer">
+      <div class="nb-theme-selectors">
+        <button class="nb-theme-dot default active" data-theme="default" title="Default Theme"></button>
+        <button class="nb-theme-dot sepia" data-theme="sepia" title="Sepia Warmth"></button>
+        <button class="nb-theme-dot dark" data-theme="dark" title="Dark Obsidian"></button>
+        <button class="nb-theme-dot high-contrast" data-theme="high-contrast" title="High Contrast AAA"></button>
+      </div>
+      <button class="nb-link-btn" id="btn-open-sanctuary">🌐 Open Web Sanctuary</button>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
