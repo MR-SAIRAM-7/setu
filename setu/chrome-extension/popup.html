@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SETU Lens</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="neuroread-popup">
+    <header class="popup-header">
+      <div class="logo">
+        <span class="logo-icon">⌁</span>
+        <h1>SETU Lens</h1>
+      </div>
+      <p class="tagline">Turn digital overload into clear action</p>
+    </header>
+
+    <main class="popup-main">
+      <!-- Quick Actions -->
+      <section class="quick-actions">
+        <h2>Reading support</h2>
+        <div class="mode-grid">
+          <button class="mode-btn" id="btn-bionic" data-mode="bionic">
+            <span class="mode-icon">👁️</span>
+            <span class="mode-label">Bionic Reading</span>
+            <span class="mode-desc">Bold word beginnings</span>
+          </button>
+          <button class="mode-btn" id="btn-focus" data-mode="focus">
+            <span class="mode-icon">🎯</span>
+            <span class="mode-label">Focus Mode</span>
+            <span class="mode-desc">Remove distractions</span>
+          </button>
+          <button class="mode-btn" id="btn-eye" data-mode="eye">
+            <span class="mode-icon">📹</span>
+            <span class="mode-label">Eye Tracking</span>
+            <span class="mode-desc">Follow your gaze</span>
+          </button>
+          <button class="mode-btn" id="btn-scroll" data-mode="scroll">
+            <span class="mode-icon">📜</span>
+            <span class="mode-label">Auto Scroll</span>
+            <span class="mode-desc">Hands-free reading</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="setu-actions">
+        <h2>SETU support</h2>
+        <div class="setu-grid">
+          <button class="setu-btn" id="btn-commander" type="button">
+            <span aria-hidden="true">🎙</span>
+            <span><strong>Commander</strong><small>Voice or type a command</small></span>
+          </button>
+          <button class="setu-btn" id="btn-chunking" data-mode="chunking" type="button">
+            <span aria-hidden="true">✓</span>
+            <span><strong>Task path</strong><small>One step at a time</small></span>
+          </button>
+          <label class="setu-toggle" for="toggle-breathe">
+            <input type="checkbox" id="toggle-breathe">
+            <span class="toggle-slider"></span>
+            <span><strong>Breathe protocol</strong><small>Gentle overload support</small></span>
+          </label>
+          <button class="setu-btn" id="btn-visual" type="button">
+            <span aria-hidden="true">◫</span>
+            <span><strong>Explain visuals</strong><small>Charts, tables, images</small></span>
+          </button>
+        </div>
+      </section>
+
+      <!-- Features -->
+      <section class="features">
+        <h2>Features</h2>
+        <div class="feature-list">
+          <label class="feature-toggle">
+            <input type="checkbox" id="toggle-tts">
+            <span class="toggle-slider"></span>
+            <span class="feature-label">
+              <span class="feature-icon">🔊</span>
+              Text to Speech
+            </span>
+          </label>
+          <label class="feature-toggle">
+            <input type="checkbox" id="toggle-highlight">
+            <span class="toggle-slider"></span>
+            <span class="feature-label">
+              <span class="feature-icon">✨</span>
+              Word Highlight
+            </span>
+          </label>
+          <label class="feature-toggle">
+            <input type="checkbox" id="toggle-dyslexia">
+            <span class="toggle-slider"></span>
+            <span class="feature-label">
+              <span class="feature-icon">🔤</span>
+              Dyslexia Font
+            </span>
+          </label>
+        </div>
+      </section>
+
+      <!-- AI Summarizer -->
+      <section class="ai-section">
+        <h2>Clear this page</h2>
+        <button class="ai-btn" id="btn-summarize">
+          <span>✨ Get a simple summary</span>
+        </button>
+        <div class="summary-output" id="summary-output" style="display: none;">
+          <div class="summary-content"></div>
+        </div>
+      </section>
+
+      <section class="sanctuary-section">
+        <h2>SETU Sanctuary</h2>
+        <button class="sanctuary-btn" id="btn-sanctuary" type="button">
+          Save this page as a map & flashcards
+        </button>
+      </section>
+
+      <!-- Reading Stats -->
+      <section class="stats-section">
+        <h2>📊 Reading Stats</h2>
+        <div class="stats-grid">
+          <div class="stat-item">
+            <span class="stat-value" id="stat-wpm">0</span>
+            <span class="stat-label">WPM</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value" id="stat-time">0m</span>
+            <span class="stat-label">Time</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value" id="stat-words">0</span>
+            <span class="stat-label">Words</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Theme Selector -->
+      <section class="theme-section">
+        <h2>🎨 Theme</h2>
+        <div class="theme-options">
+          <button class="theme-btn active" data-theme="default" title="Default">
+            <span class="theme-preview default"></span>
+          </button>
+          <button class="theme-btn" data-theme="sepia" title="Sepia">
+            <span class="theme-preview sepia"></span>
+          </button>
+          <button class="theme-btn" data-theme="dark" title="Dark">
+            <span class="theme-preview dark"></span>
+          </button>
+          <button class="theme-btn" data-theme="high-contrast" title="High Contrast">
+            <span class="theme-preview high-contrast"></span>
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="popup-footer">
+      <button class="settings-btn" id="btn-settings">⚙️ Advanced Settings</button>
+      <button class="reset-btn" id="btn-reset">Reset All</button>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
