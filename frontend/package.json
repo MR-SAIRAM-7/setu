@@ -1,7 +1,7 @@
 {
-  "name": "neuroread-dashboard",
+  "name": "setu-dashboard",
   "version": "1.0.0",
-  "description": "NeuroRead Settings Dashboard",
+  "description": "SETU Settings Dashboard",
   "private": true,
   "dependencies": {
     "react": "^18.2.0",

@@ -29,7 +29,7 @@ class WordHighlight {
     this.setupEventListeners();
     this.startFollowing();
     
-    document.body.classList.add('neuroread-highlight-active');
+    document.body.classList.add('setu-highlight-active');
   }
 
   disable() {
@@ -42,13 +42,13 @@ class WordHighlight {
     this.removeEventListeners();
     this.removeHighlight();
     
-    document.body.classList.remove('neuroread-highlight-active');
+    document.body.classList.remove('setu-highlight-active');
   }
 
   createHighlight() {
     // Create the highlight element
     this.highlightElement = document.createElement('div');
-    this.highlightElement.id = 'neuroread-word-highlight';
+    this.highlightElement.id = 'setu-word-highlight';
     this.highlightElement.innerHTML = `
       <div class="highlight-line"></div>
       <div class="highlight-controls">
@@ -241,7 +241,7 @@ class WordHighlight {
       if (regex.test(text)) {
         // Create highlight
         const span = document.createElement('span');
-        span.className = 'neuroread-word-highlight-static';
+        span.className = 'setu-word-highlight-static';
         
         const parts = text.split(regex);
         const match = text.match(regex);

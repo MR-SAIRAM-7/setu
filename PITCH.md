@@ -1,4 +1,4 @@
-# 🧠 NeuroRead - Hackathon Pitch
+# 🧠 SETU - Hackathon Pitch
 
 ## Problem Statement
 **PS 01: NeuroInclusive Tech** - Making digital content readable for ADHD and Dyslexic minds
@@ -22,7 +22,7 @@
 
 ---
 
-## Our Solution: NeuroRead
+## Our Solution: SETU
 
 ### A Chrome Extension That Adapts the Web to YOUR Brain
 
@@ -109,7 +109,7 @@
 
 ### 1. **Introduction** (30 seconds)
 - Show the problem: dense text, distractions
-- Introduce NeuroRead
+- Introduce SETU
 
 ### 2. **Bionic Reading** (1 minute)
 - Toggle on any webpage
@@ -200,7 +200,7 @@
 
 ## Key Differentiators
 
-| Feature | NeuroRead | Competitors |
+| Feature | SETU | Competitors |
 |---------|-----------|-------------|
 | Bionic Reading | ✅ Built-in | ❌ Separate extension |
 | Eye Tracking | ✅ Webcam-based | ❌ Requires hardware |
@@ -231,7 +231,7 @@
 
 ## Call to Action
 
-**Try NeuroRead today and experience the web like never before!**
+**Try SETU today and experience the web like never before!**
 
 > "Reading that adapts to YOUR brain"
 

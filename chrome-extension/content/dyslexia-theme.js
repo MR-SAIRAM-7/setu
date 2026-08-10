@@ -70,7 +70,7 @@ class DyslexiaTheme {
     // Apply current theme
     this.applyTheme(this.currentTheme);
     
-    document.body.classList.add('neuroread-dyslexia-active');
+    document.body.classList.add('setu-dyslexia-active');
   }
 
   disable() {
@@ -80,7 +80,7 @@ class DyslexiaTheme {
     console.log('🔤 Dyslexia Theme disabled');
     
     this.removeStyles();
-    document.body.classList.remove('neuroread-dyslexia-active');
+    document.body.classList.remove('setu-dyslexia-active');
   }
 
   setTheme(themeName) {
@@ -92,13 +92,13 @@ class DyslexiaTheme {
     
     // Update body class
     document.body.classList.remove(
-      'neuroread-theme-default',
-      'neuroread-theme-sepia',
-      'neuroread-theme-dark',
-      'neuroread-theme-high-contrast',
-      'neuroread-theme-dyslexia'
+      'setu-theme-default',
+      'setu-theme-sepia',
+      'setu-theme-dark',
+      'setu-theme-high-contrast',
+      'setu-theme-dyslexia'
     );
-    document.body.classList.add(`neuroread-theme-${themeName}`);
+    document.body.classList.add(`setu-theme-${themeName}`);
   }
 
   loadDyslexicFont() {
@@ -121,15 +121,15 @@ class DyslexiaTheme {
     
     // Create style element
     this.styleElement = document.createElement('style');
-    this.styleElement.id = 'neuroread-dyslexia-styles';
+    this.styleElement.id = 'setu-dyslexia-styles';
     
     const css = `
-      /* NeuroRead Dyslexia Theme: ${themeName} */
+      /* setu Dyslexia Theme: ${themeName} */
       
-      body.neuroread-dyslexia-active,
-      body.neuroread-dyslexia-active *,
-      body.neuroread-dyslexia-active *::before,
-      body.neuroread-dyslexia-active *::after {
+      body.setu-dyslexia-active,
+      body.setu-dyslexia-active *,
+      body.setu-dyslexia-active *::before,
+      body.setu-dyslexia-active *::after {
         background-color: ${theme.background} !important;
         color: ${theme.text} !important;
         font-family: ${theme.font} !important;
@@ -138,45 +138,45 @@ class DyslexiaTheme {
         word-spacing: ${theme.wordSpacing} !important;
       }
       
-      body.neuroread-dyslexia-active a,
-      body.neuroread-dyslexia-active a:visited {
+      body.setu-dyslexia-active a,
+      body.setu-dyslexia-active a:visited {
         color: ${theme.link} !important;
         text-decoration: underline !important;
       }
       
-      body.neuroread-dyslexia-active a:hover {
+      body.setu-dyslexia-active a:hover {
         opacity: 0.8 !important;
       }
       
       /* Improve readability */
-      body.neuroread-dyslexia-active p {
+      body.setu-dyslexia-active p {
         max-width: 70ch !important;
         margin-bottom: 1.5em !important;
       }
       
       /* Larger clickable areas */
-      body.neuroread-dyslexia-active a,
-      body.neuroread-dyslexia-active button {
+      body.setu-dyslexia-active a,
+      body.setu-dyslexia-active button {
         min-height: 44px !important;
         min-width: 44px !important;
         padding: 8px 16px !important;
       }
       
       /* Better focus indicators */
-      body.neuroread-dyslexia-active *:focus {
+      body.setu-dyslexia-active *:focus {
         outline: 3px solid ${theme.link} !important;
         outline-offset: 2px !important;
       }
       
       /* Remove justified text */
-      body.neuroread-dyslexia-active * {
+      body.setu-dyslexia-active * {
         text-align: left !important;
       }
       
       /* Improve form elements */
-      body.neuroread-dyslexia-active input,
-      body.neuroread-dyslexia-active textarea,
-      body.neuroread-dyslexia-active select {
+      body.setu-dyslexia-active input,
+      body.setu-dyslexia-active textarea,
+      body.setu-dyslexia-active select {
         font-size: 16px !important;
         padding: 12px !important;
         border: 2px solid ${theme.text} !important;
@@ -184,27 +184,27 @@ class DyslexiaTheme {
       }
       
       /* Headings */
-      body.neuroread-dyslexia-active h1,
-      body.neuroread-dyslexia-active h2,
-      body.neuroread-dyslexia-active h3 {
+      body.setu-dyslexia-active h1,
+      body.setu-dyslexia-active h2,
+      body.setu-dyslexia-active h3 {
         font-weight: 700 !important;
         margin-top: 1.5em !important;
         margin-bottom: 0.5em !important;
       }
       
       /* Lists */
-      body.neuroread-dyslexia-active ul,
-      body.neuroread-dyslexia-active ol {
+      body.setu-dyslexia-active ul,
+      body.setu-dyslexia-active ol {
         padding-left: 2em !important;
       }
       
-      body.neuroread-dyslexia-active li {
+      body.setu-dyslexia-active li {
         margin-bottom: 0.5em !important;
       }
       
       /* Code blocks */
-      body.neuroread-dyslexia-active code,
-      body.neuroread-dyslexia-active pre {
+      body.setu-dyslexia-active code,
+      body.setu-dyslexia-active pre {
         font-family: 'Courier New', monospace !important;
         background: rgba(0,0,0,0.05) !important;
         padding: 2px 6px !important;
@@ -212,33 +212,33 @@ class DyslexiaTheme {
       }
       
       /* Images */
-      body.neuroread-dyslexia-active img {
+      body.setu-dyslexia-active img {
         max-width: 100% !important;
         height: auto !important;
       }
       
       /* Tables */
-      body.neuroread-dyslexia-active table {
+      body.setu-dyslexia-active table {
         border-collapse: collapse !important;
         width: 100% !important;
       }
       
-      body.neuroread-dyslexia-active th,
-      body.neuroread-dyslexia-active td {
+      body.setu-dyslexia-active th,
+      body.setu-dyslexia-active td {
         border: 1px solid ${theme.text} !important;
         padding: 12px !important;
       }
       
       /* Ruler line for reading */
-      body.neuroread-dyslexia-active p {
+      body.setu-dyslexia-active p {
         position: relative !important;
       }
       
       /* Hide distracting elements */
-      body.neuroread-dyslexia-active .advertisement,
-      body.neuroread-dyslexia-active .ad,
-      body.neuroread-dyslexia-active .popup,
-      body.neuroread-dyslexia-active .modal:not([aria-modal="true"]) {
+      body.setu-dyslexia-active .advertisement,
+      body.setu-dyslexia-active .ad,
+      body.setu-dyslexia-active .popup,
+      body.setu-dyslexia-active .modal:not([aria-modal="true"]) {
         display: none !important;
       }
     `;
@@ -282,7 +282,7 @@ class DyslexiaTheme {
   // Create a reading ruler
   createReadingRuler() {
     const ruler = document.createElement('div');
-    ruler.id = 'neuroread-reading-ruler';
+    ruler.id = 'setu-reading-ruler';
     ruler.innerHTML = `
       <div class="ruler-line"></div>
       <div class="ruler-overlay top"></div>

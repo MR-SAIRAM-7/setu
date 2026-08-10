@@ -1,6 +1,6 @@
 /* Eye Tracker Styles */
 
-#neuroread-eye-overlay {
+#setu-eye-overlay {
   position: fixed;
   bottom: 20px;
   left: 20px;
@@ -8,7 +8,7 @@
   font-family: system-ui, -apple-system, sans-serif;
 }
 
-.neuroread-eye-panel {
+.setu-eye-panel {
   background: #1e293b;
   border-radius: 12px;
   padding: 12px;
@@ -17,14 +17,14 @@
   width: 200px;
 }
 
-#neuroread-eye-video {
+#setu-eye-video {
   width: 100%;
   border-radius: 8px;
   display: block;
   transform: scaleX(-1); /* Mirror for natural feel */
 }
 
-#neuroread-eye-canvas {
+#setu-eye-canvas {
   position: absolute;
   top: 12px;
   left: 12px;
@@ -34,7 +34,7 @@
   transform: scaleX(-1);
 }
 
-.neuroread-eye-status {
+.setu-eye-status {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -62,7 +62,7 @@
   color: #94a3b8;
 }
 
-.neuroread-eye-close {
+.setu-eye-close {
   position: absolute;
   top: 8px;
   right: 8px;
@@ -80,12 +80,12 @@
   transition: background 0.2s;
 }
 
-.neuroread-eye-close:hover {
+.setu-eye-close:hover {
   background: rgba(239, 68, 68, 0.8);
 }
 
 /* Gaze Indicator */
-#neuroread-gaze-indicator {
+#setu-gaze-indicator {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
@@ -103,12 +103,12 @@
   backdrop-filter: blur(4px);
 }
 
-#neuroread-gaze-indicator span {
+#setu-gaze-indicator span {
   font-size: 16px;
 }
 
 /* Reading Zone Indicator */
-.neuroread-reading-zone {
+.setu-reading-zone {
   position: fixed;
   top: 30%;
   left: 0;
@@ -136,7 +136,7 @@
 }
 
 /* Permission Message */
-.neuroread-permission-message {
+.setu-permission-message {
   position: fixed;
   top: 0;
   left: 0;
@@ -190,7 +190,7 @@
 }
 
 /* Calibration */
-#neuroread-calibration {
+#setu-calibration {
   position: fixed;
   top: 0;
   left: 0;

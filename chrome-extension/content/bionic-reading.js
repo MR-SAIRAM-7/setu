@@ -22,7 +22,7 @@ class BionicReading {
     this.setupMutationObserver();
     
     // Add bionic class to body
-    document.body.classList.add('neuroread-bionic-active');
+    document.body.classList.add('setu-bionic-active');
   }
 
   disable() {
@@ -38,7 +38,7 @@ class BionicReading {
     }
     
     // Remove bionic class
-    document.body.classList.remove('neuroread-bionic-active');
+    document.body.classList.remove('setu-bionic-active');
     
     // Restore original text
     this.restoreOriginalText();
@@ -65,7 +65,7 @@ class BionicReading {
             return NodeFilter.FILTER_REJECT;
           }
           
-          if (parent.closest('.neuroread-*') || parent.closest('#neuroread-*')) {
+          if (parent.closest('.setu-*') || parent.closest('#setu-*')) {
             return NodeFilter.FILTER_REJECT;
           }
           
@@ -110,7 +110,7 @@ class BionicReading {
       if (isInteractive) {
         // For interactive elements, wrap in span to preserve functionality
         const wrapper = document.createElement('span');
-        wrapper.className = 'neuroread-bionic-text';
+        wrapper.className = 'setu-bionic-text';
         wrapper.innerHTML = bionicText;
         
         // Replace text node with wrapper
@@ -123,7 +123,7 @@ class BionicReading {
       } else {
         // For regular text, use a span
         const span = document.createElement('span');
-        span.className = 'neuroread-bionic-text';
+        span.className = 'setu-bionic-text';
         span.innerHTML = bionicText;
         
         if (textNode.parentNode) {
@@ -144,13 +144,13 @@ class BionicReading {
       const boldPart = word.substring(0, boldLength);
       const restPart = word.substring(boldLength);
       
-      return `<strong class="neuroread-bold">${boldPart}</strong>${restPart}`;
+      return `<strong class="setu-bold">${boldPart}</strong>${restPart}`;
     });
   }
 
   restoreOriginalText() {
     // Find all bionic text elements and restore
-    const bionicElements = document.querySelectorAll('.neuroread-bionic-text');
+    const bionicElements = document.querySelectorAll('.setu-bionic-text');
     bionicElements.forEach(el => {
       const textContent = el.textContent;
       const textNode = document.createTextNode(textContent);
@@ -183,7 +183,7 @@ class BionicReading {
 
   processNewElement(element) {
     // Skip our own elements
-    if (element.classList && element.classList.contains('neuroread-*')) return;
+    if (element.classList && element.classList.contains('setu-*')) return;
     
     // Get all text nodes within this element
     const walker = document.createTreeWalker(

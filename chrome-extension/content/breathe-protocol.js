@@ -133,7 +133,7 @@ class BreatheProtocol {
     this.overlay.querySelector('[data-action="continue"]').addEventListener('click', () => this.removeOverlay());
     this.overlay.querySelector('[data-action="simplify"]').addEventListener('click', () => {
       this.removeOverlay();
-      window.neuroread?.activateSupportPath();
+      window.setu?.activateSupportPath();
     });
     this.runBreathingCycle();
     this.overlay.querySelector('.setu-primary').focus();

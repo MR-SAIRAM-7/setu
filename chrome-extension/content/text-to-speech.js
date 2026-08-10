@@ -76,7 +76,7 @@ class TextToSpeech {
 
   createControls() {
     this.ttsOverlay = document.createElement('div');
-    this.ttsOverlay.id = 'neuroread-tts-controls';
+    this.ttsOverlay.id = 'setu-tts-controls';
     this.ttsOverlay.innerHTML = `
       <div class="tts-panel">
         <button class="tts-btn tts-play" title="Play">
@@ -182,7 +182,7 @@ class TextToSpeech {
       this.isSpeaking = true;
       this.isPaused = false;
       this.updateControls();
-      document.body.classList.add('neuroread-tts-speaking');
+      document.body.classList.add('setu-tts-speaking');
     };
     
     this.currentUtterance.onend = () => {
@@ -190,7 +190,7 @@ class TextToSpeech {
       this.isPaused = false;
       this.updateControls();
       this.clearHighlight();
-      document.body.classList.remove('neuroread-tts-speaking');
+      document.body.classList.remove('setu-tts-speaking');
     };
     
     this.currentUtterance.onpause = () => {
@@ -245,7 +245,7 @@ class TextToSpeech {
     this.isPaused = false;
     this.clearHighlight();
     this.updateControls();
-    document.body.classList.remove('neuroread-tts-speaking');
+    document.body.classList.remove('setu-tts-speaking');
   }
 
   setRate(rate) {
@@ -310,10 +310,10 @@ class TextToSpeech {
       
       if (regex.test(text)) {
         const parent = node.parentElement;
-        if (parent && !parent.closest('#neuroread-*')) {
+        if (parent && !parent.closest('#setu-*')) {
           // Create highlight
           const span = document.createElement('span');
-          span.className = 'neuroread-tts-highlight';
+          span.className = 'setu-tts-highlight';
           
           const parts = text.split(regex);
           const match = text.match(regex);

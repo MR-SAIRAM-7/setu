@@ -1,4 +1,4 @@
-# 🚀 NeuroRead Installation Guide
+# 🚀 SETU Installation Guide
 
 ## Quick Start (5 minutes)
 
@@ -8,7 +8,7 @@
 2. Enable **"Developer mode"** (toggle in top right)
 3. Click **"Load unpacked"**
 4. Select the `chrome-extension` folder
-5. The NeuroRead icon should appear in your toolbar!
+5. The SETU icon should appear in your toolbar!
 
 ### Step 2: Start Backend (Optional - for AI features)
 
@@ -35,7 +35,7 @@ The dashboard will open at `http://localhost:3001`
 ## Testing the Extension
 
 1. Open the demo page: `demo-assets/demo-page.html`
-2. Click the NeuroRead icon in your toolbar
+2. Click the SETU icon in your toolbar
 3. Try different features:
    - Toggle **Bionic Reading**
    - Enable **Focus Mode**
@@ -52,30 +52,11 @@ The dashboard will open at `http://localhost:3001`
 | `Alt + F` | Toggle Focus Mode |
 | `Alt + S` | Toggle Auto Scroll |
 | `Alt + T` | Toggle Text to Speech |
-| `Alt + E` | Toggle Eye Tracking |
-| `Shift + Esc` | Reset All |
+| `Alt + Shift + C` | Open SETU Commander |
 
 ---
 
 ## Troubleshooting
 
-### Extension not loading?
-- Make sure Developer mode is enabled
-- Check that you selected the correct folder
-- Try refreshing the extensions page
-
-### Backend not starting?
-- Check if port 3000 is available
-- Make sure Node.js is installed
-- Run `npm install` first
-
-### Features not working?
-- Check browser console for errors
-- Ensure you have the latest Chrome version
-- Try refreshing the page
-
----
-
-## Need Help?
-
-Contact us or check the documentation!
+- **Extension not working on new tab page?** Chrome restricts extensions on internal pages (`chrome://`). Try a normal website.
+- **Backend API not connecting?** Ensure `http://localhost:3000` is running. SETU features work offline automatically using local L0 fallbacks.

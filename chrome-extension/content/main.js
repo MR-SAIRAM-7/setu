@@ -1,7 +1,7 @@
-// NeuroRead Main Content Script
-// Orchestrates all reading assistance features
+// SETU Main Content Script
+// Orchestrates all reading and cognitive assistance features
 
-class NeuroRead {
+class Setu {
   constructor() {
     this.features = {
       bionic: null,
@@ -36,7 +36,7 @@ class NeuroRead {
   async init() {
     if (this.isInitialized) return;
     
-    console.log('🧠 NeuroRead initializing...');
+    console.log('🧠 SETU initializing...');
     
     // Initialize feature modules
     this.features.bionic = new BionicReading();
@@ -61,18 +61,19 @@ class NeuroRead {
     // Setup keyboard shortcuts
     this.setupKeyboardShortcuts();
     
-    // Inject NeuroRead container
+    // Inject SETU container
     this.injectContainer();
     
     this.isInitialized = true;
-    console.log('✅ NeuroRead initialized successfully');
+    console.log('✅ SETU initialized successfully');
   }
 
   async loadState() {
     try {
-      const result = await chrome.storage.sync.get('neuroreadState');
-      if (result.neuroreadState) {
-        this.state = { ...this.state, ...result.neuroreadState };
+      const result = await chrome.storage.sync.get(['setuState', 'setuState']);
+      const stateData = result.setuState || result.setuState;
+      if (stateData) {
+        this.state = { ...this.state, ...stateData };
         
         // Apply saved states
         Object.keys(this.state).forEach(key => {
@@ -147,169 +148,110 @@ class NeuroRead {
         }
 
         case 'saveToSanctuary':
-          this.features.sanctuary.save()
-            .then((documentArtifact) => sendResponse({ success: true, id: documentArtifact.id }))
-            .catch((error) => sendResponse({ success: false, error: error.message }));
+          this.features.sanctuary.save().then((data) => sendResponse({ success: true, data })).catch((error) => sendResponse({ success: false, error: error.message }));
           return true;
-          
+
+        case 'activateSupportPath':
+          this.activateSupportPath();
+          sendResponse({ success: true });
+          break;
+
         case 'resetAll':
           this.resetAll();
           sendResponse({ success: true });
           break;
-          
-        case 'getState':
-          sendResponse({ state: this.state });
-          break;
+
+        default:
+          sendResponse({ error: 'Unknown action' });
       }
-      
       return true;
     });
   }
 
   setupKeyboardShortcuts() {
     document.addEventListener('keydown', (e) => {
-      // Alt + B: Toggle Bionic Reading
-      if (e.altKey && e.key === 'b') {
-        e.preventDefault();
-        this.toggleMode('bionic');
-      }
-      // Alt + F: Toggle Focus Mode
-      if (e.altKey && e.key === 'f') {
-        e.preventDefault();
-        this.toggleMode('focus');
-      }
-      // Alt + S: Toggle Auto Scroll
-      if (e.altKey && e.key === 's') {
-        e.preventDefault();
-        this.toggleMode('scroll');
-      }
-      // Alt + T: Toggle Text to Speech
-      if (e.altKey && e.key === 't') {
-        e.preventDefault();
-        this.toggleFeature('tts');
-      }
-      // Alt + E: Toggle Eye Tracking
-      if (e.altKey && e.key === 'e') {
-        e.preventDefault();
-        this.toggleMode('eye');
-      }
-      // Escape: Reset all
-      if (e.key === 'Escape' && e.shiftKey) {
-        e.preventDefault();
-        this.resetAll();
+      if (e.altKey && !e.ctrlKey && !e.metaKey) {
+        switch (e.key.toLowerCase()) {
+          case 'b':
+            e.preventDefault();
+            this.toggleMode('bionic', !this.state.bionic);
+            break;
+          case 'f':
+            e.preventDefault();
+            this.toggleMode('focus', !this.state.focus);
+            break;
+          case 's':
+            e.preventDefault();
+            this.toggleMode('scroll', !this.state.scroll);
+            break;
+          case 't':
+            e.preventDefault();
+            this.toggleFeature('tts', !this.state.tts);
+            break;
+        }
       }
     });
   }
 
   injectContainer() {
-    // Create floating indicator
-    const indicator = document.createElement('div');
-    indicator.id = 'neuroread-indicator';
-    indicator.innerHTML = `
-      <div class="neuroread-indicator-content">
-        <span class="neuroread-logo">🧠</span>
-        <span class="neuroread-status">NeuroRead Active</span>
-      </div>
-    `;
-    indicator.style.cssText = `
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      background: linear-gradient(135deg, #6366f1, #8b5cf6);
-      color: white;
-      padding: 10px 16px;
-      border-radius: 50px;
-      font-family: system-ui, -apple-system, sans-serif;
-      font-size: 13px;
-      font-weight: 600;
-      z-index: 999999;
-      box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
-      cursor: pointer;
-      opacity: 0;
-      transform: translateY(20px);
-      transition: all 0.3s ease;
-      pointer-events: none;
-    `;
+    if (document.getElementById('setu-container')) return;
     
-    document.body.appendChild(indicator);
-    
-    // Show indicator when features are active
-    this.updateIndicator();
+    const container = document.createElement('div');
+    container.id = 'setu-container';
+    container.style.cssText = 'position: fixed; z-index: 2147483647; pointer-events: none;';
+    document.body.appendChild(container);
   }
 
-  updateIndicator() {
-    const indicator = document.getElementById('neuroread-indicator');
-    if (!indicator) return;
-    
-    const activeFeatures = Object.keys(this.state).filter(key => this.state[key]);
-    
-    if (activeFeatures.length > 0) {
-      indicator.style.opacity = '1';
-      indicator.style.transform = 'translateY(0)';
-      indicator.querySelector('.neuroread-status').textContent = 
-        `${activeFeatures.length} mode${activeFeatures.length > 1 ? 's' : ''} active`;
-    } else {
-      indicator.style.opacity = '0';
-      indicator.style.transform = 'translateY(20px)';
+  toggleMode(mode, enabled) {
+    if (this.features[mode]) {
+      this.state[mode] = enabled;
+      if (enabled) {
+        this.features[mode].enable();
+      } else {
+        this.features[mode].disable();
+      }
+      this.saveState();
+      this.showToast(`${mode.charAt(0).toUpperCase() + mode.slice(1)} Mode ${enabled ? 'enabled' : 'disabled'}`);
     }
   }
 
-  toggleMode(mode, enabled = null) {
-    if (!this.features[mode]) return;
-    
-    const newState = enabled !== null ? enabled : !this.state[mode];
-    this.state[mode] = newState;
-    
-    if (newState) {
-      this.features[mode].enable();
-    } else {
-      this.features[mode].disable();
+  toggleFeature(feature, enabled) {
+    if (this.features[feature]) {
+      this.state[feature] = enabled;
+      if (enabled) {
+        this.features[feature].enable();
+      } else {
+        this.features[feature].disable();
+      }
+      this.saveState();
+      this.showToast(`${feature.charAt(0).toUpperCase() + feature.slice(1)} ${enabled ? 'enabled' : 'disabled'}`);
     }
-    
-    this.saveState();
-    this.updateIndicator();
-    
-    // Show toast notification
-    this.showToast(`${mode.charAt(0).toUpperCase() + mode.slice(1)} ${newState ? 'enabled' : 'disabled'}`);
-  }
-
-  toggleFeature(feature, enabled = null) {
-    if (!this.features[feature]) return;
-    
-    const newState = enabled !== null ? enabled : !this.state[feature];
-    this.state[feature] = newState;
-    
-    if (newState) {
-      this.features[feature].enable();
-    } else {
-      this.features[feature].disable();
-    }
-    
-    this.saveState();
-    this.updateIndicator();
   }
 
   setTheme(theme) {
     this.state.theme = theme;
-    this.features.dyslexia.setTheme(theme);
+    if (this.features.dyslexia) {
+      this.features.dyslexia.setTheme(theme);
+    }
     this.saveState();
+    this.showToast(`Theme changed to ${theme}`);
   }
 
   async saveState() {
     try {
-      await chrome.storage.sync.set({ neuroreadState: this.state });
+      await chrome.storage.sync.set({ setuState: this.state, setuState: this.state });
     } catch (error) {
-      console.log('Could not save state');
+      console.log('Storage not available');
     }
   }
 
   resetAll() {
-    ['bionic', 'focus', 'eye', 'scroll', 'tts', 'highlight', 'dyslexia', 'breathe', 'chunking'].forEach(key => {
-      if (this.state[key] && this.features[key]) {
+    Object.keys(this.features).forEach(key => {
+      if (this.features[key] && typeof this.features[key].disable === 'function') {
         this.features[key].disable();
       }
     });
-    
+
     this.state = {
       bionic: false,
       focus: false,
@@ -322,41 +264,42 @@ class NeuroRead {
       chunking: false,
       theme: 'default'
     };
-    
+
     this.saveState();
-    this.updateIndicator();
-    this.showToast('All modes reset');
+    this.showToast('All features reset');
   }
 
   showToast(message) {
+    const existing = document.getElementById('setu-toast');
+    if (existing) existing.remove();
+
     const toast = document.createElement('div');
-    toast.className = 'neuroread-toast';
+    toast.id = 'setu-toast';
     toast.textContent = message;
     toast.style.cssText = `
       position: fixed;
-      top: 20px;
+      bottom: 20px;
       right: 20px;
-      background: #1e293b;
+      background: #0f172a;
       color: white;
       padding: 12px 20px;
       border-radius: 8px;
       font-family: system-ui, -apple-system, sans-serif;
       font-size: 14px;
-      font-weight: 500;
-      z-index: 9999999;
-      animation: neuroread-toast-in 0.3s ease;
+      z-index: 2147483647;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      animation: setu-toast-in 0.3s ease;
     `;
-    
+
     document.body.appendChild(toast);
     
     setTimeout(() => {
-      toast.style.animation = 'neuroread-toast-out 0.3s ease';
+      toast.style.animation = 'setu-toast-out 0.3s ease';
       setTimeout(() => toast.remove(), 300);
     }, 2000);
   }
 
   async summarizePage() {
-    // This will be handled by the popup
     chrome.runtime.sendMessage({ action: 'openSettings' });
   }
 
@@ -370,22 +313,26 @@ class NeuroRead {
 // Add toast animations
 const style = document.createElement('style');
 style.textContent = `
-  @keyframes neuroread-toast-in {
+  @keyframes setu-toast-in {
     from { opacity: 0; transform: translateX(20px); }
     to { opacity: 1; transform: translateX(0); }
   }
-  @keyframes neuroread-toast-out {
+  @keyframes setu-toast-out {
     from { opacity: 1; transform: translateX(0); }
     to { opacity: 0; transform: translateX(20px); }
   }
 `;
 document.head.appendChild(style);
 
-// Initialize NeuroRead when DOM is ready
+// Initialize SETU when DOM is ready
+const initSetu = () => {
+  const instance = new Setu();
+  window.setu = instance;
+  window.setu = instance; // backward compatibility
+};
+
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    window.neuroread = new NeuroRead();
-  });
+  document.addEventListener('DOMContentLoaded', initSetu);
 } else {
-  window.neuroread = new NeuroRead();
+  initSetu();
 }

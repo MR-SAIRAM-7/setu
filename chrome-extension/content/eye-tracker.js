@@ -46,7 +46,7 @@ class EyeTracker {
     await this.startCamera();
     this.startTracking();
     
-    document.body.classList.add('neuroread-eye-active');
+    document.body.classList.add('setu-eye-active');
   }
 
   disable() {
@@ -59,7 +59,7 @@ class EyeTracker {
     this.stopCamera();
     this.removeOverlay();
     
-    document.body.classList.remove('neuroread-eye-active');
+    document.body.classList.remove('setu-eye-active');
   }
 
   async requestCameraPermission() {
@@ -81,7 +81,7 @@ class EyeTracker {
 
   showPermissionMessage() {
     const message = document.createElement('div');
-    message.className = 'neuroread-permission-message';
+    message.className = 'setu-permission-message';
     message.innerHTML = `
       <div class="permission-content">
         <span class="permission-icon">📹</span>
@@ -112,18 +112,18 @@ class EyeTracker {
   createOverlay() {
     // Create tracking overlay
     this.trackingOverlay = document.createElement('div');
-    this.trackingOverlay.id = 'neuroread-eye-overlay';
+    this.trackingOverlay.id = 'setu-eye-overlay';
     this.trackingOverlay.innerHTML = `
-      <div class="neuroread-eye-panel">
-        <video id="neuroread-eye-video" autoplay playsinline muted></video>
-        <canvas id="neuroread-eye-canvas"></canvas>
-        <div class="neuroread-eye-status">
+      <div class="setu-eye-panel">
+        <video id="setu-eye-video" autoplay playsinline muted></video>
+        <canvas id="setu-eye-canvas"></canvas>
+        <div class="setu-eye-status">
           <span class="eye-status-dot"></span>
           <span class="eye-status-text">Initializing...</span>
         </div>
-        <button class="neuroread-eye-close" title="Close">✕</button>
+        <button class="setu-eye-close" title="Close">✕</button>
       </div>
-      <div class="neuroread-reading-zone">
+      <div class="setu-reading-zone">
         <div class="reading-zone-indicator"></div>
       </div>
     `;
@@ -132,18 +132,18 @@ class EyeTracker {
     
     // Create gaze indicator
     this.gazeIndicator = document.createElement('div');
-    this.gazeIndicator.id = 'neuroread-gaze-indicator';
+    this.gazeIndicator.id = 'setu-gaze-indicator';
     this.gazeIndicator.innerHTML = '<span>👁️</span>';
     document.body.appendChild(this.gazeIndicator);
     
     // Setup close button
-    this.trackingOverlay.querySelector('.neuroread-eye-close').addEventListener('click', () => {
+    this.trackingOverlay.querySelector('.setu-eye-close').addEventListener('click', () => {
       this.disable();
     });
     
     // Get video and canvas elements
-    this.video = document.getElementById('neuroread-eye-video');
-    this.canvas = document.getElementById('neuroread-eye-canvas');
+    this.video = document.getElementById('setu-eye-video');
+    this.canvas = document.getElementById('setu-eye-canvas');
     this.ctx = this.canvas.getContext('2d');
   }
 
@@ -397,7 +397,7 @@ class EyeTracker {
     
     // Show calibration UI
     const calibrationUI = document.createElement('div');
-    calibrationUI.id = 'neuroread-calibration';
+    calibrationUI.id = 'setu-calibration';
     calibrationUI.innerHTML = `
       <div class="calibration-point" style="top: 20%; left: 50%;"></div>
       <div class="calibration-instruction">Look at the dot and click</div>

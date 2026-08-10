@@ -4,11 +4,11 @@
 // Extension installation
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {
-    console.log('NeuroRead installed - Welcome!');
+    console.log('setu installed - Welcome!');
     
     // Initialize default settings
     chrome.storage.sync.set({
-      neuroreadState: {
+      setuState: {
         bionic: false,
         focus: false,
         eye: false,
@@ -47,49 +47,49 @@ chrome.runtime.onInstalled.addListener(() => {
 function createContextMenu() {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
-      id: 'neuroread-parent',
-      title: 'NeuroRead',
+      id: 'setu-parent',
+      title: 'setu',
       contexts: ['all']
     });
 
     chrome.contextMenus.create({
       id: 'toggle-bionic',
-      parentId: 'neuroread-parent',
+      parentId: 'setu-parent',
       title: 'Toggle Bionic Reading',
       contexts: ['all']
     });
 
     chrome.contextMenus.create({
       id: 'toggle-focus',
-      parentId: 'neuroread-parent',
+      parentId: 'setu-parent',
       title: 'Toggle Focus Mode',
       contexts: ['all']
     });
 
     chrome.contextMenus.create({
       id: 'toggle-tts',
-      parentId: 'neuroread-parent',
+      parentId: 'setu-parent',
       title: 'Read Selected Text',
       contexts: ['selection']
     });
 
     chrome.contextMenus.create({
       id: 'summarize-page',
-      parentId: 'neuroread-parent',
+      parentId: 'setu-parent',
       title: 'Save to SETU Sanctuary',
       contexts: ['all']
     });
 
     chrome.contextMenus.create({
       id: 'open-commander',
-      parentId: 'neuroread-parent',
+      parentId: 'setu-parent',
       title: 'Open SETU Commander',
       contexts: ['all']
     });
 
     chrome.contextMenus.create({
       id: 'task-path',
-      parentId: 'neuroread-parent',
+      parentId: 'setu-parent',
       title: 'Create a task path',
       contexts: ['all']
     });
@@ -129,8 +129,8 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   switch (request.action) {
     case 'getState':
-      chrome.storage.sync.get('neuroreadState').then(result => {
-        sendResponse(result.neuroreadState);
+      chrome.storage.sync.get('setuState').then(result => {
+        sendResponse(result.setuState);
       });
       return true;
 

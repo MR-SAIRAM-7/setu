@@ -117,15 +117,15 @@ class SetuCommander {
     if (!plan?.intent) return false;
     switch (plan.intent) {
       case 'focus':
-        window.neuroread?.toggleMode('focus', true);
+        (window.setu || window.setu)?.toggleMode('focus', true);
         this.setResult(plan.message);
         return true;
       case 'task_path':
-        window.neuroread?.toggleMode('chunking', true);
+        (window.setu || window.setu)?.toggleMode('chunking', true);
         this.setResult(plan.message);
         return true;
       case 'visual_breakdown':
-        window.neuroread?.features.visual?.open();
+        (window.setu || window.setu)?.features.visual?.open();
         this.setResult(plan.message);
         return true;
       case 'explain_selection':
@@ -134,8 +134,8 @@ class SetuCommander {
       case 'read': {
         const selection = window.getSelection()?.toString().trim();
         const text = selection || document.querySelector('article, main, [role="main"]')?.innerText || document.body.innerText;
-        window.neuroread?.toggleFeature('tts', true);
-        window.neuroread?.features.tts?.speak(text.slice(0, 8000));
+        (window.setu || window.setu)?.toggleFeature('tts', true);
+        (window.setu || window.setu)?.features.tts?.speak(text.slice(0, 8000));
         this.setResult(plan.message);
         return true;
       }
@@ -163,7 +163,7 @@ class SetuCommander {
         await this.previewFormFill();
         return true;
       case 'save_sanctuary': {
-        const artifact = await window.neuroread?.features.sanctuary?.save();
+        const artifact = await (window.setu || window.setu)?.features.sanctuary?.save();
         if (artifact) {
           chrome.runtime.sendMessage({ action: 'openSanctuary' });
           this.setResult('Saved locally to SETU Sanctuary. Your map and flashcards are ready.');
@@ -185,17 +185,17 @@ class SetuCommander {
     if (!normalized) return;
     this.clearPending();
     if (/simplify|focus mode|remove distractions/.test(normalized)) {
-      window.neuroread?.toggleMode('focus', true);
+      (window.setu || window.setu)?.toggleMode('focus', true);
       this.setResult('Focus Mode is on. I kept the article and removed surrounding clutter.');
       return;
     }
     if (/task|step by step|checklist|chunk/.test(normalized)) {
-      window.neuroread?.toggleMode('chunking', true);
+      (window.setu || window.setu)?.toggleMode('chunking', true);
       this.setResult('I made a task path. Start with the highlighted first step.');
       return;
     }
     if (/explain.*(visual|image|chart|table)|visual.*explain/.test(normalized)) {
-      window.neuroread?.features.visual?.open();
+      (window.setu || window.setu)?.features.visual?.open();
       this.setResult('I opened a plain-language breakdown of the page visuals.');
       return;
     }
@@ -206,8 +206,8 @@ class SetuCommander {
     if (/read( this| page| selected| aloud)?/.test(normalized)) {
       const selection = window.getSelection()?.toString().trim();
       const text = selection || document.querySelector('article, main, [role="main"]')?.innerText || document.body.innerText;
-      window.neuroread?.toggleFeature('tts', true);
-      window.neuroread?.features.tts?.speak(text.slice(0, 8000));
+      (window.setu || window.setu)?.toggleFeature('tts', true);
+      (window.setu || window.setu)?.features.tts?.speak(text.slice(0, 8000));
       this.setResult(selection ? 'Reading your selected text aloud.' : 'Reading the main page aloud.');
       return;
     }
@@ -333,7 +333,7 @@ class SetuCommander {
     }
     this.setResult(explanation);
     if (this.overlay.querySelector('.setu-speak-answer').checked) {
-      window.neuroread?.features.tts?.speak(explanation);
+      (window.setu || window.setu)?.features.tts?.speak(explanation);
     }
   }
 }

@@ -1,7 +1,7 @@
 {
-  "name": "neuroread-backend",
+  "name": "setu-backend",
   "version": "1.0.0",
-  "description": "AI-powered backend for NeuroRead Chrome Extension",
+  "description": "AI-powered backend for SETU Chrome Extension",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -24,6 +24,6 @@
     "reading",
     "ai"
   ],
-  "author": "NeuroRead Team",
+  "author": "SETU Team",
   "license": "MIT"
 }

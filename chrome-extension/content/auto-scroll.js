@@ -37,7 +37,7 @@ class AutoScroll {
     this.startScrolling();
     this.setupEventListeners();
     
-    document.body.classList.add('neuroread-scroll-active');
+    document.body.classList.add('setu-scroll-active');
   }
 
   disable() {
@@ -51,7 +51,7 @@ class AutoScroll {
     this.removeEventListeners();
     this.saveReadingStats();
     
-    document.body.classList.remove('neuroread-scroll-active');
+    document.body.classList.remove('setu-scroll-active');
   }
 
   analyzeContent() {
@@ -78,7 +78,7 @@ class AutoScroll {
 
   createControls() {
     this.controlsOverlay = document.createElement('div');
-    this.controlsOverlay.id = 'neuroread-scroll-controls';
+    this.controlsOverlay.id = 'setu-scroll-controls';
     this.controlsOverlay.innerHTML = `
       <div class="scroll-controls-panel">
         <button class="scroll-btn scroll-pause" title="Pause/Play (Space)">
@@ -151,7 +151,7 @@ class AutoScroll {
     
     // Click to pause
     this.clickHandler = (e) => {
-      if (!e.target.closest('#neuroread-scroll-controls')) {
+      if (!e.target.closest('#setu-scroll-controls')) {
         this.togglePause();
       }
     };

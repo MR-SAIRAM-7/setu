@@ -83,7 +83,7 @@ class TaskChunker {
         <button class="setu-primary" data-action="done">Mark step done</button>
       </div>`;
     document.body.appendChild(this.overlay);
-    this.overlay.querySelector('.setu-dismiss').addEventListener('click', () => window.neuroread?.toggleMode('chunking', false));
+    this.overlay.querySelector('.setu-dismiss').addEventListener('click', () => window.setu?.toggleMode('chunking', false));
     this.overlay.querySelector('[data-action="previous"]').addEventListener('click', () => this.move(-1));
     this.overlay.querySelector('[data-action="done"]').addEventListener('click', () => this.move(1));
     this.paintSteps();
@@ -119,10 +119,10 @@ class TaskChunker {
 
   move(amount) {
     if (amount > 0 && this.currentIndex >= this.steps.length - 1) {
-      window.neuroread?.showToast('Nice work — task path complete.');
+      window.setu?.showToast('Nice work — task path complete.');
       this.disable();
-      if (window.neuroread) window.neuroread.state.chunking = false;
-      window.neuroread?.saveState();
+      if (window.setu) window.setu.state.chunking = false;
+      window.setu?.saveState();
       return;
     }
     this.currentIndex = Math.max(0, Math.min(this.steps.length - 1, this.currentIndex + amount));

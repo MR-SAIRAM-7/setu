@@ -1,6 +1,6 @@
 /* Focus Mode Styles */
 
-#neuroread-focus-overlay {
+#setu-focus-overlay {
   position: fixed;
   top: 0;
   left: 0;
@@ -12,7 +12,7 @@
   font-family: system-ui, -apple-system, sans-serif;
 }
 
-.neuroread-focus-header {
+.setu-focus-header {
   position: sticky;
   top: 0;
   background: linear-gradient(135deg, #6366f1, #8b5cf6);
@@ -24,13 +24,13 @@
   box-shadow: 0 2px 10px rgba(0,0,0,0.1);
 }
 
-.neuroread-focus-controls {
+.setu-focus-controls {
   display: flex;
   gap: 10px;
 }
 
-.neuroread-focus-btn,
-.neuroread-focus-close {
+.setu-focus-btn,
+.setu-focus-close {
   background: rgba(255,255,255,0.2);
   border: none;
   color: white;
@@ -45,13 +45,13 @@
   transition: all 0.2s;
 }
 
-.neuroread-focus-btn:hover,
-.neuroread-focus-close:hover {
+.setu-focus-btn:hover,
+.setu-focus-close:hover {
   background: rgba(255,255,255,0.3);
   transform: scale(1.05);
 }
 
-.neuroread-focus-content {
+.setu-focus-content {
   max-width: 700px;
   margin: 0 auto;
   padding: 40px 24px;
@@ -60,31 +60,31 @@
   color: #1e293b;
 }
 
-.neuroread-focus-content h1,
-.neuroread-focus-content h2,
-.neuroread-focus-content h3 {
+.setu-focus-content h1,
+.setu-focus-content h2,
+.setu-focus-content h3 {
   margin-top: 1.5em;
   margin-bottom: 0.5em;
   line-height: 1.3;
 }
 
-.neuroread-focus-content p {
+.setu-focus-content p {
   margin-bottom: 1.2em;
 }
 
-.neuroread-focus-content img {
+.setu-focus-content img {
   max-width: 100%;
   height: auto;
   border-radius: 8px;
   margin: 20px 0;
 }
 
-.neuroread-focus-content a {
+.setu-focus-content a {
   color: #6366f1;
   text-decoration: underline;
 }
 
-.neuroread-focus-content blockquote {
+.setu-focus-content blockquote {
   border-left: 4px solid #6366f1;
   padding-left: 20px;
   margin: 20px 0;
@@ -92,7 +92,7 @@
   font-style: italic;
 }
 
-.neuroread-focus-content code {
+.setu-focus-content code {
   background: #f1f5f9;
   padding: 2px 6px;
   border-radius: 4px;
@@ -100,7 +100,7 @@
   font-size: 0.9em;
 }
 
-.neuroread-focus-content pre {
+.setu-focus-content pre {
   background: #1e293b;
   color: #e2e8f0;
   padding: 16px;
@@ -108,7 +108,7 @@
   overflow-x: auto;
 }
 
-.neuroread-focus-progress {
+.setu-focus-progress {
   position: fixed;
   top: 0;
   left: 0;
@@ -118,7 +118,7 @@
   z-index: 11;
 }
 
-.neuroread-progress-bar {
+.setu-progress-bar {
   height: 100%;
   background: #22c55e;
   width: 0%;
@@ -126,27 +126,27 @@
 }
 
 /* Theme variations */
-#neuroread-focus-overlay[data-theme="sepia"] {
+#setu-focus-overlay[data-theme="sepia"] {
   background: #f4ecd8;
 }
 
-#neuroread-focus-overlay[data-theme="sepia"] .neuroread-focus-content {
+#setu-focus-overlay[data-theme="sepia"] .setu-focus-content {
   color: #5b4636;
 }
 
-#neuroread-focus-overlay[data-theme="dark"] {
+#setu-focus-overlay[data-theme="dark"] {
   background: #1a1a2e;
 }
 
-#neuroread-focus-overlay[data-theme="dark"] .neuroread-focus-content {
+#setu-focus-overlay[data-theme="dark"] .setu-focus-content {
   color: #eaeaea;
 }
 
-#neuroread-focus-overlay[data-theme="high-contrast"] {
+#setu-focus-overlay[data-theme="high-contrast"] {
   background: #000000;
 }
 
-#neuroread-focus-overlay[data-theme="high-contrast"] .neuroread-focus-content {
+#setu-focus-overlay[data-theme="high-contrast"] .setu-focus-content {
   color: #ffffff;
 }
 
@@ -162,6 +162,6 @@
   }
 }
 
-#neuroread-focus-overlay {
+#setu-focus-overlay {
   animation: focusModeIn 0.3s ease;
 }

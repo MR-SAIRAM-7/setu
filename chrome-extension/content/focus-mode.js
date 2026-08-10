@@ -30,7 +30,7 @@ class FocusMode {
       this.enableSimpleFocus();
     }
     
-    document.body.classList.add('neuroread-focus-active');
+    document.body.classList.add('setu-focus-active');
   }
 
   disable() {
@@ -49,7 +49,7 @@ class FocusMode {
     this.restoreDistractions();
     
     // Remove body class
-    document.body.classList.remove('neuroread-focus-active');
+    document.body.classList.remove('setu-focus-active');
     
     // Restore scroll position
     window.scrollTo(0, this.scrollPosition);
@@ -100,32 +100,32 @@ class FocusMode {
   createFocusOverlay() {
     // Create the focus overlay container
     this.focusOverlay = document.createElement('div');
-    this.focusOverlay.id = 'neuroread-focus-overlay';
+    this.focusOverlay.id = 'setu-focus-overlay';
     this.focusOverlay.innerHTML = `
-      <div class="neuroread-focus-header">
-        <button class="neuroread-focus-close" title="Close Focus Mode (Esc)">
+      <div class="setu-focus-header">
+        <button class="setu-focus-close" title="Close Focus Mode (Esc)">
           <span>✕</span>
         </button>
-        <div class="neuroread-focus-controls">
-          <button class="neuroread-focus-btn" data-action="decrease-font" title="Decrease Font Size">
+        <div class="setu-focus-controls">
+          <button class="setu-focus-btn" data-action="decrease-font" title="Decrease Font Size">
             <span>A-</span>
           </button>
-          <button class="neuroread-focus-btn" data-action="increase-font" title="Increase Font Size">
+          <button class="setu-focus-btn" data-action="increase-font" title="Increase Font Size">
             <span>A+</span>
           </button>
-          <button class="neuroread-focus-btn" data-action="toggle-theme" title="Toggle Theme">
+          <button class="setu-focus-btn" data-action="toggle-theme" title="Toggle Theme">
             <span>🎨</span>
           </button>
-          <button class="neuroread-focus-btn" data-action="tts" title="Read Aloud">
+          <button class="setu-focus-btn" data-action="tts" title="Read Aloud">
             <span>🔊</span>
           </button>
         </div>
       </div>
-      <div class="neuroread-focus-content">
+      <div class="setu-focus-content">
         ${this.articleContent.innerHTML}
       </div>
-      <div class="neuroread-focus-progress">
-        <div class="neuroread-progress-bar"></div>
+      <div class="setu-focus-progress">
+        <div class="setu-progress-bar"></div>
       </div>
     `;
 
@@ -140,13 +140,13 @@ class FocusMode {
 
   setupFocusControls() {
     // Close button
-    this.focusOverlay.querySelector('.neuroread-focus-close').addEventListener('click', () => {
+    this.focusOverlay.querySelector('.setu-focus-close').addEventListener('click', () => {
       this.disable();
     });
 
     // Font size controls
     let fontSize = 18;
-    const content = this.focusOverlay.querySelector('.neuroread-focus-content');
+    const content = this.focusOverlay.querySelector('.setu-focus-content');
     
     this.focusOverlay.querySelector('[data-action="decrease-font"]').addEventListener('click', () => {
       fontSize = Math.max(14, fontSize - 2);
@@ -169,8 +169,8 @@ class FocusMode {
 
     // TTS
     this.focusOverlay.querySelector('[data-action="tts"]').addEventListener('click', () => {
-      if (window.neuroread && window.neuroread.features.tts) {
-        window.neuroread.features.tts.speak(this.articleContent.textContent);
+      if (window.setu && window.setu.features.tts) {
+        window.setu.features.tts.speak(this.articleContent.textContent);
       }
     });
 
@@ -183,8 +183,8 @@ class FocusMode {
   }
 
   setupProgressTracking() {
-    const progressBar = this.focusOverlay.querySelector('.neuroread-progress-bar');
-    const content = this.focusOverlay.querySelector('.neuroread-focus-content');
+    const progressBar = this.focusOverlay.querySelector('.setu-progress-bar');
+    const content = this.focusOverlay.querySelector('.setu-focus-content');
 
     const updateProgress = () => {
       const scrollTop = this.focusOverlay.scrollTop;
@@ -200,7 +200,7 @@ class FocusMode {
   hideDistractions() {
     // Elements to hide
     const hideSelectors = [
-      'header:not(.neuroread-focus-header)',
+      'header:not(.setu-focus-header)',
       'nav',
       'aside',
       '.sidebar',
@@ -223,7 +223,7 @@ class FocusMode {
     hideSelectors.forEach(selector => {
       const elements = document.querySelectorAll(selector);
       elements.forEach(el => {
-        if (!el.closest('#neuroread-focus-overlay') && !this.originalStyles.has(el)) {
+        if (!el.closest('#setu-focus-overlay') && !this.originalStyles.has(el)) {
           this.originalStyles.set(el, el.style.display);
           el.style.display = 'none';
         }
@@ -232,7 +232,7 @@ class FocusMode {
 
     // Hide body content except our overlay
     Array.from(document.body.children).forEach(child => {
-      if (child !== this.focusOverlay && !child.id?.startsWith('neuroread')) {
+      if (child !== this.focusOverlay && !child.id?.startsWith('setu')) {
         if (!this.originalStyles.has(child)) {
           this.originalStyles.set(child, child.style.display);
           child.style.display = 'none';
@@ -253,9 +253,9 @@ class FocusMode {
   enableSimpleFocus() {
     // Fallback: Just dim everything except main content area
     const style = document.createElement('style');
-    style.id = 'neuroread-simple-focus';
+    style.id = 'setu-simple-focus';
     style.textContent = `
-      body > *:not(#neuroread-focus-overlay):not([id^="neuroread"]) {
+      body > *:not(#setu-focus-overlay):not([id^="setu"]) {
         opacity: 0.1 !important;
         pointer-events: none !important;
       }

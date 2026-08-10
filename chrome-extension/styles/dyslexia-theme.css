@@ -1,7 +1,7 @@
 /* Dyslexia Theme Styles */
 
 /* Reading Ruler */
-#neuroread-reading-ruler {
+#setu-reading-ruler {
   position: fixed;
   top: 0;
   left: 0;
@@ -29,25 +29,25 @@
 }
 
 /* Theme-specific overrides */
-body.neuroread-theme-sepia {
+body.setu-theme-sepia {
   filter: sepia(0.2);
 }
 
-body.neuroread-theme-dark {
+body.setu-theme-dark {
   filter: invert(1) hue-rotate(180deg);
 }
 
-body.neuroread-theme-dark img,
-body.neuroread-theme-dark video {
+body.setu-theme-dark img,
+body.setu-theme-dark video {
   filter: invert(1) hue-rotate(180deg);
 }
 
-body.neuroread-theme-high-contrast {
+body.setu-theme-high-contrast {
   filter: contrast(1.5);
 }
 
 /* Auto Scroll Controls */
-#neuroread-scroll-controls {
+#setu-scroll-controls {
   position: fixed;
   bottom: 20px;
   left: 50%;
@@ -130,16 +130,16 @@ body.neuroread-theme-high-contrast {
   transition: width 0.1s linear;
 }
 
-#neuroread-scroll-controls.paused .scroll-btn.scroll-pause {
+#setu-scroll-controls.paused .scroll-btn.scroll-pause {
   display: none !important;
 }
 
-#neuroread-scroll-controls.paused .scroll-btn.scroll-play {
+#setu-scroll-controls.paused .scroll-btn.scroll-play {
   display: flex !important;
 }
 
 /* TTS Controls */
-#neuroread-tts-controls {
+#setu-tts-controls {
   position: fixed;
   bottom: 80px;
   left: 50%;
@@ -221,14 +221,14 @@ body.neuroread-theme-high-contrast {
 }
 
 /* TTS Highlight */
-.neuroread-tts-highlight {
+.setu-tts-highlight {
   background: rgba(99, 102, 241, 0.3) !important;
   border-radius: 3px;
   padding: 0 2px;
 }
 
 /* Indicator */
-#neuroread-indicator {
+#setu-indicator {
   position: fixed;
   bottom: 20px;
   right: 20px;
@@ -248,24 +248,24 @@ body.neuroread-theme-high-contrast {
   pointer-events: none;
 }
 
-#neuroread-indicator.visible {
+#setu-indicator.visible {
   opacity: 1;
   transform: translateY(0);
   pointer-events: auto;
 }
 
-.neuroread-indicator-content {
+.setu-indicator-content {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.neuroread-logo {
+.setu-logo {
   font-size: 18px;
 }
 
 /* Toast notifications */
-.neuroread-toast {
+.setu-toast {
   position: fixed;
   top: 20px;
   right: 20px;
@@ -277,15 +277,15 @@ body.neuroread-theme-high-contrast {
   font-size: 14px;
   font-weight: 500;
   z-index: 9999999;
-  animation: neuroread-toast-in 0.3s ease;
+  animation: setu-toast-in 0.3s ease;
 }
 
-@keyframes neuroread-toast-in {
+@keyframes setu-toast-in {
   from { opacity: 0; transform: translateX(20px); }
   to { opacity: 1; transform: translateX(0); }
 }
 
-@keyframes neuroread-toast-out {
+@keyframes setu-toast-out {
   from { opacity: 1; transform: translateX(0); }
   to { opacity: 0; transform: translateX(20px); }
 }
