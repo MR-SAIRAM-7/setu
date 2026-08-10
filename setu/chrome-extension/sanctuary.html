@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SETU Sanctuary</title>
+  <link rel="stylesheet" href="sanctuary.css">
+</head>
+<body>
+  <div class="sanctuary-shell">
+    <aside class="library-panel">
+      <a class="brand" href="#top" aria-label="SETU Sanctuary home"><span>⌁</span><div><strong>SETU</strong><small>Sanctuary</small></div></a>
+      <label class="search-label" for="memory-search">Remember something?</label>
+      <div class="search-box"><input id="memory-search" type="search" placeholder="What was I learning yesterday?"><button id="search-button" aria-label="Search memory">⌕</button></div>
+      <p class="search-hint">Search stays on this device.</p>
+      <div id="search-results" class="search-results" hidden></div>
+      <div class="library-heading"><h2>Your materials</h2><span id="material-count">0</span></div>
+      <nav id="document-list" class="document-list" aria-label="Saved materials"></nav>
+      <label class="import-button" for="file-import">+ Import a text file<input id="file-import" type="file" accept=".txt,.md,.html,.htm,text/plain,text/markdown,text/html" hidden></label>
+      <p class="import-hint">For PDFs, open the document in Chrome and use SETU Lens on its readable page.</p>
+    </aside>
+
+    <main id="top" class="workspace">
+      <header class="workspace-header">
+        <div><p class="eyebrow">A calm place for deep work</p><h1 id="document-title">Welcome to SETU Sanctuary</h1><p id="document-meta" class="document-meta">Save any supported web page from SETU Lens to begin.</p></div>
+        <div class="header-actions"><button id="open-source" class="secondary" disabled>Open source</button><button id="remove-document" class="danger" disabled>Remove</button></div>
+      </header>
+
+      <section id="empty-state" class="empty-state">
+        <span aria-hidden="true">⌁</span>
+        <h2>Your next clear step can start here.</h2>
+        <p>Use <strong>Save this page as a map &amp; flashcards</strong> in SETU Lens. SETU will build a local summary, a visual map, and study cards without requiring an account.</p>
+      </section>
+
+      <div id="document-view" hidden>
+        <section class="summary-card"><h2>The short version</h2><ul id="summary-list"></ul></section>
+        <nav class="view-tabs" aria-label="Sanctuary view"><button class="active" data-view="map">Mind map</button><button data-view="cards">Flashcards</button><button data-view="progress">Memory trail</button></nav>
+        <section id="view-map" class="view-panel">
+          <p class="panel-intro">Start at the center, then open just one branch at a time.</p>
+          <div id="mind-map" class="mind-map"></div>
+        </section>
+        <section id="view-cards" class="view-panel" hidden>
+          <div class="flashcard-toolbar"><p id="card-progress">Card 1 of 1</p><button id="flip-card" class="primary">Show answer</button></div>
+          <article id="flashcard" class="flashcard" tabindex="0" role="button" aria-label="Flashcard. Press enter to flip."><p class="card-label">Prompt</p><h2></h2><p class="card-answer" hidden></p></article>
+          <div class="card-controls"><button id="previous-card" class="secondary">← Previous</button><button id="remember-card" class="primary">I remember this</button><button id="next-card" class="secondary">Next →</button></div>
+        </section>
+        <section id="view-progress" class="view-panel" hidden><div id="memory-trail" class="memory-trail"></div></section>
+      </div>
+    </main>
+  </div>
+  <script src="sanctuary.js"></script>
+</body>
+</html>
