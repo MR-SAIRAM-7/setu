@@ -1,6 +1,9 @@
 /* Shared SETU overlays. All overlays are opt-in, keyboard reachable, and sit
    above the page without changing the underlying document. */
-#setu-breathe-overlay, #setu-commander, #setu-visual-breakdown, #setu-task-path {
+#setu-breathe-overlay,
+#setu-commander,
+#setu-visual-breakdown,
+#setu-task-path {
   color: #172033 !important;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
   letter-spacing: normal !important;
@@ -10,62 +13,627 @@
   z-index: 2147483646 !important;
 }
 
-#setu-breathe-overlay *, #setu-commander *, #setu-visual-breakdown *, #setu-task-path * { box-sizing: border-box !important; font-family: inherit !important; }
-.setu-kicker { color: #5b4bb7 !important; font-size: 11px !important; font-weight: 800 !important; letter-spacing: .09em !important; margin: 0 0 4px !important; text-transform: uppercase !important; }
-.setu-muted { color: #526078 !important; font-size: 13px !important; margin: 10px 0 16px !important; }
-.setu-dismiss { border: 0 !important; background: transparent !important; color: #526078 !important; cursor: pointer !important; font-size: 28px !important; line-height: 1 !important; padding: 2px 6px !important; }
-.setu-primary, .setu-secondary { border-radius: 9px !important; cursor: pointer !important; font-size: 13px !important; font-weight: 700 !important; padding: 10px 13px !important; }
-.setu-primary { background: #5b4bb7 !important; border: 1px solid #5b4bb7 !important; color: #fff !important; }
-.setu-secondary { background: #fff !important; border: 1px solid #cad2e0 !important; color: #29354b !important; }
-.setu-primary:hover { background: #46369b !important; }
-.setu-next-target { outline: 4px solid #f5b942 !important; outline-offset: 5px !important; border-radius: 4px !important; }
+#setu-breathe-overlay *,
+#setu-commander *,
+#setu-visual-breakdown *,
+#setu-task-path * {
+  box-sizing: border-box !important;
+  font-family: inherit !important;
+}
+
+.setu-kicker {
+  color: #5b4bb7 !important;
+  font-size: 11px !important;
+  font-weight: 800 !important;
+  letter-spacing: .09em !important;
+  margin: 0 0 4px !important;
+  text-transform: uppercase !important;
+}
+
+.setu-muted {
+  color: #526078 !important;
+  font-size: 13px !important;
+  margin: 10px 0 16px !important;
+}
+
+.setu-dismiss {
+  border: 0 !important;
+  background: transparent !important;
+  color: #526078 !important;
+  cursor: pointer !important;
+  font-size: 28px !important;
+  line-height: 1 !important;
+  padding: 2px 6px !important;
+}
+
+.setu-primary,
+.setu-secondary {
+  border-radius: 9px !important;
+  cursor: pointer !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  padding: 10px 13px !important;
+}
+
+.setu-primary {
+  background: #5b4bb7 !important;
+  border: 1px solid #5b4bb7 !important;
+  color: #fff !important;
+}
+
+.setu-secondary {
+  background: #fff !important;
+  border: 1px solid #cad2e0 !important;
+  color: #29354b !important;
+}
+
+.setu-primary:hover {
+  background: #46369b !important;
+}
+
+.setu-next-target {
+  outline: 4px solid #f5b942 !important;
+  outline-offset: 5px !important;
+  border-radius: 4px !important;
+}
 
 #setu-breathe-overlay {
-  align-items: center !important; background: rgba(16, 24, 40, .68) !important; display: flex !important; inset: 0 !important; justify-content: center !important; position: fixed !important;
+  align-items: center !important;
+  background: rgba(16, 24, 40, .68) !important;
+  display: flex !important;
+  inset: 0 !important;
+  justify-content: center !important;
+  position: fixed !important;
 }
-.setu-breathe-card { background: #fff !important; border-radius: 20px !important; box-shadow: 0 22px 70px rgba(0,0,0,.32) !important; max-width: 410px !important; padding: 28px !important; position: relative !important; text-align: center !important; width: calc(100% - 32px) !important; }
-.setu-breathe-card .setu-dismiss { position: absolute !important; right: 12px !important; top: 12px !important; }
-.setu-breathe-card h2 { color: #172033 !important; font-size: 23px !important; line-height: 1.2 !important; margin: 0 !important; }
-.setu-breath { border: 2px solid #9b8bea !important; height: 140px !important; margin: 20px auto 12px !important; max-width: 220px !important; position: relative !important; }
-.setu-breath-dot { animation: setu-box-breathe 5s linear infinite !important; background: #5b4bb7 !important; border-radius: 50% !important; display: block !important; height: 16px !important; left: -9px !important; position: absolute !important; top: -9px !important; width: 16px !important; }
-.setu-breath-status { color: #5b4bb7 !important; font-size: 16px !important; font-weight: 800 !important; margin: 0 !important; }
-.setu-breathe-actions { display: flex !important; gap: 8px !important; justify-content: center !important; }
-@keyframes setu-box-breathe { 0% { left: -9px; top: -9px; } 25% { left: calc(100% - 7px); top: -9px; } 50% { left: calc(100% - 7px); top: calc(100% - 7px); } 75% { left: -9px; top: calc(100% - 7px); } 100% { left: -9px; top: -9px; } }
 
-#setu-task-path { background: #fff !important; border: 1px solid #dbe2ec !important; border-radius: 16px !important; bottom: 18px !important; box-shadow: 0 14px 45px rgba(21, 31, 50, .22) !important; max-height: calc(100vh - 36px) !important; overflow: auto !important; padding: 18px !important; position: fixed !important; right: 18px !important; width: min(360px, calc(100vw - 36px)) !important; }
-.setu-task-header, .setu-visual-header, .setu-commander-header { align-items: flex-start !important; display: flex !important; justify-content: space-between !important; }
-.setu-task-header h2, .setu-visual-header h2, .setu-commander-header h2 { color: #172033 !important; font-size: 19px !important; line-height: 1.2 !important; margin: 0 !important; }
-.setu-task-list { list-style: none !important; margin: 0 !important; padding: 0 !important; }
-.setu-task-list li { margin: 6px 0 !important; }
-.setu-task-list button { align-items: flex-start !important; background: #f8f9fc !important; border: 1px solid #e4e8f0 !important; border-radius: 10px !important; color: #243047 !important; cursor: pointer !important; display: flex !important; gap: 10px !important; padding: 10px !important; text-align: left !important; width: 100% !important; }
-.setu-task-list li.current button { background: #f0edff !important; border-color: #8f80df !important; }
-.setu-task-list li.complete button { opacity: .64 !important; }
-.setu-task-list strong, .setu-task-list small { display: block !important; }
-.setu-task-list strong { font-size: 13px !important; }
-.setu-task-list small { color: #526078 !important; font-size: 11px !important; margin-top: 3px !important; }
-.setu-step-number { align-items: center !important; background: #e6e2ff !important; border-radius: 50% !important; color: #4a3aa1 !important; display: inline-flex !important; flex: 0 0 22px !important; font-size: 11px !important; font-weight: 800 !important; height: 22px !important; justify-content: center !important; }
-.setu-task-footer { display: flex !important; gap: 8px !important; justify-content: flex-end !important; margin-top: 14px !important; }
-.setu-task-footer button:disabled { cursor: not-allowed !important; opacity: .45 !important; }
+.setu-breathe-card {
+  background: #fff !important;
+  border-radius: 20px !important;
+  box-shadow: 0 22px 70px rgba(0, 0, 0, .32) !important;
+  max-width: 410px !important;
+  padding: 28px !important;
+  position: relative !important;
+  text-align: center !important;
+  width: calc(100% - 32px) !important;
+}
 
-#setu-commander { background: #fff !important; border: 1px solid #dbe2ec !important; border-radius: 16px !important; box-shadow: 0 14px 45px rgba(21, 31, 50, .22) !important; padding: 18px !important; position: fixed !important; right: 18px !important; top: 18px !important; width: min(410px, calc(100vw - 36px)) !important; }
-.setu-command-row { display: flex !important; gap: 8px !important; }
-.setu-command-input { border: 1px solid #b9c3d5 !important; border-radius: 9px !important; color: #172033 !important; flex: 1 !important; font-size: 14px !important; min-width: 0 !important; padding: 10px !important; }
-.setu-command-input:focus { outline: 3px solid rgba(91,75,183,.25) !important; border-color: #5b4bb7 !important; }
-.setu-mic { background: #f0edff !important; border: 1px solid #c9c0ff !important; border-radius: 9px !important; cursor: pointer !important; font-size: 17px !important; padding: 6px 10px !important; }
-.setu-command-options { align-items: center !important; color: #526078 !important; display: flex !important; font-size: 12px !important; gap: 14px !important; margin-top: 10px !important; }
-.setu-command-options select { border: 1px solid #cbd3e0 !important; border-radius: 6px !important; font-size: 12px !important; padding: 3px !important; }
-.setu-speak-label { align-items: center !important; display: flex !important; gap: 4px !important; }
-.setu-command-result { background: #f7f8fb !important; border-left: 3px solid #8f80df !important; color: #28354c !important; font-size: 13px !important; line-height: 1.5 !important; margin-top: 13px !important; min-height: 54px !important; padding: 10px !important; white-space: pre-line !important; }
-.setu-command-result[data-tone="warning"] { border-left-color: #d58b15 !important; }
-.setu-command-confirm { display: flex !important; gap: 8px !important; justify-content: flex-end !important; margin-top: 10px !important; }
+.setu-breathe-card .setu-dismiss {
+  position: absolute !important;
+  right: 12px !important;
+  top: 12px !important;
+}
 
-#setu-visual-breakdown { background: #fff !important; border: 1px solid #dbe2ec !important; border-radius: 16px !important; box-shadow: 0 14px 45px rgba(21, 31, 50, .22) !important; max-height: calc(100vh - 36px) !important; overflow: auto !important; padding: 18px !important; position: fixed !important; right: 18px !important; top: 18px !important; width: min(470px, calc(100vw - 36px)) !important; }
-.setu-visual-cards { display: grid !important; gap: 10px !important; }
-.setu-visual-card { background: #f8f9fc !important; border: 1px solid #e4e8f0 !important; border-radius: 10px !important; padding: 12px !important; }
-.setu-visual-card h3 { color: #253149 !important; font-size: 14px !important; margin: 0 0 6px !important; }
-.setu-visual-card p, .setu-visual-card li { color: #526078 !important; font-size: 12px !important; margin: 0 !important; }
-.setu-visual-card ol { margin: 9px 0 0 16px !important; padding: 0 !important; }
-.setu-visual-card li { margin: 4px 0 !important; }
+.setu-breathe-card h2 {
+  color: #172033 !important;
+  font-size: 23px !important;
+  line-height: 1.2 !important;
+  margin: 0 !important;
+}
 
-@media (max-width: 540px) { #setu-commander, #setu-visual-breakdown { left: 12px !important; right: 12px !important; top: 12px !important; width: auto !important; } #setu-task-path { bottom: 12px !important; right: 12px !important; } }
-@media (prefers-reduced-motion: reduce) { .setu-breath-dot { animation: none !important; } }
+.setu-breath {
+  border: 2px solid #9b8bea !important;
+  height: 140px !important;
+  margin: 20px auto 12px !important;
+  max-width: 220px !important;
+  position: relative !important;
+}
+
+.setu-breath-dot {
+  animation: setu-box-breathe 5s linear infinite !important;
+  background: #5b4bb7 !important;
+  border-radius: 50% !important;
+  display: block !important;
+  height: 16px !important;
+  left: -9px !important;
+  position: absolute !important;
+  top: -9px !important;
+  width: 16px !important;
+}
+
+.setu-breath-status {
+  color: #5b4bb7 !important;
+  font-size: 16px !important;
+  font-weight: 800 !important;
+  margin: 0 !important;
+}
+
+.setu-breathe-actions {
+  display: flex !important;
+  gap: 8px !important;
+  justify-content: center !important;
+}
+
+@keyframes setu-box-breathe {
+  0% {
+    left: -9px;
+    top: -9px;
+  }
+
+  25% {
+    left: calc(100% - 7px);
+    top: -9px;
+  }
+
+  50% {
+    left: calc(100% - 7px);
+    top: calc(100% - 7px);
+  }
+
+  75% {
+    left: -9px;
+    top: calc(100% - 7px);
+  }
+
+  100% {
+    left: -9px;
+    top: -9px;
+  }
+}
+
+#setu-task-path {
+  background: #fff !important;
+  border: 1px solid #dbe2ec !important;
+  border-radius: 16px !important;
+  bottom: 18px !important;
+  box-shadow: 0 14px 45px rgba(21, 31, 50, .22) !important;
+  max-height: calc(100vh - 36px) !important;
+  overflow: auto !important;
+  padding: 18px !important;
+  position: fixed !important;
+  right: 18px !important;
+  width: min(360px, calc(100vw - 36px)) !important;
+}
+
+.setu-task-header,
+.setu-visual-header,
+.setu-commander-header {
+  align-items: flex-start !important;
+  display: flex !important;
+  justify-content: space-between !important;
+}
+
+.setu-task-header h2,
+.setu-visual-header h2,
+.setu-commander-header h2 {
+  color: #172033 !important;
+  font-size: 19px !important;
+  line-height: 1.2 !important;
+  margin: 0 !important;
+}
+
+.setu-task-list {
+  list-style: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.setu-task-list li {
+  margin: 6px 0 !important;
+}
+
+.setu-task-list button {
+  align-items: flex-start !important;
+  background: #f8f9fc !important;
+  border: 1px solid #e4e8f0 !important;
+  border-radius: 10px !important;
+  color: #243047 !important;
+  cursor: pointer !important;
+  display: flex !important;
+  gap: 10px !important;
+  padding: 10px !important;
+  text-align: left !important;
+  width: 100% !important;
+}
+
+.setu-task-list li.current button {
+  background: #f0edff !important;
+  border-color: #8f80df !important;
+}
+
+.setu-task-list li.complete button {
+  opacity: .64 !important;
+}
+
+.setu-task-list strong,
+.setu-task-list small {
+  display: block !important;
+}
+
+.setu-task-list strong {
+  font-size: 13px !important;
+}
+
+.setu-task-list small {
+  color: #526078 !important;
+  font-size: 11px !important;
+  margin-top: 3px !important;
+}
+
+.setu-step-number {
+  align-items: center !important;
+  background: #e6e2ff !important;
+  border-radius: 50% !important;
+  color: #4a3aa1 !important;
+  display: inline-flex !important;
+  flex: 0 0 22px !important;
+  font-size: 11px !important;
+  font-weight: 800 !important;
+  height: 22px !important;
+  justify-content: center !important;
+}
+
+.setu-task-footer {
+  display: flex !important;
+  gap: 8px !important;
+  justify-content: flex-end !important;
+  margin-top: 14px !important;
+}
+
+.setu-task-footer button:disabled {
+  cursor: not-allowed !important;
+  opacity: .45 !important;
+}
+
+#setu-commander {
+  background: #fff !important;
+  border: 1px solid #dbe2ec !important;
+  border-radius: 16px !important;
+  box-shadow: 0 14px 45px rgba(21, 31, 50, .22) !important;
+  padding: 18px !important;
+  position: fixed !important;
+  right: 18px !important;
+  top: 18px !important;
+  width: min(410px, calc(100vw - 36px)) !important;
+}
+
+.setu-command-row {
+  display: flex !important;
+  gap: 8px !important;
+}
+
+.setu-command-input {
+  border: 1px solid #b9c3d5 !important;
+  border-radius: 9px !important;
+  color: #172033 !important;
+  flex: 1 !important;
+  font-size: 14px !important;
+  min-width: 0 !important;
+  padding: 10px !important;
+}
+
+.setu-command-input:focus {
+  outline: 3px solid rgba(91, 75, 183, .25) !important;
+  border-color: #5b4bb7 !important;
+}
+
+.setu-mic {
+  background: #f0edff !important;
+  border: 1px solid #c9c0ff !important;
+  border-radius: 9px !important;
+  cursor: pointer !important;
+  font-size: 17px !important;
+  padding: 6px 10px !important;
+}
+
+.setu-command-options {
+  align-items: center !important;
+  color: #526078 !important;
+  display: flex !important;
+  font-size: 12px !important;
+  gap: 14px !important;
+  margin-top: 10px !important;
+}
+
+.setu-command-options select {
+  border: 1px solid #cbd3e0 !important;
+  border-radius: 6px !important;
+  font-size: 12px !important;
+  padding: 3px !important;
+}
+
+.setu-speak-label {
+  align-items: center !important;
+  display: flex !important;
+  gap: 4px !important;
+}
+
+.setu-command-result {
+  background: #f7f8fb !important;
+  border-left: 3px solid #8f80df !important;
+  color: #28354c !important;
+  font-size: 13px !important;
+  line-height: 1.5 !important;
+  margin-top: 13px !important;
+  min-height: 54px !important;
+  padding: 10px !important;
+  white-space: pre-line !important;
+}
+
+.setu-command-result[data-tone="warning"] {
+  border-left-color: #d58b15 !important;
+}
+
+.setu-command-confirm {
+  display: flex !important;
+  gap: 8px !important;
+  justify-content: flex-end !important;
+  margin-top: 10px !important;
+}
+
+#setu-visual-breakdown {
+  background: #fff !important;
+  border: 1px solid #dbe2ec !important;
+  border-radius: 16px !important;
+  box-shadow: 0 14px 45px rgba(21, 31, 50, .22) !important;
+  max-height: calc(100vh - 36px) !important;
+  overflow: auto !important;
+  padding: 18px !important;
+  position: fixed !important;
+  right: 18px !important;
+  top: 18px !important;
+  width: min(470px, calc(100vw - 36px)) !important;
+}
+
+.setu-visual-cards {
+  display: grid !important;
+  gap: 10px !important;
+}
+
+.setu-visual-card {
+  background: #f8f9fc !important;
+  border: 1px solid #e4e8f0 !important;
+  border-radius: 10px !important;
+  padding: 12px !important;
+}
+
+.setu-visual-card h3 {
+  color: #253149 !important;
+  font-size: 14px !important;
+  margin: 0 0 6px !important;
+}
+
+.setu-visual-card p,
+.setu-visual-card li {
+  color: #526078 !important;
+  font-size: 12px !important;
+  margin: 0 !important;
+}
+
+.setu-visual-card ol {
+  margin: 9px 0 0 16px !important;
+  padding: 0 !important;
+}
+
+.setu-visual-card li {
+  margin: 4px 0 !important;
+}
+
+@media (max-width: 540px) {
+
+  #setu-commander,
+  #setu-visual-breakdown {
+    left: 12px !important;
+    right: 12px !important;
+    top: 12px !important;
+    width: auto !important;
+  }
+
+  #setu-task-path {
+    bottom: 12px !important;
+    right: 12px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setu-breath-dot {
+    animation: none !important;
+  }
+}
+
+/* NeuroBridge Autonomous Agent Overlay & DOM Highlighting */
+#nb-agent-overlay {
+  position: fixed !important;
+  bottom: 24px !important;
+  right: 24px !important;
+  width: 360px !important;
+  max-width: calc(100vw - 32px) !important;
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border: 2px solid #2563eb !important;
+  border-radius: 16px !important;
+  box-shadow: 0 16px 48px rgba(15, 23, 42, 0.25) !important;
+  z-index: 2147483647 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  padding: 16px !important;
+  gap: 12px !important;
+  font-family: 'Atkinson Hyperlegible', sans-serif !important;
+}
+
+.nb-agent-header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+}
+
+.nb-agent-title-box {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+
+.nb-agent-badge-icon {
+  font-size: 24px !important;
+}
+
+.nb-agent-title-box h3 {
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  margin: 0 !important;
+  line-height: 1.2 !important;
+}
+
+.nb-agent-subtitle {
+  font-size: 11px !important;
+  color: #475569 !important;
+}
+
+.nb-agent-close-btn {
+  background: transparent !important;
+  border: none !important;
+  font-size: 24px !important;
+  cursor: pointer !important;
+  color: #64748b !important;
+}
+
+.nb-agent-input-container {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+}
+
+.nb-agent-input-row {
+  display: flex !important;
+  gap: 6px !important;
+}
+
+.nb-agent-input {
+  flex: 1 !important;
+  padding: 8px 12px !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 8px !important;
+  font-size: 13px !important;
+}
+
+.nb-agent-mic-btn {
+  background: #f1f5f9 !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 8px !important;
+  padding: 6px 10px !important;
+  cursor: pointer !important;
+}
+
+.nb-agent-start-btn {
+  background: #2563eb !important;
+  color: #ffffff !important;
+  border: none !important;
+  border-radius: 8px !important;
+  padding: 8px 12px !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+  font-size: 13px !important;
+}
+
+.nb-agent-progress-bar {
+  height: 6px !important;
+  background: #e2e8f0 !important;
+  border-radius: 3px !important;
+  overflow: hidden !important;
+  margin-bottom: 6px !important;
+}
+
+.nb-agent-progress-fill {
+  height: 100% !important;
+  background: #059669 !important;
+  transition: width 0.3s ease !important;
+}
+
+.nb-agent-step-counter {
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  color: #2563eb !important;
+  margin-bottom: 6px !important;
+}
+
+.nb-agent-instruction-card {
+  background: #f8fafc !important;
+  border-left: 4px solid #059669 !important;
+  padding: 12px !important;
+  border-radius: 8px !important;
+}
+
+.nb-agent-instruction-text {
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  margin: 0 0 6px 0 !important;
+  line-height: 1.5 !important;
+}
+
+.nb-agent-tip-text {
+  font-size: 11px !important;
+  color: #475569 !important;
+}
+
+.nb-agent-control-buttons {
+  display: flex !important;
+  gap: 8px !important;
+  margin-top: 6px !important;
+}
+
+.nb-agent-action-btn {
+  flex: 1 !important;
+  padding: 6px 10px !important;
+  border-radius: 6px !important;
+  border: 1px solid #cbd5e1 !important;
+  background: #ffffff !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+}
+
+.nb-agent-nav-footer {
+  display: flex !important;
+  justify-content: space-between !important;
+  margin-top: 8px !important;
+}
+
+.nb-agent-nav-btn {
+  padding: 8px 14px !important;
+  border-radius: 6px !important;
+  border: none !important;
+  font-weight: 700 !important;
+  font-size: 12px !important;
+  cursor: pointer !important;
+}
+
+.nb-agent-nav-btn.prev {
+  background: #f1f5f9 !important;
+  color: #475569 !important;
+}
+
+.nb-agent-nav-btn.next {
+  background: #059669 !important;
+  color: #ffffff !important;
+}
+
+/* DOM Highlighting & Floating Step Badge Tooltip */
+.nb-agent-target-highlight {
+  outline: 4px solid #059669 !important;
+  outline-offset: 4px !important;
+  box-shadow: 0 0 20px rgba(5, 150, 105, 0.6) !important;
+  animation: nb-glow-pulse 1.5s infinite alternate !important;
+}
+
+@keyframes nb-glow-pulse {
+  from {
+    outline-color: #059669;
+  }
+
+  to {
+    outline-color: #10b981;
+    box-shadow: 0 0 30px rgba(16, 185, 129, 0.9);
+  }
+}
+
+.nb-agent-floating-badge {
+  position: absolute !important;
+  z-index: 2147483647 !important;
+  background: #059669 !important;
+  color: #ffffff !important;
+  padding: 4px 10px !important;
+  border-radius: 20px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2) !important;
+  pointer-events: none !important;
+}

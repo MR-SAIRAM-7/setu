@@ -359,6 +359,61 @@ const guideSchema = {
   required: ['workflowName', 'totalSteps', 'steps']
 };
 
+// 8. AUTONOMOUS AGENT NAVIGATE CONTROLLER
+async function handleAgentNavigate(req, res, next) {
+  try {
+    const task = req.body.task;
+    const pageContext = req.body.pageContext || {};
+    let result;
+    let fallback = false;
+
+    if (config.openAiApiKey) {
+      try {
+        result = await requestStructuredAI({
+          name: 'neurobridge_agent_navigate',
+          schema: agentNavigateSchema,
+          instructions: 'You are NeuroBridge Autonomous Navigation Agent. Given a user task (e.g. Apply for EPFO, login to portal) and safe DOM controls extracted from the live page, return a clear, step-by-step navigation plan. For each step provide an ultra-clear instruction, targetSelector or text, actionType (click, fill, view), and a calm tip.',
+          input: `USER TASK: "${task}"\nLIVE PAGE DOM CONTEXT:\n${JSON.stringify(pageContext)}`
+        });
+      } catch (err) {
+        console.warn('AI Navigation Agent failed, engaging L0 fallback:', err.message);
+        fallback = true;
+      }
+    } else {
+      fallback = true;
+    }
+
+    result = result || fallbacks.generateLocalNavigationPlan(task, pageContext);
+    res.json({ ...result, fallback });
+  } catch (error) { next(error); }
+}
+
+const agentNavigateSchema = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    goal: { type: 'string' },
+    totalSteps: { type: 'number' },
+    currentStepIndex: { type: 'number' },
+    supportiveMessage: { type: 'string' },
+    steps: {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: false,
+        properties: {
+          stepNumber: { type: 'number' },
+          instruction: { type: 'string' },
+          targetSelector: { type: 'string' },
+          targetText: { type: 'string' },
+          actionType: { type: 'string', enum: ['click', 'fill', 'view', 'navigate'] },
+          tip: { type: 'string' }
+        },
+        required: ['stepNumber', 'instruction', 'targetSelector', 'targetText', 'actionType', 'tip']
+      }
+    }
+  },
+  required: ['goal', 'totalSteps', 'currentStepIndex', 'supportiveMessage', 'steps']
+};
+
 module.exports = {
   handleStartMode,
   handleSimplifyMode,
@@ -367,5 +422,6 @@ module.exports = {
   handlePracticeMode,
   handleWriteMode,
   handleGuideMode,
+  handleAgentNavigate,
   handleExport
 };

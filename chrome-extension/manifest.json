@@ -36,6 +36,7 @@
         "content/commander.js",
         "content/visual-breakdown.js",
         "content/sanctuary-bridge.js",
+        "content/agent-copilot.js",
         "content/main.js"
       ],
       "css": [

@@ -249,6 +249,38 @@ body[data-theme="high-contrast"] .nb-tab.active {
   gap: 16px;
 }
 
+/* Agent Launch Banner */
+.nb-agent-launch-banner {
+  background: linear-gradient(135deg, #eff6ff, #dbeafe);
+  border: 1px solid #bfdbfe;
+  border-radius: var(--nb-radius);
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+body[data-theme="dark"] .nb-agent-launch-banner {
+  background: linear-gradient(135deg, #1e293b, #0f172a);
+  border-color: #334155;
+}
+
+.nb-agent-banner-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.nb-agent-banner-info span {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--nb-text);
+}
+
+.nb-agent-banner-info small {
+  font-size: 10px;
+  color: var(--nb-muted);
+}
+
 /* Tab Contents */
 .nb-tab-content {
   display: none;

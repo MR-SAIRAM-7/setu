@@ -12,6 +12,7 @@ const {
   handlePracticeMode,
   handleWriteMode,
   handleGuideMode,
+  handleAgentNavigate,
   handleExport
 } = require('../controllers/modeControllers');
 
@@ -26,12 +27,12 @@ router.get('/health', (_req, res) => {
     product: 'NeuroBridge One',
     engine: 'SETU Kernel Modular v2.5',
     aiEnabled: Boolean(config.openAiApiKey || config.geminiApiKey),
-    modes: ['start', 'simplify', 'learn', 'meet', 'practice', 'write', 'guide'],
+    modes: ['start', 'simplify', 'learn', 'meet', 'practice', 'write', 'guide', 'agent_navigate'],
     timestamp: new Date().toISOString()
   });
 });
 
-// 7 Mode Endpoints
+// 7 Mode Endpoints + Autonomous Agent Navigator
 router.post('/start', validateInputMiddleware('task', 1000), handleStartMode);
 router.post('/simplify', validateInputMiddleware('text', config.maxTextLength), handleSimplifyMode);
 router.post('/learn', validateInputMiddleware('text', config.maxTextLength), handleLearnMode);
@@ -39,6 +40,7 @@ router.post('/meet', validateInputMiddleware('transcript', config.maxTextLength)
 router.post('/practice', validateInputMiddleware('topic', 1000), handlePracticeMode);
 router.post('/write', validateInputMiddleware('text', config.maxTextLength), handleWriteMode);
 router.post('/guide', validateInputMiddleware('goal', 1000), handleGuideMode);
+router.post('/agent/navigate', validateInputMiddleware('task', 1000), handleAgentNavigate);
 
 // Export & Summarize
 router.post('/export', handleExport);

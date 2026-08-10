@@ -55,6 +55,11 @@ class NeuroBridgePopup {
         this.saveState();
       });
     });
+
+    document.getElementById('btn-launch-agent')?.addEventListener('click', async () => {
+      await this.sendActionToTab('openAgentCopilot');
+      window.close();
+    });
   }
 
   setupSensorySwitch() {

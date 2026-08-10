@@ -42,6 +42,10 @@ export async function exportArtifactMarkdown(mode, data) {
   }
 }
 
+export async function callAgentNavigate(task, pageContext = {}) {
+  return await callModeApi('/api/agent/navigate', { task, pageContext });
+}
+
 function getLocalL0Fallback(endpoint, payload) {
   if (endpoint.includes('/start')) {
     return {
@@ -55,6 +59,40 @@ function getLocalL0Fallback(endpoint, payload) {
       ],
       supportiveMessage: "Starting takes bravery. 10 minutes is all you need right now.",
       confidenceMeter: { effortLevel: 'Low', anxietyLevel: 'Moderate', estimatedTimeMinutes: 10 }
+    };
+  }
+  if (endpoint.includes('/agent/navigate')) {
+    return {
+      goal: payload.task || 'EPFO Portal Navigation',
+      totalSteps: 3,
+      currentStepIndex: 0,
+      steps: [
+        {
+          stepNumber: 1,
+          instruction: "Click 'Member Passbook / UAN Login' highlighted in green on the portal.",
+          targetSelector: "a",
+          targetText: "Member Passbook",
+          actionType: "click",
+          tip: "The element has a green glowing halo ring around it."
+        },
+        {
+          stepNumber: 2,
+          instruction: "Enter your 12-digit UAN number and Password into the login form.",
+          targetSelector: "input[type='text']",
+          targetText: "UAN Field",
+          actionType: "fill",
+          tip: "Double check your digits before proceeding."
+        },
+        {
+          stepNumber: 3,
+          instruction: "Click 'Submit Claim / Check Passbook' to complete your action.",
+          targetSelector: "button",
+          targetText: "Submit",
+          actionType: "click",
+          tip: "Your session stays active for 15 minutes."
+        }
+      ],
+      supportiveMessage: "Guiding you step-by-step through your portal task."
     };
   }
   return { summary: "Processed with zero latency via local L0 engine." };

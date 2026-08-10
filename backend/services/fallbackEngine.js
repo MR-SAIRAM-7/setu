@@ -174,6 +174,69 @@ function formatArtifactMarkdown(mode, data) {
   return md;
 }
 
+function generateLocalNavigationPlan(task, pageContext = {}) {
+  const cleanTask = String(task || 'Navigate page').trim();
+  const controls = pageContext.controls || [];
+  const title = pageContext.title || 'Target Portal';
+
+  // Extract login or primary action controls from page context
+  const loginControl = controls.find(c => /login|sign in|member|passbook|portal|log in/i.test(c.label || c.text || ''));
+  const submitControl = controls.find(c => /submit|apply|proceed|next|register|search/i.test(c.label || c.text || ''));
+  const inputControl = controls.find(c => /input|text|search|uan|aadhaar|pan|email|user/i.test(c.type || c.label || ''));
+
+  const steps = [];
+
+  if (loginControl) {
+    steps.push({
+      stepNumber: 1,
+      instruction: `Click the "${loginControl.label || 'Login'}" link highlighted on the page to open the member access portal.`,
+      targetSelector: loginControl.selector || 'a, button',
+      targetText: loginControl.label || 'Login',
+      actionType: 'click',
+      tip: 'The target element is highlighted with a green glowing halo ring on your screen.'
+    });
+  } else {
+    steps.push({
+      stepNumber: 1,
+      instruction: `Locate the main access section on ${title}.`,
+      targetSelector: 'body',
+      targetText: title,
+      actionType: 'view',
+      tip: 'Look for the primary navigation header or main button.'
+    });
+  }
+
+  if (inputControl) {
+    steps.push({
+      stepNumber: steps.length + 1,
+      instruction: `Enter your details into the "${inputControl.label || 'Input'}" field.`,
+      targetSelector: inputControl.selector || 'input[type="text"]',
+      targetText: inputControl.label || '',
+      actionType: 'fill',
+      tip: 'Optional fields can be skipped to save working memory.'
+    });
+  }
+
+  steps.push({
+    stepNumber: steps.length + 1,
+    instruction: submitControl 
+      ? `Click "${submitControl.label || 'Submit'}" to complete your request for "${cleanTask}".`
+      : `Press the primary action button to complete "${cleanTask}".`,
+    targetSelector: submitControl?.selector || 'button[type="submit"], input[type="submit"]',
+    targetText: submitControl?.label || 'Submit',
+    actionType: 'click',
+    tip: 'Your progress is automatically saved.'
+  });
+
+  return {
+    goal: cleanTask,
+    totalSteps: steps.length,
+    currentStepIndex: 0,
+    steps,
+    supportiveMessage: `I am guiding you step-by-step through ${cleanTask}. Focus on one highlighted action at a time.`
+  };
+}
+
 module.exports = {
   splitSentences,
   generateLocalStartMode,
@@ -184,5 +247,6 @@ module.exports = {
   generateLocalWriteMode,
   generateLocalGuideMode,
   generateLocalSummary,
+  generateLocalNavigationPlan,
   formatArtifactMarkdown
 };
