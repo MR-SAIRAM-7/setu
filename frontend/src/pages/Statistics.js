@@ -1,13 +1,8 @@
 import React, { useState } from 'react';
 import { 
-  ShieldCheck, 
   Cpu, 
   Activity, 
-  Clock, 
-  Lock, 
-  Zap,
-  BarChart2,
-  FileCheck
+  Lock
 } from 'lucide-react';
 import './Statistics.css';
 

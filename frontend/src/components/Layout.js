@@ -7,11 +7,7 @@ import {
   Info, 
   LayoutDashboard,
   Menu,
-  X,
-  Plant,
-  Sun,
-  Moon,
-  Sparkles
+  X
 } from 'lucide-react';
 import './Layout.css';
 

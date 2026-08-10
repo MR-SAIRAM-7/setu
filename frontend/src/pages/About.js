@@ -1,5 +1,5 @@
 import React from 'react';
-import { Award, Zap, ShieldCheck, Heart, Layers } from 'lucide-react';
+import { Award, Zap, ShieldCheck, Layers } from 'lucide-react';
 import './About.css';
 
 const About = () => {

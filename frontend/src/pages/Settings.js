@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, RotateCcw, ShieldCheck, Cpu } from 'lucide-react';
+import { Save, ShieldCheck } from 'lucide-react';
 import './Settings.css';
 
 const Settings = () => {
