@@ -101,7 +101,7 @@ class TaskChunker {
       button.type = 'button';
       const number = document.createElement('span');
       number.className = 'setu-step-number';
-      number.textContent = index < this.currentIndex ? '✓' : String(index + 1);
+      number.textContent = index < this.currentIndex ? '\u2713' : String(index + 1);
       const content = document.createElement('span');
       const title = document.createElement('strong');
       title.textContent = step.title;

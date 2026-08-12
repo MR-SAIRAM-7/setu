@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Download } from 'lucide-react';
+import { Brain, Compass, BookOpen, Download } from 'lucide-react';
 import { callModeApi, exportArtifactMarkdown } from '../../services/apiService';
 
 const LearnModePane = () => {
@@ -17,7 +17,7 @@ const LearnModePane = () => {
 
   return (
     <div className="mode-pane">
-      <h2>🧠 Learn Mode: Mind Map & Quiz Generator</h2>
+      <h2><Brain size={22} style={{ display: 'inline', marginRight: 8 }} /> Learn Mode: Mind Map &amp; Quiz Generator</h2>
       <p className="pane-desc">Transforms dense academic text or articles into an interactive Visual Mind Map and Quick Quiz.</p>
 
       <textarea 
@@ -27,7 +27,8 @@ const LearnModePane = () => {
         onChange={(e) => setText(e.target.value)}
       />
       <button className="nb-action-btn primary" onClick={handleRun} disabled={loading}>
-        {loading ? 'Processing...' : '🧠 Generate Mind Map'}
+        <Brain size={16} style={{ display: 'inline', marginRight: 6 }} />
+        {loading ? 'Processing...' : 'Generate Mind Map'}
       </button>
 
       {result && (
@@ -40,13 +41,14 @@ const LearnModePane = () => {
           </div>
 
           <div className="mindmap-root-node">
-            📍 Root: <strong>{result.mindMap?.rootNode}</strong>
+            <Compass size={16} style={{ display: 'inline', marginRight: 6 }} />
+            Root: <strong>{result.mindMap?.rootNode}</strong>
           </div>
 
           <div className="mindmap-tree-grid">
             {(result.mindMap?.branches || []).map((b, idx) => (
               <div key={idx} className="mindmap-branch-card">
-                <h4>🔹 {b.topic}</h4>
+                <h4><BookOpen size={16} style={{ display: 'inline', marginRight: 6 }} /> {b.topic}</h4>
                 <ul>
                   {b.details.map((d, dIdx) => (
                     <li key={dIdx}>{d}</li>
@@ -68,9 +70,9 @@ const LearnModePane = () => {
                       className="quiz-opt-btn"
                       onClick={() => {
                         if (oIdx === q.answerIndex) {
-                          alert(`Correct! 🎉 ${q.explanation}`);
+                          alert(`Correct! ${q.explanation}`);
                         } else {
-                          alert(`Try again! 💡 ${q.explanation}`);
+                          alert(`Try again! ${q.explanation}`);
                         }
                       }}
                     >

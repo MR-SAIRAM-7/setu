@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Bot, Volume2, Target } from 'lucide-react';
+import { Compass, Bot, Volume2, Target, Lightbulb } from 'lucide-react';
 import { callModeApi, callAgentNavigate } from '../../services/apiService';
 
 const GuideModePane = () => {
@@ -44,9 +44,9 @@ const GuideModePane = () => {
 
   return (
     <div className="mode-pane">
-      <h2>📍 Guide & In-Page Autonomous AI Agent Navigator</h2>
+      <h2><Compass size={22} style={{ display: 'inline', marginRight: 8 }} /> Guide &amp; In-Page Autonomous AI Agent Navigator</h2>
       <p className="pane-desc">
-        Simplifies heavy, clumsy portals (e.g. EPFO, GST, banking, university sites) for ADHD & Dyslexia minds by parsing DOM code and guiding you step-by-step.
+        Simplifies heavy, clumsy portals (e.g. EPFO, GST, banking, university sites) for ADHD &amp; Dyslexia minds by parsing DOM code and guiding you step-by-step.
       </p>
 
       <div className="input-group">
@@ -58,10 +58,10 @@ const GuideModePane = () => {
           onChange={(e) => setGoal(e.target.value)}
         />
         <button className="nb-action-btn primary" onClick={handleRunAgent} disabled={loading}>
-          <Bot size={18} /> {loading ? 'Analyzing Portal...' : '🤖 Launch AI Agent Navigator'}
+          <Bot size={18} /> {loading ? 'Analyzing Portal...' : 'Launch AI Agent Navigator'}
         </button>
         <button className="nb-action-btn secondary" onClick={handleRunGuide} disabled={loading} style={{ background: 'var(--bg-hover)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}>
-          📍 Basic Step Guide
+          <Compass size={16} style={{ display: 'inline', marginRight: 4 }} /> Basic Step Guide
         </button>
       </div>
 
@@ -69,7 +69,7 @@ const GuideModePane = () => {
       {agentPlan && (
         <div className="artifact-card fade-in" style={{ borderLeft: '4px solid var(--accent-green)' }}>
           <div className="card-top-bar">
-            <h3>🤖 AI Agent Active Navigation Plan: {agentPlan.goal}</h3>
+            <h3><Bot size={18} style={{ display: 'inline', marginRight: 6 }} /> AI Agent Active Navigation Plan: {agentPlan.goal}</h3>
             <span className="meter-badge time">Step {currentStepIdx + 1} of {agentPlan.steps?.length}</span>
           </div>
 
@@ -87,7 +87,8 @@ const GuideModePane = () => {
                 {agentPlan.steps[currentStepIdx].instruction}
               </p>
               <small style={{ color: 'var(--text-secondary)' }}>
-                💡 {agentPlan.steps[currentStepIdx].tip}
+                <Lightbulb size={12} style={{ display: 'inline', marginRight: 4 }} />
+                {agentPlan.steps[currentStepIdx].tip}
               </small>
 
               <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
@@ -102,7 +103,7 @@ const GuideModePane = () => {
                   className="start-timer-btn"
                   onClick={() => alert(`Highlighting element "${agentPlan.steps[currentStepIdx].targetText}" with a green glowing halo on screen!`)}
                 >
-                  🎯 Highlight Target Element
+                  <Target size={16} style={{ display: 'inline', marginRight: 4 }} /> Highlight Target Element
                 </button>
               </div>
             </div>
@@ -114,7 +115,7 @@ const GuideModePane = () => {
               disabled={currentStepIdx === 0}
               onClick={() => setCurrentStepIdx(prev => Math.max(0, prev - 1))}
             >
-              ← Previous Step
+              &larr; Previous Step
             </button>
             <button 
               className="start-timer-btn"
@@ -122,11 +123,11 @@ const GuideModePane = () => {
                 if (currentStepIdx < agentPlan.steps.length - 1) {
                   setCurrentStepIdx(prev => prev + 1);
                 } else {
-                  alert("🎉 Task complete! You successfully navigated the portal.");
+                  alert("Task complete! You successfully navigated the portal.");
                 }
               }}
             >
-              {currentStepIdx < agentPlan.steps.length - 1 ? 'Next Step →' : 'Finish Task ✓'}
+              {currentStepIdx < agentPlan.steps.length - 1 ? 'Next Step \u2192' : 'Finish Task'}
             </button>
           </div>
         </div>
@@ -143,7 +144,7 @@ const GuideModePane = () => {
                 <div className="step-info">
                   <h4>{s.title}</h4>
                   <p>{s.actionRequired}</p>
-                  <small>💡 {s.tip}</small>
+                  <small><Lightbulb size={12} style={{ display: 'inline', marginRight: 4 }} /> {s.tip}</small>
                 </div>
               </div>
             ))}

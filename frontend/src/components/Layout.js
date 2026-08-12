@@ -7,7 +7,8 @@ import {
   Info, 
   LayoutDashboard,
   Menu,
-  X
+  X,
+  Leaf
 } from 'lucide-react';
 import './Layout.css';
 
@@ -46,7 +47,7 @@ const Layout = ({ children }) => {
         </button>
         <div className="mobile-logo">
           <Brain size={24} color="#2563eb" />
-          <span>NeuroBridge One</span>
+          <span>NeuroRead</span>
         </div>
       </header>
 
@@ -54,10 +55,12 @@ const Layout = ({ children }) => {
       <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-header">
           <div className="logo">
-            <div className="logo-badge">⌁</div>
+            <div className="logo-badge">
+              <Brain size={18} />
+            </div>
             <div className="logo-text">
-              <h1>NeuroBridge One</h1>
-              <span className="subtext">powered by SETU</span>
+              <h1>NeuroRead</h1>
+              <span className="subtext">ADHD &amp; Dyslexia Suite</span>
             </div>
           </div>
         </div>
@@ -71,7 +74,9 @@ const Layout = ({ children }) => {
               onChange={(e) => setSensoryCalm(e.target.checked)}
             />
             <span className="slider"></span>
-            <span className="sensory-text">🌱 Sensory Calm Mode</span>
+            <span className="sensory-text" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Leaf size={14} color="#059669" /> Sensory Calm Mode
+            </span>
           </label>
         </div>
 
@@ -101,8 +106,8 @@ const Layout = ({ children }) => {
         </div>
 
         <div className="sidebar-footer">
-          <div className="version">NeuroBridge v2.5.0</div>
-          <div className="tagline">Cognitive Accessibility Layer</div>
+          <div className="version">NeuroRead v2.5.0</div>
+          <div className="tagline">Cognitive Accessibility Engine</div>
         </div>
       </aside>
 

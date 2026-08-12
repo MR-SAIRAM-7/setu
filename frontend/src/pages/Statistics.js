@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import { 
   Cpu, 
   Activity, 
-  Lock
+  Lock,
+  Layers,
+  ShieldCheck
 } from 'lucide-react';
 import './Statistics.css';
 
@@ -17,7 +19,7 @@ const Statistics = () => {
   return (
     <div className="statistics">
       <header className="statistics-header">
-        <h1>Trust & Cognitive Load Ledger</h1>
+        <h1>Trust &amp; Cognitive Load Ledger</h1>
         <p>Complete transparency into every AI call, compute rung, latency, and PII redactions.</p>
       </header>
 
@@ -29,7 +31,7 @@ const Statistics = () => {
               <Activity size={24} color="#2563eb" />
             </div>
             <div className="overview-info">
-              <span className="overview-value">45 → 3</span>
+              <span className="overview-value">45 &rarr; 3</span>
               <span className="overview-label">Cognitive Load Score</span>
             </div>
           </div>
@@ -58,21 +60,21 @@ const Statistics = () => {
 
       {/* Compute Ladder Breakdown */}
       <section className="ladder-section">
-        <h2>🪜 The Compute Ladder</h2>
+        <h2><Layers size={20} style={{ display: 'inline', marginRight: 6 }} /> The Compute Ladder</h2>
         <div className="ladder-grid">
           <div className="ladder-card active">
             <div className="rung-tag l0">L0 Deterministic</div>
-            <h3>0 ms · ₹0 · Offline</h3>
+            <h3>0 ms &middot; 100% Offline</h3>
             <p>Runs locally in the browser with zero network requests. PII private by construction.</p>
           </div>
           <div className="ladder-card">
             <div className="rung-tag l1">L1 On-Device Model</div>
-            <h3>~300 ms · ₹0 · Offline</h3>
+            <h3>~300 ms &middot; On-Device</h3>
             <p>Chrome Prompt API / Built-in model execution where available.</p>
           </div>
           <div className="ladder-card">
             <div className="rung-tag l2">L2 Cloud Flash</div>
-            <h3>~1–2 s · Needs Consent</h3>
+            <h3>~1–2 s &middot; Needs Consent</h3>
             <p>Structured Gemini/OpenAI call with strict JSON response schemas.</p>
           </div>
         </div>
@@ -80,7 +82,7 @@ const Statistics = () => {
 
       {/* Trust Ledger Audit Table */}
       <section className="ledger-table-section">
-        <h2>🛡️ Real-Time Audit Log (Trust Ledger)</h2>
+        <h2><ShieldCheck size={20} style={{ display: 'inline', marginRight: 6 }} /> Real-Time Audit Log (Trust Ledger)</h2>
         <table className="ledger-table">
           <thead>
             <tr>

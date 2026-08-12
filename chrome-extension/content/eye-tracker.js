@@ -31,12 +31,12 @@ class EyeTracker {
   async enable() {
     if (this.isEnabled) return;
     
-    console.log('📹 Eye Tracking enabled');
+    console.log('[EyeTracker] Enabled');
     
     // Request camera permission first
     const hasPermission = await this.requestCameraPermission();
     if (!hasPermission) {
-      console.log('Camera permission denied');
+      console.log('[EyeTracker] Camera permission denied');
       this.showPermissionMessage();
       return;
     }
@@ -53,7 +53,7 @@ class EyeTracker {
     if (!this.isEnabled) return;
     this.isEnabled = false;
     
-    console.log('📹 Eye Tracking disabled');
+    console.log('[EyeTracker] Disabled');
     
     this.stopTracking();
     this.stopCamera();
@@ -84,7 +84,9 @@ class EyeTracker {
     message.className = 'setu-permission-message';
     message.innerHTML = `
       <div class="permission-content">
-        <span class="permission-icon">📹</span>
+        <span class="permission-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+        </span>
         <h3>Camera Access Required</h3>
         <p>Eye tracking needs camera access to follow your gaze.</p>
         <button class="permission-btn" onclick="this.parentElement.parentElement.remove()">
@@ -121,7 +123,7 @@ class EyeTracker {
           <span class="eye-status-dot"></span>
           <span class="eye-status-text">Initializing...</span>
         </div>
-        <button class="setu-eye-close" title="Close">✕</button>
+        <button class="setu-eye-close" title="Close">&times;</button>
       </div>
       <div class="setu-reading-zone">
         <div class="reading-zone-indicator"></div>
@@ -133,7 +135,7 @@ class EyeTracker {
     // Create gaze indicator
     this.gazeIndicator = document.createElement('div');
     this.gazeIndicator.id = 'setu-gaze-indicator';
-    this.gazeIndicator.innerHTML = '<span>👁️</span>';
+    this.gazeIndicator.innerHTML = '<span class="gaze-dot-ring"></span>';
     document.body.appendChild(this.gazeIndicator);
     
     // Setup close button

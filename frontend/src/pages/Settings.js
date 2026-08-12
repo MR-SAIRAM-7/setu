@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, ShieldCheck } from 'lucide-react';
+import { Save, ShieldCheck, Brain, Leaf, Server } from 'lucide-react';
 import './Settings.css';
 
 const Settings = () => {
@@ -23,7 +23,8 @@ const Settings = () => {
     tts: {
       rate: 1.0,
       highlightWords: true
-    }
+    },
+    apiHost: 'http://localhost:3000'
   });
 
   const [saved, setSaved] = useState(false);
@@ -31,11 +32,17 @@ const Settings = () => {
   useEffect(() => {
     const loadSettings = async () => {
       try {
+        const storedHost = localStorage.getItem('neuroread_api_url') || 'http://localhost:3000';
         if (window.chrome && window.chrome.storage) {
-          const result = await window.chrome.storage.sync.get(['nbSettings']);
+          const result = await window.chrome.storage.sync.get(['nbSettings', 'apiHost']);
           if (result.nbSettings) {
-            setSettings(result.nbSettings);
+            setSettings({ ...result.nbSettings, apiHost: result.apiHost || storedHost });
+            return;
           }
+        }
+        const local = localStorage.getItem('nbSettings');
+        if (local) {
+          setSettings({ ...JSON.parse(local), apiHost: storedHost });
         }
       } catch (error) {
         console.log('Storage unavailable, using local memory');
@@ -45,22 +52,27 @@ const Settings = () => {
   }, []);
 
   const handleChange = (section, key, value) => {
-    setSettings(prev => ({
-      ...prev,
-      [section]: {
-        ...prev[section],
-        [key]: value
-      }
-    }));
+    if (section === 'root') {
+      setSettings(prev => ({ ...prev, [key]: value }));
+    } else {
+      setSettings(prev => ({
+        ...prev,
+        [section]: {
+          ...prev[section],
+          [key]: value
+        }
+      }));
+    }
     setSaved(false);
   };
 
   const saveSettings = async () => {
     try {
       if (window.chrome && window.chrome.storage) {
-        await window.chrome.storage.sync.set({ nbSettings: settings });
+        await window.chrome.storage.sync.set({ nbSettings: settings, apiHost: settings.apiHost });
       }
       localStorage.setItem('nbSettings', JSON.stringify(settings));
+      localStorage.setItem('neuroread_api_url', settings.apiHost);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (error) {
@@ -77,21 +89,21 @@ const Settings = () => {
 
       {/* Memory Profile */}
       <section className="settings-section">
-        <h2>🧠 Accessibility Profile & Tone Memory</h2>
+        <h2><Brain size={20} style={{ display: 'inline', marginRight: 6 }} /> Accessibility Profile &amp; Tone Memory</h2>
         <div className="settings-card">
           <div className="setting-item">
             <div className="setting-info">
               <label>AI Co-pilot Tone</label>
-              <p>How NeuroBridge One speaks when delivering instructions and plans</p>
+              <p>How NeuroRead speaks when delivering instructions and plans</p>
             </div>
             <select 
               value={settings.memory.preferredTone}
               onChange={(e) => handleChange('memory', 'preferredTone', e.target.value)}
               className="setting-input"
             >
-              <option value="Calm & Direct">Calm & Direct (No pressure)</option>
-              <option value="Encouraging & Warm">Encouraging & Warm</option>
-              <option value="Ultra-Short & Bulleted">Ultra-Short & Bulleted</option>
+              <option value="Calm & Direct">Calm &amp; Direct (No pressure)</option>
+              <option value="Encouraging & Warm">Encouraging &amp; Warm</option>
+              <option value="Ultra-Short & Bulleted">Ultra-Short &amp; Bulleted</option>
             </select>
           </div>
 
@@ -129,9 +141,29 @@ const Settings = () => {
         </div>
       </section>
 
+      {/* Backend API Config */}
+      <section className="settings-section">
+        <h2><Server size={20} style={{ display: 'inline', marginRight: 6 }} /> Dynamic API Server Endpoint</h2>
+        <div className="settings-card">
+          <div className="setting-item">
+            <div className="setting-info">
+              <label>Backend URL</label>
+              <p>Configurable API endpoint for production deployment</p>
+            </div>
+            <input 
+              type="text" 
+              value={settings.apiHost || 'http://localhost:3000'}
+              onChange={(e) => handleChange('root', 'apiHost', e.target.value)}
+              className="setting-input"
+              style={{ width: 250, padding: '8px 12px' }}
+            />
+          </div>
+        </div>
+      </section>
+
       {/* Sensory & Reading Assistance */}
       <section className="settings-section">
-        <h2>🌱 Sensory & Motion Rules</h2>
+        <h2><Leaf size={20} style={{ display: 'inline', marginRight: 6 }} /> Sensory &amp; Motion Rules</h2>
         <div className="settings-card">
           <div className="setting-item">
             <div className="setting-info">

@@ -1,7 +1,7 @@
 /**
- * NeuroBridge One - Chrome Extension Popup Controller
- * Manages the 7 Cognitive Accessibility Modes, Sensory Switch, Theme persistence,
- * local-first processing, and one-click artifact export.
+ * NeuroRead - Chrome Extension Popup Controller
+ * Manages the Cognitive Accessibility Modes, Sensory Switch, Dynamic API Configuration,
+ * Theme persistence, local-first processing, and one-click artifact export.
  */
 
 class NeuroBridgePopup {
@@ -13,7 +13,10 @@ class NeuroBridgePopup {
       theme: 'default',
       bionic: false,
       focus: false,
+      eye: false,
+      scroll: false,
       tts: false,
+      highlight: false,
       dyslexia: false,
       lastArtifact: null
     };
@@ -22,6 +25,7 @@ class NeuroBridgePopup {
 
   async init() {
     await this.loadState();
+    this.setupServerConfig();
     this.setupNavigationTabs();
     this.setupSensorySwitch();
     this.setupThemeSelector();
@@ -31,14 +35,33 @@ class NeuroBridgePopup {
   }
 
   async loadState() {
-    const { nbState } = await chrome.storage.sync.get('nbState');
+    const { nbState, apiHost } = await chrome.storage.sync.get(['nbState', 'apiHost']);
     if (nbState) {
       this.state = { ...this.state, ...nbState };
+    }
+    if (apiHost) {
+      this.apiHost = apiHost;
     }
   }
 
   async saveState() {
-    await chrome.storage.sync.set({ nbState: this.state });
+    await chrome.storage.sync.set({ nbState: this.state, apiHost: this.apiHost });
+  }
+
+  setupServerConfig() {
+    const input = document.getElementById('api-server-input');
+    const saveBtn = document.getElementById('btn-save-server');
+    if (input) {
+      input.value = this.apiHost;
+    }
+    saveBtn?.addEventListener('click', async () => {
+      const val = input.value.trim().replace(/\/$/, '');
+      if (val) {
+        this.apiHost = val;
+        await this.saveState();
+        alert(`API server URL updated to: ${this.apiHost}`);
+      }
+    });
   }
 
   setupNavigationTabs() {
@@ -109,8 +132,13 @@ class NeuroBridgePopup {
       });
     });
 
+    // AI Summarize Page button
+    document.getElementById('btn-summarize-page')?.addEventListener('click', async () => {
+      await this.sendActionToTab('summarizePage');
+    });
+
     document.getElementById('btn-open-sanctuary')?.addEventListener('click', () => {
-      chrome.tabs.create({ url: 'http://localhost:3000' });
+      chrome.tabs.create({ url: `${this.apiHost.includes('localhost') ? 'http://localhost:3000' : this.apiHost}` });
     });
   }
 
@@ -128,6 +156,16 @@ class NeuroBridgePopup {
       document.querySelectorAll('.nb-theme-dot').forEach(d => d.classList.remove('active'));
       activeThemeDot.classList.add('active');
     }
+
+    // Reflect active tool buttons
+    ['bionic', 'focus', 'eye', 'scroll'].forEach(mode => {
+      const btn = document.querySelector(`.nb-tool-btn[data-mode="${mode}"]`);
+      if (btn && this.state[mode]) btn.classList.add('active');
+    });
+    ['tts', 'highlight', 'dyslexia'].forEach(feature => {
+      const btn = document.querySelector(`.nb-tool-btn[data-feature="${feature}"]`);
+      if (btn && this.state[feature]) btn.classList.add('active');
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -174,7 +212,7 @@ class NeuroBridgePopup {
 
     document.getElementById('badge-effort').textContent = `Effort: ${data.confidenceMeter?.effortLevel || 'Low'}`;
     document.getElementById('badge-anxiety').textContent = `Anxiety: ${data.confidenceMeter?.anxietyLevel || 'Low'}`;
-    document.getElementById('badge-time').textContent = `⏱️ ${data.confidenceMeter?.estimatedTimeMinutes || 10} mins`;
+    document.getElementById('badge-time').textContent = `${data.confidenceMeter?.estimatedTimeMinutes || 10} mins`;
 
     document.getElementById('start-supportive').textContent = `"${data.supportiveMessage}"`;
     document.getElementById('start-question').textContent = data.clarifyingQuestion;
@@ -233,14 +271,14 @@ class NeuroBridgePopup {
     const rootEl = document.createElement('div');
     rootEl.style.fontWeight = '700';
     rootEl.style.marginBottom = '8px';
-    rootEl.textContent = `📍 Root: ${data.mindMap?.rootNode || 'Material'}`;
+    rootEl.textContent = `Root: ${data.mindMap?.rootNode || 'Material'}`;
     mindmapContainer.appendChild(rootEl);
 
     (data.mindMap?.branches || []).forEach(b => {
       const branchDiv = document.createElement('div');
       branchDiv.style.marginLeft = '12px';
       branchDiv.style.marginBottom = '6px';
-      branchDiv.innerHTML = `<strong>🔹 ${b.topic}</strong>`;
+      branchDiv.innerHTML = `<strong>${b.topic}</strong>`;
       const ul = document.createElement('ul');
       b.details.forEach(d => {
         const li = document.createElement('li');
@@ -323,7 +361,7 @@ class NeuroBridgePopup {
 
     const data = await this.callApi('/api/practice', { topic });
     document.getElementById('practice-partner-line').textContent = data.openingLine;
-    document.getElementById('practice-tip').textContent = `💡 Coaching Tip: ${data.coachingTip}`;
+    document.getElementById('practice-tip').textContent = `Coaching Tip: ${data.coachingTip}`;
 
     const optionsContainer = document.getElementById('practice-options');
     optionsContainer.replaceChildren();
@@ -386,7 +424,7 @@ class NeuroBridgePopup {
       const div = document.createElement('div');
       div.className = 'nb-action-highlight';
       div.style.marginBottom = '8px';
-      div.innerHTML = `<strong>Step ${s.stepNumber}: ${s.title}</strong><p>${s.actionRequired}</p><small>💡 ${s.tip}</small>`;
+      div.innerHTML = `<strong>Step ${s.stepNumber}: ${s.title}</strong><p>${s.actionRequired}</p><small>Tip: ${s.tip}</small>`;
       container.appendChild(div);
     });
 
@@ -409,7 +447,7 @@ class NeuroBridgePopup {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = res.filename || `neurobridge-${mode}.md`;
+      a.download = res.filename || `neuroread-${mode}.md`;
       a.click();
     }
   }
@@ -449,7 +487,7 @@ class NeuroBridgePopup {
 
   showLoading(element, message) {
     element.style.display = 'block';
-    element.innerHTML = `<div style="padding: 12px; color: var(--nb-muted); font-style: italic;">⏱️ ${message}</div>`;
+    element.innerHTML = `<div style="padding: 12px; color: var(--nb-muted); font-style: italic;">Processing: ${message}</div>`;
   }
 
   async sendActionToTab(action, payload = {}) {

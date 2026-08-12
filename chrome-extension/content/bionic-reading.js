@@ -13,7 +13,7 @@ class BionicReading {
     if (this.isEnabled) return;
     this.isEnabled = true;
     
-    console.log('🔤 Bionic Reading enabled');
+    console.log('[BionicReading] Enabled');
     
     // Process existing content
     this.processDocument();
@@ -29,7 +29,7 @@ class BionicReading {
     if (!this.isEnabled) return;
     this.isEnabled = false;
     
-    console.log('🔤 Bionic Reading disabled');
+    console.log('[BionicReading] Disabled');
     
     // Disconnect observer
     if (this.observer) {

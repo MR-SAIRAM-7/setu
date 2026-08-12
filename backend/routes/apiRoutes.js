@@ -13,6 +13,8 @@ const {
   handleWriteMode,
   handleGuideMode,
   handleAgentNavigate,
+  handleAgentPlan,
+  handleExplain,
   handleExport
 } = require('../controllers/modeControllers');
 
@@ -41,6 +43,8 @@ router.post('/practice', validateInputMiddleware('topic', 1000), handlePracticeM
 router.post('/write', validateInputMiddleware('text', config.maxTextLength), handleWriteMode);
 router.post('/guide', validateInputMiddleware('goal', 1000), handleGuideMode);
 router.post('/agent/navigate', validateInputMiddleware('task', 1000), handleAgentNavigate);
+router.post('/agent/plan', handleAgentPlan);
+router.post('/explain', handleExplain);
 
 // Export & Summarize
 router.post('/export', handleExport);

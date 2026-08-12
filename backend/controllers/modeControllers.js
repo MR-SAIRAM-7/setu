@@ -14,7 +14,7 @@ async function handleStartMode(req, res, next) {
     let result;
     let fallback = false;
 
-    if (config.openAiApiKey) {
+    if (config.openAiApiKey || config.geminiApiKey) {
       try {
         result = await requestStructuredAI({
           name: 'neurobridge_start',
@@ -42,7 +42,7 @@ async function handleSimplifyMode(req, res, next) {
     let result;
     let fallback = false;
 
-    if (config.openAiApiKey) {
+    if (config.openAiApiKey || config.geminiApiKey) {
       try {
         result = await requestStructuredAI({
           name: 'neurobridge_simplify',
@@ -70,7 +70,7 @@ async function handleLearnMode(req, res, next) {
     let result;
     let fallback = false;
 
-    if (config.openAiApiKey) {
+    if (config.openAiApiKey || config.geminiApiKey) {
       try {
         result = await requestStructuredAI({
           name: 'neurobridge_learn',
@@ -98,7 +98,7 @@ async function handleMeetMode(req, res, next) {
     let result;
     let fallback = false;
 
-    if (config.openAiApiKey) {
+    if (config.openAiApiKey || config.geminiApiKey) {
       try {
         result = await requestStructuredAI({
           name: 'neurobridge_meet',
@@ -127,7 +127,7 @@ async function handlePracticeMode(req, res, next) {
     let result;
     let fallback = false;
 
-    if (config.openAiApiKey) {
+    if (config.openAiApiKey || config.geminiApiKey) {
       try {
         result = await requestStructuredAI({
           name: 'neurobridge_practice',
@@ -155,7 +155,7 @@ async function handleWriteMode(req, res, next) {
     let result;
     let fallback = false;
 
-    if (config.openAiApiKey) {
+    if (config.openAiApiKey || config.geminiApiKey) {
       try {
         result = await requestStructuredAI({
           name: 'neurobridge_write',
@@ -183,7 +183,7 @@ async function handleGuideMode(req, res, next) {
     let result;
     let fallback = false;
 
-    if (config.openAiApiKey) {
+    if (config.openAiApiKey || config.geminiApiKey) {
       try {
         result = await requestStructuredAI({
           name: 'neurobridge_guide',
@@ -367,7 +367,7 @@ async function handleAgentNavigate(req, res, next) {
     let result;
     let fallback = false;
 
-    if (config.openAiApiKey) {
+    if (config.openAiApiKey || config.geminiApiKey) {
       try {
         result = await requestStructuredAI({
           name: 'neurobridge_agent_navigate',
@@ -404,7 +404,8 @@ const agentNavigateSchema = {
           instruction: { type: 'string' },
           targetSelector: { type: 'string' },
           targetText: { type: 'string' },
-          actionType: { type: 'string', enum: ['click', 'fill', 'view', 'navigate'] },
+          actionType: { type: 'string', enum: ['click', 'fill', 'view', 'navigate', 'scroll', 'select', 'summarize', 'extract', 'wait'] },
+          valueToFill: { type: 'string' },
           tip: { type: 'string' }
         },
         required: ['stepNumber', 'instruction', 'targetSelector', 'targetText', 'actionType', 'tip']
@@ -413,6 +414,29 @@ const agentNavigateSchema = {
   },
   required: ['goal', 'totalSteps', 'currentStepIndex', 'supportiveMessage', 'steps']
 };
+
+async function handleAgentPlan(req, res, next) {
+  try {
+    const command = req.body.command || '';
+    const context = req.body.context || {};
+    const navPlan = fallbacks.generateLocalNavigationPlan(command, context);
+    res.json({
+      plan: {
+        intent: 'task_path',
+        message: `I created a task path for "${command}".`,
+        steps: navPlan.steps
+      }
+    });
+  } catch (error) { next(error); }
+}
+
+async function handleExplain(req, res, next) {
+  try {
+    const text = req.body.text || '';
+    const explanation = fallbacks.generateLocalSimplifyMode(text).plainLanguageRewrite || text;
+    res.json({ explanation });
+  } catch (error) { next(error); }
+}
 
 module.exports = {
   handleStartMode,
@@ -423,5 +447,7 @@ module.exports = {
   handleWriteMode,
   handleGuideMode,
   handleAgentNavigate,
+  handleAgentPlan,
+  handleExplain,
   handleExport
 };

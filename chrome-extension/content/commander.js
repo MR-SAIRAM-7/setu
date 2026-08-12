@@ -26,7 +26,7 @@ class SetuCommander {
       <p class="setu-muted">Try “simplify this page”, “find checkout”, “fill my contact details”, or “explain the selected text”.</p>
       <div class="setu-command-row">
         <input class="setu-command-input" type="text" autocomplete="off" placeholder="Type a command…" aria-label="Command">
-        <button class="setu-mic" type="button" aria-label="Speak a command">🎙</button>
+        <button class="setu-mic" type="button" aria-label="Speak a command"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg></button>
       </div>
       <div class="setu-command-options">
         <label>Explain in <select class="setu-language"><option value="en">English</option><option value="hi">Hindi</option><option value="ta">Tamil</option><option value="te">Telugu</option><option value="bn">Bengali</option></select></label>
@@ -100,7 +100,9 @@ class SetuCommander {
 
   async requestAgentPlan(command) {
     try {
-      const response = await fetch('http://localhost:3000/api/agent/plan', {
+      const storage = await chrome.storage?.sync?.get('apiHost');
+      const apiHost = storage?.apiHost || 'http://localhost:3000';
+      const response = await fetch(`${apiHost}/api/agent/plan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ command, context: this.pageContext() })
@@ -322,7 +324,9 @@ class SetuCommander {
     this.setResult('Making that clearer…');
     let explanation;
     try {
-      const response = await fetch('http://localhost:3000/api/explain', {
+      const storage = await chrome.storage?.sync?.get('apiHost');
+      const apiHost = storage?.apiHost || 'http://localhost:3000';
+      const response = await fetch(`${apiHost}/api/explain`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, language: this.language })
       });

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Edit3 } from 'lucide-react';
 import { callModeApi } from '../../services/apiService';
 
 const WriteModePane = () => {
@@ -16,7 +17,7 @@ const WriteModePane = () => {
 
   return (
     <div className="mode-pane">
-      <h2>✍️ Write Mode: Accessible Authoring Assistant</h2>
+      <h2><Edit3 size={22} style={{ display: 'inline', marginRight: 8 }} /> Write Mode: Accessible Authoring Assistant</h2>
       <p className="pane-desc">Checks draft text for passive voice, sentence complexity, and readability.</p>
 
       <textarea 
@@ -26,7 +27,8 @@ const WriteModePane = () => {
         onChange={(e) => setDraft(e.target.value)}
       />
       <button className="nb-action-btn primary" onClick={handleRun} disabled={loading}>
-        {loading ? 'Analyzing...' : '✍️ Check Readability'}
+        <Edit3 size={16} style={{ display: 'inline', marginRight: 6 }} />
+        {loading ? 'Analyzing...' : 'Check Readability'}
       </button>
 
       {result && (

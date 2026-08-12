@@ -62,7 +62,7 @@ class DyslexiaTheme {
     if (this.isEnabled) return;
     this.isEnabled = true;
     
-    console.log('🔤 Dyslexia Theme enabled');
+    console.log('[DyslexiaTheme] Enabled');
     
     // Load OpenDyslexic font
     this.loadDyslexicFont();
@@ -77,7 +77,7 @@ class DyslexiaTheme {
     if (!this.isEnabled) return;
     this.isEnabled = false;
     
-    console.log('🔤 Dyslexia Theme disabled');
+    console.log('[DyslexiaTheme] Disabled');
     
     this.removeStyles();
     document.body.classList.remove('setu-dyslexia-active');

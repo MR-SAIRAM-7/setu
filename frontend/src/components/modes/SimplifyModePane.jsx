@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Download } from 'lucide-react';
+import { Sparkles, CheckCircle2, Download } from 'lucide-react';
 import { callModeApi, exportArtifactMarkdown } from '../../services/apiService';
 
 const SimplifyModePane = () => {
@@ -17,7 +17,7 @@ const SimplifyModePane = () => {
 
   return (
     <div className="mode-pane">
-      <h2>✨ Simplify Mode: Plain Language & Clutter Reduction</h2>
+      <h2><Sparkles size={22} style={{ display: 'inline', marginRight: 8 }} /> Simplify Mode: Plain Language &amp; Clutter Reduction</h2>
       <p className="pane-desc">Converts complex text, dense notices, or convoluted web pages into Grade 6.0 plain language.</p>
 
       <textarea 
@@ -27,7 +27,8 @@ const SimplifyModePane = () => {
         onChange={(e) => setText(e.target.value)}
       />
       <button className="nb-action-btn primary" onClick={handleRun} disabled={loading}>
-        {loading ? 'Simplifying...' : '✨ Transform Text'}
+        <Sparkles size={16} style={{ display: 'inline', marginRight: 6 }} />
+        {loading ? 'Simplifying...' : 'Transform Text'}
       </button>
 
       {result && (
@@ -48,7 +49,7 @@ const SimplifyModePane = () => {
             <h3>Key Takeaways:</h3>
             <ul>
               {(result.keyTakeaways || []).map((point, idx) => (
-                <li key={idx}>🔹 {point}</li>
+                <li key={idx}><CheckCircle2 size={16} color="#2563eb" style={{ display: 'inline', marginRight: 6 }} /> {point}</li>
               ))}
             </ul>
           </div>

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { MessageSquare, Lightbulb } from 'lucide-react';
 import { callModeApi } from '../../services/apiService';
 
 const PracticeModePane = () => {
@@ -16,7 +17,7 @@ const PracticeModePane = () => {
 
   return (
     <div className="mode-pane">
-      <h2>💬 Practice Mode: Social Scripting Rehearsal</h2>
+      <h2><MessageSquare size={22} style={{ display: 'inline', marginRight: 8 }} /> Practice Mode: Social Scripting Rehearsal</h2>
       <p className="pane-desc">Rehearse challenging conversations, interviews, or phone calls with adaptive dialogue choices.</p>
 
       <input 
@@ -27,7 +28,8 @@ const PracticeModePane = () => {
         onChange={(e) => setTopic(e.target.value)}
       />
       <button className="nb-action-btn primary" onClick={handleRun} disabled={loading}>
-        {loading ? 'Setting up rehearsal...' : '💬 Start Rehearsal'}
+        <MessageSquare size={16} style={{ display: 'inline', marginRight: 6 }} />
+        {loading ? 'Setting up rehearsal...' : 'Start Rehearsal'}
       </button>
 
       {result && (
@@ -47,7 +49,8 @@ const PracticeModePane = () => {
           </div>
 
           <div className="coaching-banner">
-            💡 <strong>Coaching Tip:</strong> {result.coachingTip}
+            <Lightbulb size={16} style={{ display: 'inline', marginRight: 6 }} />
+            <strong>Coaching Tip:</strong> {result.coachingTip}
           </div>
         </div>
       )}

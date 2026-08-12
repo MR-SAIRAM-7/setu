@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { HelpCircle, Clock, CheckCircle2, Download } from 'lucide-react';
+import { Rocket, Zap, Target, Clock, HelpCircle, CheckCircle2, Download } from 'lucide-react';
 import { callModeApi, exportArtifactMarkdown } from '../../services/apiService';
 
 const StartModePane = () => {
@@ -18,13 +18,13 @@ const StartModePane = () => {
   return (
     <div className="mode-pane">
       <div className="pane-header-box">
-        <h2>🚀 Start Mode: Wall of Awful Copilot</h2>
+        <h2><Rocket size={22} style={{ display: 'inline', marginRight: 8 }} /> Start Mode: Wall of Awful Copilot</h2>
         <button className="autopilot-pulse-btn" onClick={() => handleRun(true)}>
-          ⚡ I am stuck! (Autopilot)
+          <Zap size={14} style={{ display: 'inline', marginRight: 4 }} /> I am stuck! (Autopilot)
         </button>
       </div>
       <p className="pane-desc">
-        When a daunting task freezes your initiation capacity, NeuroBridge One breaks it down into one 10-minute action and tiny micro-steps.
+        When a daunting task freezes your initiation capacity, NeuroRead breaks it down into one 10-minute action and tiny micro-steps.
       </p>
 
       <div className="input-group">
@@ -43,7 +43,7 @@ const StartModePane = () => {
       {result && (
         <div className="artifact-card fade-in">
           <div className="card-top-bar">
-            <h3>🎯 Starting Action Plan</h3>
+            <h3><Target size={18} style={{ display: 'inline', marginRight: 6 }} /> Starting Action Plan</h3>
             <button className="export-link-btn" onClick={() => exportArtifactMarkdown('start', result)}>
               <Download size={16} /> Export Markdown
             </button>
@@ -52,7 +52,10 @@ const StartModePane = () => {
           <div className="confidence-meter-row">
             <span className="meter-badge effort">Effort: {result.confidenceMeter?.effortLevel}</span>
             <span className="meter-badge anxiety">Anxiety: {result.confidenceMeter?.anxietyLevel}</span>
-            <span className="meter-badge time">⏱️ {result.confidenceMeter?.estimatedTimeMinutes} Minutes</span>
+            <span className="meter-badge time">
+              <Clock size={12} style={{ display: 'inline', marginRight: 4 }} />
+              {result.confidenceMeter?.estimatedTimeMinutes} Minutes
+            </span>
           </div>
 
           <blockquote className="supportive-quote">
@@ -74,7 +77,7 @@ const StartModePane = () => {
             </div>
             <p className="ten-min-text">{result.immediateTenMinuteAction}</p>
             <button className="start-timer-btn" onClick={() => alert("10-minute timer started! Take it step by step.")}>
-              ⏱️ Launch 10-Min Focus Session
+              <Clock size={14} style={{ display: 'inline', marginRight: 4 }} /> Launch 10-Min Focus Session
             </button>
           </div>
 

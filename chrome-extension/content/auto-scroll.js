@@ -29,7 +29,7 @@ class AutoScroll {
     if (this.isEnabled) return;
     this.isEnabled = true;
     
-    console.log('📜 Auto Scroll enabled');
+    console.log('[AutoScroll] Enabled');
     
     this.readingStartTime = Date.now();
     this.analyzeContent();
@@ -44,7 +44,7 @@ class AutoScroll {
     if (!this.isEnabled) return;
     this.isEnabled = false;
     
-    console.log('📜 Auto Scroll disabled');
+    console.log('[AutoScroll] Disabled');
     
     this.stopScrolling();
     this.removeControls();
@@ -82,18 +82,18 @@ class AutoScroll {
     this.controlsOverlay.innerHTML = `
       <div class="scroll-controls-panel">
         <button class="scroll-btn scroll-pause" title="Pause/Play (Space)">
-          <span class="pause-icon">⏸</span>
-          <span class="play-icon" style="display: none;">▶</span>
+          <span class="pause-icon">&#10074;&#10074;</span>
+          <span class="play-icon" style="display: none;">&#9654;</span>
         </button>
         <div class="scroll-speed-control">
-          <button class="scroll-btn scroll-slower" title="Slower">−</button>
+          <button class="scroll-btn scroll-slower" title="Slower">&minus;</button>
           <div class="speed-display">
             <span class="speed-value">200</span>
             <span class="speed-unit">WPM</span>
           </div>
           <button class="scroll-btn scroll-faster" title="Faster">+</button>
         </div>
-        <button class="scroll-btn scroll-stop" title="Stop Auto Scroll">✕</button>
+        <button class="scroll-btn scroll-stop" title="Stop Auto Scroll">&times;</button>
       </div>
       <div class="scroll-progress-bar">
         <div class="scroll-progress-fill"></div>

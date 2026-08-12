@@ -1,13 +1,22 @@
 /**
  * Extension API Client Module
- * Decouples extension HTTP requests from UI rendering logic.
+ * Decouples extension HTTP requests from UI rendering logic and dynamically handles API Host.
  */
 
-const API_HOST = 'http://localhost:3000';
+async function getApiHost() {
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync) {
+      const { apiHost } = await chrome.storage.sync.get('apiHost');
+      if (apiHost) return apiHost;
+    }
+  } catch (_) {}
+  return 'http://localhost:3000';
+}
 
 export async function postApi(endpoint, body) {
+  const apiHost = await getApiHost();
   try {
-    const response = await fetch(`${API_HOST}${endpoint}`, {
+    const response = await fetch(`${apiHost}${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)

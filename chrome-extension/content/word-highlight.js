@@ -23,7 +23,7 @@ class WordHighlight {
     if (this.isEnabled) return;
     this.isEnabled = true;
     
-    console.log('✨ Word Highlight enabled');
+    console.log('[WordHighlight] Enabled');
     
     this.createHighlight();
     this.setupEventListeners();
@@ -36,7 +36,7 @@ class WordHighlight {
     if (!this.isEnabled) return;
     this.isEnabled = false;
     
-    console.log('✨ Word Highlight disabled');
+    console.log('[WordHighlight] Disabled');
     
     this.stopFollowing();
     this.removeEventListeners();

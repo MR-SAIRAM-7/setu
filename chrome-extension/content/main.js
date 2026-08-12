@@ -15,7 +15,8 @@ class Setu {
       chunking: null,
       commander: null,
       visual: null,
-      sanctuary: null
+      sanctuary: null,
+      lineFocus: null
     };
     this.state = {
       bionic: false,
@@ -27,6 +28,7 @@ class Setu {
       dyslexia: false,
       breathe: false,
       chunking: false,
+      lineFocus: false,
       theme: 'default'
     };
     this.isInitialized = false;
@@ -36,7 +38,7 @@ class Setu {
   async init() {
     if (this.isInitialized) return;
     
-    console.log('🧠 SETU initializing...');
+    console.log('[NeuroRead] Initializing...');
     
     // Initialize feature modules
     this.features.bionic = new BionicReading();
@@ -51,6 +53,7 @@ class Setu {
     this.features.commander = new SetuCommander();
     this.features.visual = new VisualBreakdown();
     this.features.sanctuary = new SanctuaryBridge();
+    this.features.lineFocus = new LineFocus();
 
     // Load saved state
     await this.loadState();
@@ -65,7 +68,7 @@ class Setu {
     this.injectContainer();
     
     this.isInitialized = true;
-    console.log('✅ SETU initialized successfully');
+    console.log('[NeuroRead] Initialized successfully');
   }
 
   async loadState() {
@@ -188,6 +191,10 @@ class Setu {
             e.preventDefault();
             this.toggleFeature('tts', !this.state.tts);
             break;
+          case 'l':
+            e.preventDefault();
+            this.toggleMode('lineFocus', !this.state.lineFocus);
+            break;
         }
       }
     });
@@ -204,27 +211,29 @@ class Setu {
 
   toggleMode(mode, enabled) {
     if (this.features[mode]) {
-      this.state[mode] = enabled;
-      if (enabled) {
+      const targetState = (typeof enabled === 'boolean') ? enabled : !this.state[mode];
+      this.state[mode] = targetState;
+      if (targetState) {
         this.features[mode].enable();
       } else {
         this.features[mode].disable();
       }
       this.saveState();
-      this.showToast(`${mode.charAt(0).toUpperCase() + mode.slice(1)} Mode ${enabled ? 'enabled' : 'disabled'}`);
+      this.showToast(`${mode.charAt(0).toUpperCase() + mode.slice(1)} Mode ${targetState ? 'enabled' : 'disabled'}`);
     }
   }
 
   toggleFeature(feature, enabled) {
     if (this.features[feature]) {
-      this.state[feature] = enabled;
-      if (enabled) {
+      const targetState = (typeof enabled === 'boolean') ? enabled : !this.state[feature];
+      this.state[feature] = targetState;
+      if (targetState) {
         this.features[feature].enable();
       } else {
         this.features[feature].disable();
       }
       this.saveState();
-      this.showToast(`${feature.charAt(0).toUpperCase() + feature.slice(1)} ${enabled ? 'enabled' : 'disabled'}`);
+      this.showToast(`${feature.charAt(0).toUpperCase() + feature.slice(1)} ${targetState ? 'enabled' : 'disabled'}`);
     }
   }
 

@@ -1,12 +1,18 @@
 /**
- * Decoupled API Service Layer for NeuroBridge Frontend
+ * Decoupled Dynamic API Service Layer for NeuroRead Frontend
  */
 
-const API_BASE = 'http://localhost:3000';
+function getApiBase() {
+  if (typeof window !== 'undefined') {
+    return process.env.REACT_APP_API_URL || localStorage.getItem('neuroread_api_url') || 'http://localhost:3000';
+  }
+  return process.env.REACT_APP_API_URL || 'http://localhost:3000';
+}
 
 export async function callModeApi(endpoint, payload) {
+  const apiBase = getApiBase();
   try {
-    const res = await fetch(`${API_BASE}${endpoint}`, {
+    const res = await fetch(`${apiBase}${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -22,8 +28,9 @@ export async function callModeApi(endpoint, payload) {
 }
 
 export async function exportArtifactMarkdown(mode, data) {
+  const apiBase = getApiBase();
   try {
-    const res = await fetch(`${API_BASE}/api/export`, {
+    const res = await fetch(`${apiBase}/api/export`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode, data })
@@ -34,7 +41,7 @@ export async function exportArtifactMarkdown(mode, data) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = result.filename || `neurobridge-${mode}.md`;
+      a.download = result.filename || `neuroread-${mode}.md`;
       a.click();
     }
   } catch (err) {

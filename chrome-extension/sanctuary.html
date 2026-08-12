@@ -3,33 +3,40 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SETU Sanctuary</title>
+  <title>NeuroRead Sanctuary</title>
   <link rel="stylesheet" href="sanctuary.css">
 </head>
 <body>
   <div class="sanctuary-shell">
     <aside class="library-panel">
-      <a class="brand" href="#top" aria-label="SETU Sanctuary home"><span>⌁</span><div><strong>SETU</strong><small>Sanctuary</small></div></a>
+      <a class="brand" href="#top" aria-label="NeuroRead Sanctuary home">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 5.562 5.56 3 3 0 0 0 5.857.042A4 4 0 0 0 20.5 10.89a4 4 0 0 0-2.503-5.765A3 3 0 0 0 12 5z"/><path d="M12 5v14"/></svg>
+        <div><strong>NeuroRead</strong><small>Sanctuary</small></div>
+      </a>
       <label class="search-label" for="memory-search">Remember something?</label>
-      <div class="search-box"><input id="memory-search" type="search" placeholder="What was I learning yesterday?"><button id="search-button" aria-label="Search memory">⌕</button></div>
+      <div class="search-box">
+        <input id="memory-search" type="search" placeholder="What was I learning yesterday?">
+        <button id="search-button" aria-label="Search memory">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        </button>
+      </div>
       <p class="search-hint">Search stays on this device.</p>
       <div id="search-results" class="search-results" hidden></div>
       <div class="library-heading"><h2>Your materials</h2><span id="material-count">0</span></div>
       <nav id="document-list" class="document-list" aria-label="Saved materials"></nav>
       <label class="import-button" for="file-import">+ Import a text file<input id="file-import" type="file" accept=".txt,.md,.html,.htm,text/plain,text/markdown,text/html" hidden></label>
-      <p class="import-hint">For PDFs, open the document in Chrome and use SETU Lens on its readable page.</p>
+      <p class="import-hint">For PDFs, open the document in Chrome and use NeuroRead on its readable page.</p>
     </aside>
 
     <main id="top" class="workspace">
       <header class="workspace-header">
-        <div><p class="eyebrow">A calm place for deep work</p><h1 id="document-title">Welcome to SETU Sanctuary</h1><p id="document-meta" class="document-meta">Save any supported web page from SETU Lens to begin.</p></div>
+        <div><p class="eyebrow">A calm place for deep work</p><h1 id="document-title">Welcome to NeuroRead Sanctuary</h1><p id="document-meta" class="document-meta">Save any supported web page from NeuroRead to begin.</p></div>
         <div class="header-actions"><button id="open-source" class="secondary" disabled>Open source</button><button id="remove-document" class="danger" disabled>Remove</button></div>
       </header>
 
       <section id="empty-state" class="empty-state">
-        <span aria-hidden="true">⌁</span>
         <h2>Your next clear step can start here.</h2>
-        <p>Use <strong>Save this page as a map &amp; flashcards</strong> in SETU Lens. SETU will build a local summary, a visual map, and study cards without requiring an account.</p>
+        <p>Use <strong>Save this page as a map &amp; flashcards</strong> in NeuroRead. NeuroRead will build a local summary, a visual map, and study cards without requiring an account.</p>
       </section>
 
       <div id="document-view" hidden>
@@ -42,7 +49,7 @@
         <section id="view-cards" class="view-panel" hidden>
           <div class="flashcard-toolbar"><p id="card-progress">Card 1 of 1</p><button id="flip-card" class="primary">Show answer</button></div>
           <article id="flashcard" class="flashcard" tabindex="0" role="button" aria-label="Flashcard. Press enter to flip."><p class="card-label">Prompt</p><h2></h2><p class="card-answer" hidden></p></article>
-          <div class="card-controls"><button id="previous-card" class="secondary">← Previous</button><button id="remember-card" class="primary">I remember this</button><button id="next-card" class="secondary">Next →</button></div>
+          <div class="card-controls"><button id="previous-card" class="secondary">Previous</button><button id="remember-card" class="primary">I remember this</button><button id="next-card" class="secondary">Next</button></div>
         </section>
         <section id="view-progress" class="view-panel" hidden><div id="memory-trail" class="memory-trail"></div></section>
       </div>

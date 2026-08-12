@@ -1,140 +1,86 @@
-# 🧠 SETU - Hackathon Pitch
+# NeuroRead - Hackathon Pitch & Strategy Brief
 
 ## Problem Statement
-**PS 01: NeuroInclusive Tech** - Making digital content readable for ADHD and Dyslexic minds
+**Problem Statement 01: NeuroInclusive Tech** - Making digital content readable and accessible for ADHD and Dyslexic minds.
 
 ---
 
 ## The Problem
 
 ### Current State
-- Most digital content is a **wall of text**
-- Standard fonts and dense layouts cause **reading fatigue**
-- The brain skips lines, loses its place
-- **1 in 5 people** have ADHD or Dyslexia
-- **70% of websites** have accessibility issues
+- Most digital content presents a daunting **wall of text**.
+- Standard fonts, tight line spacing, and dense layouts cause severe **reading fatigue** and visual crowding.
+- The brain skips lines, loses fixations, and faces executive dysfunction task freeze.
+- **1 in 5 people** worldwide have ADHD or Dyslexia.
+- **70% of websites** suffer from critical accessibility issues.
 
-### Real Impact
-- Students struggle with online learning materials
-- Professionals face career limitations
-- Daily information consumption becomes exhausting
-- Social exclusion from digital culture
-
----
-
-## Our Solution: SETU
-
-### A Chrome Extension That Adapts the Web to YOUR Brain
-
-**Core Features:**
-
-1. **🔤 Bionic Reading**
-   - Bold first half of words
-   - Creates visual anchor points
-   - Scientifically proven technique
-
-2. **🎯 Focus Mode**
-   - Strips away distractions
-   - Removes ads, sidebars, clutter
-   - Clean, readable layout
-
-3. **📹 Eye Tracking**
-   - Webcam-based gaze detection
-   - Hands-free auto-scroll
-   - Follows your reading pace
-
-4. **📜 Auto Scroll**
-   - Adaptive reading speed
-   - Hands-free reading
-   - Customizable WPM
-
-5. **🔊 Text to Speech**
-   - Read aloud with word highlighting
-   - Multiple voices and speeds
-   - Follow along visually
-
-6. **✨ Word Highlight**
-   - Moving highlight guides reading
-   - Never lose your place
-   - Multiple highlight modes
-
-7. **🤖 AI Summarizer**
-   - Key points in seconds
-   - OpenAI-powered
-   - Works on any article
-
-8. **🎨 Accessibility Themes**
-   - Dyslexia-friendly font
-   - High contrast mode
-   - Sepia and dark themes
+### Real-World Impact
+- Students struggle with dense online learning materials and research papers.
+- Professionals face productivity blocks and career limitations.
+- Daily information consumption becomes mentally exhausting.
+- Social exclusion from digital culture and complex online portals.
 
 ---
 
-## Why We'll Win
+## Our Solution: NeuroRead
 
-### 1. **Real Impact**
-- Solves a genuine problem affecting 1.5 billion people
-- Immediate, tangible benefits for users
-- Addresses a critical accessibility gap
+### A Unified Accessibility Platform & Chrome Extension That Adapts the Web to Your Cognitive Wiring
 
-### 2. **Technical Excellence**
-- Works on ANY website
-- No account required
-- Privacy-focused (local processing)
-- Chrome Extension Manifest V3
-- React dashboard
-- Node.js backend with AI
+**Eight Core Reading Supports:**
 
-### 3. **Innovation**
-- Eye tracking without special hardware
-- Adaptive auto-scroll based on reading patterns
-- AI-powered content summarization
-- Bionic Reading automation
+1. **Bionic Reading**
+   - Bolds the first half of words to create visual anchor points.
+   - Guides the eye through text and reduces line skipping.
 
-### 4. **Accessibility First**
-- Our own UI is fully accessible
-- Keyboard navigable
-- Screen reader compatible
-- WCAG 2.1 compliant
+2. **Focus Mode**
+   - Strips away visual distractions, ads, sidebars, and popups.
+   - Delivers a clean, customizable reading canvas.
 
-### 5. **Polished MVP**
-- Beautiful, intuitive design
-- Smooth animations
-- Professional presentation
-- Demo-ready
+3. **Eye Tracking**
+   - Webcam-based gaze detection for hands-free reading.
+   - Automatically scrolls as your eyes move down the page.
+
+4. **Auto Scroll**
+   - Adaptive reading speed scrolling with customizable Words Per Minute (WPM).
+   - Spacebar pause and keyboard speed control.
+
+5. **Text to Speech (TTS)**
+   - Natural Web Speech synthesis with real-time word highlighting.
+   - Variable voice rate and pitch control.
+
+6. **Word Highlight / Reading Line Ruler**
+   - Moving spotlight ruler guides reading line-by-line.
+   - Prevents loss of place when concentration wanders.
+
+7. **AI Summarizer**
+   - Condenses lengthy articles into concise key takeaways in seconds.
+   - Powered by dynamic AI backend endpoints.
+
+8. **Accessibility Themes**
+   - 5 curated color palettes (Default, Sepia Warmth, Dark Obsidian, High Contrast AAA, and Dyslexia-Friendly with OpenDyslexic font).
 
 ---
 
-## Demo Flow
+## Why NeuroRead Stands Out
 
-### 1. **Introduction** (30 seconds)
-- Show the problem: dense text, distractions
-- Introduce SETU
+### 1. Real Impact
+- Directly addresses a genuine problem affecting over 1.5 billion neurodivergent individuals worldwide.
+- Delivers immediate, tangible accessibility improvements across any website.
 
-### 2. **Bionic Reading** (1 minute)
-- Toggle on any webpage
-- Show text transformation
-- Explain the science
+### 2. Technical & Architectural Excellence
+- Works across all websites without requiring account registration.
+- Privacy-first local processing with deterministic L0 fallbacks.
+- Chrome Extension Manifest V3 compliant.
+- Modular React dashboard and Express backend.
 
-### 3. **Focus Mode** (1 minute)
-- Show cluttered page
-- Toggle Focus Mode
-- Show clean, readable version
+### 3. Innovation
+- Computer vision webcam eye tracking without expensive external hardware.
+- Adaptive scrolling tailored to user reading velocity.
+- Structured AI schema generation for mind maps and quizzes.
 
-### 4. **Eye Tracking** (1 minute)
-- Enable eye tracking
-- Show gaze indicator
-- Demonstrate auto-scroll
-
-### 5. **AI Summarizer** (1 minute)
-- Click summarize
-- Show key points
-- Explain backend
-
-### 6. **Dashboard** (30 seconds)
-- Show statistics
-- Show settings
-- Show the full ecosystem
+### 4. Accessibility First
+- Fully keyboard navigable (Alt+B, Alt+F, Alt+E, Alt+S, Alt+T, Alt+H, Alt+A).
+- Screen reader compatible and WCAG 2.1 AAA compliant contrast ratios.
 
 ---
 
@@ -145,7 +91,7 @@
 │                    CHROME EXTENSION                      │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │
 │  │   Popup UI  │  │   Content   │  │ Background  │     │
-│  │  (React)    │  │   Scripts   │  │   Worker    │     │
+│  │  (JS/HTML)  │  │   Scripts   │  │   Worker    │     │
 │  └─────────────┘  └─────────────┘  └─────────────┘     │
 │         │                │                │              │
 │         └────────────────┴────────────────┘              │
@@ -173,87 +119,44 @@
 │                         │                               │
 │              ┌──────────┴──────────┐                    │
 │              │      Endpoints      │                    │
-│              │ • /api/summarize    │                    │
-│              │ • /api/analyze      │                    │
-│              │ • /api/keypoints    │                    │
+│              │ • /api/start        │                    │
+│              │ • /api/simplify     │                    │
+│              │ • /api/learn        │                    │
+│              │ • /api/meet         │                    │
+│              │ • /api/practice     │                    │
+│              │ • /api/write        │                    │
+│              │ • /api/guide        │                    │
+│              │ • /api/agent/navigate│                   │
 │              └─────────────────────┘                    │
 │                         │                               │
 │              ┌──────────┴──────────┐                    │
-│              │   OpenAI API        │                    │
-│              │   GPT-3.5 Turbo     │                    │
-│              └─────────────────────┘                    │
-└─────────────────────────────────────────────────────────┘
-                           │
-                           │ Optional
-                           ▼
-┌─────────────────────────────────────────────────────────┐
-│                   REACT DASHBOARD                        │
-│              ┌─────────────────────┐                    │
-│              │   Settings UI       │                    │
-│              │   Statistics        │                    │
-│              │   User Profile      │                    │
+│              │  Gemini / OpenAI    │                    │
 │              └─────────────────────┘                    │
 └─────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Key Differentiators
+## Feature Comparison
 
-| Feature | SETU | Competitors |
+| Feature | NeuroRead | Competitors |
 |---------|-----------|-------------|
-| Bionic Reading | ✅ Built-in | ❌ Separate extension |
-| Eye Tracking | ✅ Webcam-based | ❌ Requires hardware |
-| AI Summarizer | ✅ Included | ❌ Paid service |
-| Focus Mode | ✅ One-click | ❌ Manual filtering |
-| Works Everywhere | ✅ Any website | ❌ Limited sites |
-| Privacy | ✅ Local processing | ❌ Cloud-dependent |
-| Price | ✅ Free | 💰 Paid subscriptions |
+| Bionic Reading | Built-in | Separate plugin |
+| Eye Tracking | Webcam-based | Expensive hardware required |
+| AI Summarizer & Mind Maps | Included | Paid subscription |
+| Focus Mode | One-click | Manual adblockers |
+| Works Everywhere | Any website | Restricted portals |
+| Privacy | Local-first processing | Cloud-dependent data tracking |
+| Price | Free & Open | High monthly fees |
 
 ---
 
-## Future Roadmap
+## Team & Presentation
 
-### Phase 2 (Post-Hackathon)
-- [ ] Firefox/Safari extensions
-- [ ] Mobile app
-- [ ] PDF support
-- [ ] Offline mode
-- [ ] Reading list sync
-
-### Phase 3
-- [ ] Machine learning for personalization
-- [ ] Community themes
-- [ ] Enterprise version
-- [ ] API for developers
-
----
-
-## Call to Action
-
-**Try SETU today and experience the web like never before!**
-
-> "Reading that adapts to YOUR brain"
-
----
-
-## Team
-
-Built with 💜 for Hack for Infinity - Infinity 2K26
+Built for Hack for Infinity - Infinity 2K26.
 
 **Problem Statement:** PS 01 - NeuroInclusive Tech
 
 ---
 
-## Links
-
-- 🔗 GitHub Repository
-- 🌐 Live Demo
-- 📊 Dashboard
-- 📖 Documentation
-
----
-
-**Thank you for your attention!**
-
-*Questions?*
+**Thank you for your review!**

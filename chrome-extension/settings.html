@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SETU Lens Settings</title>
+  <title>NeuroRead Settings</title>
   <style>
     * {
       margin: 0;
@@ -30,7 +30,14 @@
     }
     
     .logo {
-      font-size: 48px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 48px;
+      height: 48px;
+      background: #6366f1;
+      color: white;
+      border-radius: 12px;
       margin-bottom: 16px;
     }
     
@@ -60,6 +67,9 @@
       font-size: 18px;
       margin-bottom: 20px;
       color: #1e293b;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
     
     .setting {
@@ -83,51 +93,6 @@
     .setting-info p {
       font-size: 13px;
       color: #64748b;
-    }
-    
-    .toggle {
-      position: relative;
-      width: 50px;
-      height: 26px;
-    }
-    
-    .toggle input {
-      opacity: 0;
-      width: 0;
-      height: 0;
-    }
-    
-    .slider {
-      position: absolute;
-      cursor: pointer;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: #e2e8f0;
-      border-radius: 26px;
-      transition: 0.3s;
-    }
-    
-    .slider:before {
-      content: '';
-      position: absolute;
-      height: 22px;
-      width: 22px;
-      left: 2px;
-      bottom: 2px;
-      background: white;
-      border-radius: 50%;
-      transition: 0.3s;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-    }
-    
-    .toggle input:checked + .slider {
-      background: #6366f1;
-    }
-    
-    .toggle input:checked + .slider:before {
-      transform: translateX(24px);
     }
     
     input[type="range"] {
@@ -168,11 +133,6 @@
     input[type="text"]:focus, input[type="email"]:focus, input[type="tel"]:focus {
       border-color: #6366f1;
       outline: none;
-    }
-    
-    select:focus {
-      outline: none;
-      border-color: #6366f1;
     }
     
     .value {
@@ -259,13 +219,18 @@
 <body>
   <div class="container">
     <header>
-      <div class="logo">⌁</div>
-      <h1>SETU Lens Settings</h1>
-      <p class="tagline">Customize a calmer, more predictable web</p>
+      <div class="logo">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 5.562 5.56 3 3 0 0 0 5.857.042A4 4 0 0 0 20.5 10.89a4 4 0 0 0-2.503-5.765A3 3 0 0 0 12 5z"/><path d="M12 5v14"/></svg>
+      </div>
+      <h1>NeuroRead Settings</h1>
+      <p class="tagline">Customize an accessible, distraction-free web environment</p>
     </header>
 
     <div class="section">
-      <h2>🔤 Bionic Reading</h2>
+      <h2>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
+        Bionic Reading
+      </h2>
       <div class="setting">
         <div class="setting-info">
           <h3>Bold Intensity</h3>
@@ -279,7 +244,10 @@
     </div>
 
     <div class="section">
-      <h2>📜 Auto Scroll</h2>
+      <h2>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 17l-5 5-5-5M17 7l-5-5-5 5"/></svg>
+        Auto Scroll
+      </h2>
       <div class="setting">
         <div class="setting-info">
           <h3>Scroll Speed</h3>
@@ -293,7 +261,10 @@
     </div>
 
     <div class="section">
-      <h2>🔊 Text to Speech</h2>
+      <h2>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+        Text to Speech
+      </h2>
       <div class="setting">
         <div class="setting-info">
           <h3>Speech Rate</h3>
@@ -307,19 +278,28 @@
     </div>
 
     <div class="section">
-      <h2>🎙 SETU Commander profile</h2>
-      <p style="font-size: 13px; color: #64748b; margin: -6px 0 8px;">Optional non-sensitive details. Commander only fills them after you review and confirm. Never add passwords, payment details, or identity numbers.</p>
+      <h2>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/></svg>
+        API &amp; Profile Settings
+      </h2>
+      <div class="setting">
+        <div class="setting-info">
+          <h3>Backend API Server URL</h3>
+          <p>Dynamic engine endpoint</p>
+        </div>
+        <input id="api-server-url" type="text" value="http://localhost:3000">
+      </div>
       <div class="setting"><div class="setting-info"><h3>First name</h3></div><input id="profile-first-name" type="text" autocomplete="given-name"></div>
       <div class="setting"><div class="setting-info"><h3>Last name</h3></div><input id="profile-last-name" type="text" autocomplete="family-name"></div>
       <div class="setting"><div class="setting-info"><h3>Email</h3></div><input id="profile-email" type="email" autocomplete="email"></div>
       <div class="setting"><div class="setting-info"><h3>Phone</h3></div><input id="profile-phone" type="tel" autocomplete="tel"></div>
-      <div class="setting"><div class="setting-info"><h3>Address</h3></div><input id="profile-address" type="text" autocomplete="street-address"></div>
-      <div class="setting"><div class="setting-info"><h3>City</h3></div><input id="profile-city" type="text" autocomplete="address-level2"></div>
-      <div class="setting"><div class="setting-info"><h3>Postal code</h3></div><input id="profile-postal-code" type="text" autocomplete="postal-code"></div>
     </div>
 
     <div class="section">
-      <h2>🎨 Appearance</h2>
+      <h2>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 1 0 10 10"/></svg>
+        Appearance &amp; Themes
+      </h2>
       <div class="setting">
         <div class="setting-info">
           <h3>Default Theme</h3>
@@ -329,14 +309,17 @@
           <option value="default">Default</option>
           <option value="sepia">Sepia</option>
           <option value="dark">Dark</option>
-          <option value="high-contrast">High Contrast</option>
-          <option value="dyslexia">Dyslexia-Friendly</option>
+          <option value="high-contrast">High Contrast AAA</option>
+          <option value="dyslexia">OpenDyslexic Font</option>
         </select>
       </div>
     </div>
 
     <div class="section">
-      <h2>⌨️ Keyboard Shortcuts</h2>
+      <h2>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/></svg>
+        Keyboard Shortcuts
+      </h2>
       <div class="keyboard-shortcuts">
         <div class="shortcut">
           <span>Toggle Bionic Reading</span>
@@ -371,13 +354,12 @@
     </div>
 
     <footer>
-      <p>SETU Lens v2.0.0 • Local-first cognitive accessibility</p>
+      <p>NeuroRead Suite v2.5.0 • Enterprise Cognitive Accessibility</p>
     </footer>
   </div>
 
   <script>
-    // Load saved settings
-    chrome.storage.sync.get(['settings', 'setuProfile'], (result) => {
+    chrome.storage.sync.get(['settings', 'setuProfile', 'apiHost'], (result) => {
       if (result.settings) {
         const s = result.settings;
         document.getElementById('bionic-intensity').value = s.bionic?.intensity || 0.5;
@@ -386,17 +368,16 @@
         document.getElementById('theme-select').value = s.theme?.defaultTheme || 'default';
         updateValues();
       }
+      if (result.apiHost) {
+        document.getElementById('api-server-url').value = result.apiHost;
+      }
       const profile = result.setuProfile || {};
       document.getElementById('profile-first-name').value = profile.firstName || '';
       document.getElementById('profile-last-name').value = profile.lastName || '';
       document.getElementById('profile-email').value = profile.email || '';
       document.getElementById('profile-phone').value = profile.phone || '';
-      document.getElementById('profile-address').value = profile.address || '';
-      document.getElementById('profile-city').value = profile.city || '';
-      document.getElementById('profile-postal-code').value = profile.postalCode || '';
     });
 
-    // Update value displays
     function updateValues() {
       document.getElementById('bionic-value').textContent = 
         Math.round(document.getElementById('bionic-intensity').value * 100) + '%';
@@ -406,7 +387,6 @@
         document.getElementById('tts-rate').value + 'x';
     }
 
-    // Add listeners
     document.getElementById('bionic-intensity').addEventListener('input', updateValues);
     document.getElementById('scroll-speed').addEventListener('input', updateValues);
     document.getElementById('tts-rate').addEventListener('input', updateValues);
@@ -418,17 +398,15 @@
         tts: { rate: parseFloat(document.getElementById('tts-rate').value) },
         theme: { defaultTheme: document.getElementById('theme-select').value }
       };
+      const apiHost = document.getElementById('api-server-url').value.trim();
       const setuProfile = {
         firstName: document.getElementById('profile-first-name').value.trim(),
         lastName: document.getElementById('profile-last-name').value.trim(),
         email: document.getElementById('profile-email').value.trim(),
-        phone: document.getElementById('profile-phone').value.trim(),
-        address: document.getElementById('profile-address').value.trim(),
-        city: document.getElementById('profile-city').value.trim(),
-        postalCode: document.getElementById('profile-postal-code').value.trim()
+        phone: document.getElementById('profile-phone').value.trim()
       };
 
-      chrome.storage.sync.set({ settings, setuProfile }, () => {
+      chrome.storage.sync.set({ settings, setuProfile, apiHost }, () => {
         alert('Settings saved!');
       });
     }
@@ -438,6 +416,7 @@
       document.getElementById('scroll-speed').value = 200;
       document.getElementById('tts-rate').value = 1;
       document.getElementById('theme-select').value = 'default';
+      document.getElementById('api-server-url').value = 'http://localhost:3000';
       updateValues();
     }
   </script>

@@ -14,7 +14,7 @@ class FocusMode {
     if (this.isEnabled) return;
     this.isEnabled = true;
     
-    console.log('🎯 Focus Mode enabled');
+    console.log('[FocusMode] Enabled');
     
     // Save scroll position
     this.scrollPosition = window.scrollY;
@@ -37,7 +37,7 @@ class FocusMode {
     if (!this.isEnabled) return;
     this.isEnabled = false;
     
-    console.log('🎯 Focus Mode disabled');
+    console.log('[FocusMode] Disabled');
     
     // Remove focus overlay
     if (this.focusOverlay) {
@@ -104,7 +104,7 @@ class FocusMode {
     this.focusOverlay.innerHTML = `
       <div class="setu-focus-header">
         <button class="setu-focus-close" title="Close Focus Mode (Esc)">
-          <span>✕</span>
+          <span>&times;</span>
         </button>
         <div class="setu-focus-controls">
           <button class="setu-focus-btn" data-action="decrease-font" title="Decrease Font Size">
@@ -114,10 +114,10 @@ class FocusMode {
             <span>A+</span>
           </button>
           <button class="setu-focus-btn" data-action="toggle-theme" title="Toggle Theme">
-            <span>🎨</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 1 0 10 10"/></svg>
           </button>
           <button class="setu-focus-btn" data-action="tts" title="Read Aloud">
-            <span>🔊</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
           </button>
         </div>
       </div>

@@ -63,7 +63,7 @@ class TextToSpeech {
 
   enable() {
     this.isEnabled = true;
-    console.log('🔊 Text to Speech enabled');
+    console.log('[TextToSpeech] Enabled');
     this.createControls();
   }
 
@@ -71,7 +71,7 @@ class TextToSpeech {
     this.isEnabled = false;
     this.stop();
     this.removeControls();
-    console.log('🔊 Text to Speech disabled');
+    console.log('[TextToSpeech] Disabled');
   }
 
   createControls() {
@@ -80,20 +80,20 @@ class TextToSpeech {
     this.ttsOverlay.innerHTML = `
       <div class="tts-panel">
         <button class="tts-btn tts-play" title="Play">
-          <span>▶</span>
+          <span>&#9654;</span>
         </button>
         <button class="tts-btn tts-pause" title="Pause" style="display: none;">
-          <span>⏸</span>
+          <span>&#10074;&#10074;</span>
         </button>
         <button class="tts-btn tts-stop" title="Stop">
-          <span>⏹</span>
+          <span>&#9632;</span>
         </button>
         <div class="tts-speed">
-          <button class="tts-btn tts-speed-down" title="Slower">−</button>
+          <button class="tts-btn tts-speed-down" title="Slower">&minus;</button>
           <span class="tts-rate">1.0x</span>
           <button class="tts-btn tts-speed-up" title="Faster">+</button>
         </div>
-        <button class="tts-btn tts-close" title="Close">✕</button>
+        <button class="tts-btn tts-close" title="Close">&times;</button>
       </div>
       <div class="tts-progress">
         <div class="tts-progress-bar"></div>

@@ -48,7 +48,7 @@ function createContextMenu() {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: 'setu-parent',
-      title: 'setu',
+      title: 'NeuroRead',
       contexts: ['all']
     });
 
@@ -67,6 +67,13 @@ function createContextMenu() {
     });
 
     chrome.contextMenus.create({
+      id: 'toggle-linefocus',
+      parentId: 'setu-parent',
+      title: 'Toggle Line Focus',
+      contexts: ['all']
+    });
+
+    chrome.contextMenus.create({
       id: 'toggle-tts',
       parentId: 'setu-parent',
       title: 'Read Selected Text',
@@ -76,14 +83,14 @@ function createContextMenu() {
     chrome.contextMenus.create({
       id: 'summarize-page',
       parentId: 'setu-parent',
-      title: 'Save to SETU Sanctuary',
+      title: 'Save to NeuroRead Sanctuary',
       contexts: ['all']
     });
 
     chrome.contextMenus.create({
       id: 'open-commander',
       parentId: 'setu-parent',
-      title: 'Open SETU Commander',
+      title: 'Open NeuroRead Commander',
       contexts: ['all']
     });
 
@@ -98,29 +105,45 @@ function createContextMenu() {
 
 // Handle context menu clicks
 chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (!tab || !tab.id) return;
+
+  const sendMessageSafely = (msg, callback) => {
+    chrome.tabs.sendMessage(tab.id, msg, (response) => {
+      const err = chrome.runtime.lastError;
+      if (err) {
+        console.debug('[NeuroRead Background] Context menu message suppressed:', err.message);
+        return;
+      }
+      if (callback) callback(response);
+    });
+  };
+
   switch (info.menuItemId) {
     case 'toggle-bionic':
-      chrome.tabs.sendMessage(tab.id, { action: 'toggleMode', mode: 'bionic' });
+      sendMessageSafely({ action: 'toggleMode', mode: 'bionic' });
       break;
     case 'toggle-focus':
-      chrome.tabs.sendMessage(tab.id, { action: 'toggleMode', mode: 'focus' });
+      sendMessageSafely({ action: 'toggleMode', mode: 'focus' });
+      break;
+    case 'toggle-linefocus':
+      sendMessageSafely({ action: 'toggleMode', mode: 'lineFocus' });
       break;
     case 'toggle-tts':
-      chrome.tabs.sendMessage(tab.id, { 
+      sendMessageSafely({ 
         action: 'speakText', 
         text: info.selectionText 
       });
       break;
     case 'summarize-page':
-      chrome.tabs.sendMessage(tab.id, { action: 'saveToSanctuary' }, (response) => {
+      sendMessageSafely({ action: 'saveToSanctuary' }, (response) => {
         if (response?.success) chrome.tabs.create({ url: chrome.runtime.getURL('sanctuary.html') });
       });
       break;
     case 'open-commander':
-      chrome.tabs.sendMessage(tab.id, { action: 'openCommander' });
+      sendMessageSafely({ action: 'openCommander' });
       break;
     case 'task-path':
-      chrome.tabs.sendMessage(tab.id, { action: 'toggleMode', mode: 'chunking', enabled: true });
+      sendMessageSafely({ action: 'toggleMode', mode: 'chunking', enabled: true });
       break;
   }
 });
@@ -139,10 +162,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       break;
 
     case 'captureTab':
-      chrome.tabs.captureVisibleTab(sender.tab.windowId, { format: 'png' })
-        .then(dataUrl => sendResponse({ success: true, dataUrl }))
-        .catch(error => sendResponse({ success: false, error: error.message }));
-      return true;
+      if (sender.tab?.windowId !== undefined) {
+        chrome.tabs.captureVisibleTab(sender.tab.windowId, { format: 'png' })
+          .then(dataUrl => sendResponse({ success: true, dataUrl }))
+          .catch(error => sendResponse({ success: false, error: error.message }));
+        return true;
+      }
+      sendResponse({ success: false, error: 'No tab window available' });
+      break;
 
     case 'openSettings':
       chrome.tabs.create({ url: chrome.runtime.getURL('settings.html') });
@@ -179,13 +206,15 @@ async function updateReadingStats(newStats) {
 const readingSessions = new Map();
 
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
-  const tab = await chrome.tabs.get(tabId);
-  if (tab.url && !tab.url.startsWith('chrome://')) {
-    readingSessions.set(tabId, {
-      startTime: Date.now(),
-      url: tab.url
-    });
-  }
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab?.url && !tab.url.startsWith('chrome://')) {
+      readingSessions.set(tabId, {
+        startTime: Date.now(),
+        url: tab.url
+      });
+    }
+  } catch (_) {}
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
@@ -204,24 +233,41 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 // Keyboard shortcuts
-chrome.commands.onCommand.addListener((command, tab) => {
+chrome.commands.onCommand.addListener(async (command, tab) => {
+  let targetTabId = tab?.id;
+  if (!targetTabId) {
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    targetTabId = activeTab?.id;
+  }
+  if (!targetTabId) return;
+
+  const sendMessageSafely = (msg) => {
+    chrome.tabs.sendMessage(targetTabId, msg).catch((err) => {
+      console.debug('[NeuroRead Background] Could not send command message to tab:', err.message);
+    });
+  };
+
   switch (command) {
     case 'toggle-bionic':
-      chrome.tabs.sendMessage(tab.id, { action: 'toggleMode', mode: 'bionic' });
+      sendMessageSafely({ action: 'toggleMode', mode: 'bionic' });
       break;
     case 'toggle-focus':
-      chrome.tabs.sendMessage(tab.id, { action: 'toggleMode', mode: 'focus' });
+      sendMessageSafely({ action: 'toggleMode', mode: 'focus' });
+      break;
+    case 'toggle-linefocus':
+      sendMessageSafely({ action: 'toggleMode', mode: 'lineFocus' });
       break;
     case 'toggle-tts':
-      chrome.tabs.sendMessage(tab.id, { action: 'toggleFeature', feature: 'tts' });
+      sendMessageSafely({ action: 'toggleFeature', feature: 'tts' });
       break;
     case 'toggle-scroll':
-      chrome.tabs.sendMessage(tab.id, { action: 'toggleMode', mode: 'scroll' });
+      sendMessageSafely({ action: 'toggleMode', mode: 'scroll' });
       break;
     case 'open-commander':
-      chrome.tabs.sendMessage(tab.id, { action: 'openCommander' });
+      sendMessageSafely({ action: 'openCommander' });
       break;
   }
 });
 
 console.log('SETU Lens background service worker initialized');
+

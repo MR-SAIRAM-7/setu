@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Download } from 'lucide-react';
+import { Mic, Download } from 'lucide-react';
 import { callModeApi, exportArtifactMarkdown } from '../../services/apiService';
 
 const MeetModePane = () => {
@@ -17,7 +17,7 @@ const MeetModePane = () => {
 
   return (
     <div className="mode-pane">
-      <h2>🎙️ Meet Mode: Transcript to Action Items & Owners</h2>
+      <h2><Mic size={22} style={{ display: 'inline', marginRight: 8 }} /> Meet Mode: Transcript to Action Items &amp; Owners</h2>
       <p className="pane-desc">Extracts decisions, owner-assigned deadlines, and decodes corporate jargon from meeting transcripts.</p>
 
       <textarea 
@@ -27,13 +27,14 @@ const MeetModePane = () => {
         onChange={(e) => setTranscript(e.target.value)}
       />
       <button className="nb-action-btn primary" onClick={handleRun} disabled={loading}>
-        {loading ? 'Processing...' : '🎙️ Extract Action Items'}
+        <Mic size={16} style={{ display: 'inline', marginRight: 6 }} />
+        {loading ? 'Processing...' : 'Extract Action Items'}
       </button>
 
       {result && (
         <div className="artifact-card fade-in">
           <div className="card-top-bar">
-            <h3>Action Items & Assigned Owners</h3>
+            <h3>Action Items &amp; Assigned Owners</h3>
             <button className="export-link-btn" onClick={() => exportArtifactMarkdown('meet', result)}>
               <Download size={16} /> Export Summary
             </button>
