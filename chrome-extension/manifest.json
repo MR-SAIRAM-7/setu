@@ -69,10 +69,6 @@
       "suggested_key": { "default": "Alt+F" },
       "description": "Toggle Focus Mode"
     },
-    "toggle-scroll": {
-      "suggested_key": { "default": "Alt+S" },
-      "description": "Toggle Auto Scroll"
-    },
     "toggle-tts": {
       "suggested_key": { "default": "Alt+T" },
       "description": "Toggle Text to Speech"
