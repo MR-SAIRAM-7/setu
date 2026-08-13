@@ -1,10 +1,10 @@
 /**
- * NeuroRead - Chrome Extension Popup Controller
+ * SETU Lens - Chrome Extension Popup Controller
  * Manages the Cognitive Accessibility Modes, Sensory Switch, Dynamic API Configuration,
  * Theme persistence, local-first processing, and one-click artifact export.
  */
 
-class NeuroBridgePopup {
+class SetuLensPopup {
   constructor() {
     this.apiHost = 'http://localhost:3000';
     this.state = {
@@ -31,13 +31,21 @@ class NeuroBridgePopup {
     this.setupThemeSelector();
     this.setupModeHandlers();
     this.setupToolToggles();
+    
+    document.getElementById('btn-open-dashboard')?.addEventListener('click', () => {
+      chrome.tabs.create({ url: 'http://localhost:3001' });
+    });
+    document.getElementById('btn-open-sanctuary')?.addEventListener('click', () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL('sanctuary.html') });
+    });
+
     this.updateUI();
   }
 
   async loadState() {
-    const { nbState, apiHost } = await chrome.storage.sync.get(['nbState', 'apiHost']);
-    if (nbState) {
-      this.state = { ...this.state, ...nbState };
+    const { setuState, apiHost } = await chrome.storage.sync.get(['setuState', 'apiHost']);
+    if (setuState) {
+      this.state = { ...this.state, ...setuState };
     }
     if (apiHost) {
       this.apiHost = apiHost;
@@ -45,7 +53,7 @@ class NeuroBridgePopup {
   }
 
   async saveState() {
-    await chrome.storage.sync.set({ nbState: this.state, apiHost: this.apiHost });
+    await chrome.storage.sync.set({ setuState: this.state, apiHost: this.apiHost });
   }
 
   setupServerConfig() {
@@ -447,7 +455,7 @@ class NeuroBridgePopup {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = res.filename || `neuroread-${mode}.md`;
+      a.download = res.filename || `setu-${mode}.md`;
       a.click();
     }
   }
@@ -487,7 +495,7 @@ class NeuroBridgePopup {
 
   showLoading(element, message) {
     element.style.display = 'block';
-    element.innerHTML = `<div style="padding: 12px; color: var(--nb-muted); font-style: italic;">Processing: ${message}</div>`;
+    element.innerHTML = `<div style="padding: 12px; color: var(--setu-muted); font-style: italic;">Processing: ${message}</div>`;
   }
 
   async sendActionToTab(action, payload = {}) {
@@ -503,4 +511,4 @@ class NeuroBridgePopup {
   }
 }
 
-document.addEventListener('DOMContentLoaded', () => new NeuroBridgePopup());
+document.addEventListener('DOMContentLoaded', () => new SetuLensPopup());

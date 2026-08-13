@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "NeuroBridge One — SETU Lens",
+  "name": "SETU Lens — Cognitive Accessibility",
   "version": "2.5.0",
   "description": "A unified cognitive accessibility layer that converts digital overwhelm into structured, actionable next steps.",
   "icons": {
@@ -20,7 +20,7 @@
     "<all_urls>"
   ],
   "action": {
-    "default_popup": "popup.html",
+    "default_popup": "popup/popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
