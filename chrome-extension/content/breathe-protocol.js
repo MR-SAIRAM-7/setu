@@ -1,163 +1,223 @@
-// SETU Breathe Protocol
-// Detects only short-lived, local interaction patterns. No cursor data leaves
-// the page; the protocol is opt-in and can be stopped in the popup at any time.
-class BreatheProtocol {
-  constructor() {
-    this.isEnabled = false;
-    this.pointerSamples = [];
-    this.scrollSamples = [];
-    this.clicks = [];
-    this.lastPromptAt = 0;
-    this.overlay = null;
-    this.boundPointer = this.recordPointer.bind(this);
-    this.boundScroll = this.recordScroll.bind(this);
-    this.boundClick = this.recordClick.bind(this);
-    this.boundKey = this.recordKey.bind(this);
-  }
+/**
+ * The Breathe Protocol — behavioural overwhelm detection.
+ *
+ * Watches for the interaction signatures of cognitive overload: erratic cursor
+ * reversals, rapid scroll thrash, and rage-clicking. When the combined score
+ * crosses a threshold it dims the page and offers a box-breathing prompt, then
+ * asks whether to simplify the page.
+ *
+ * Deliberately conservative: a false positive interrupts someone who was fine,
+ * which is worse than a missed detection. Signals decay continuously, the
+ * detector arms only after a settling period, and it will not re-trigger for
+ * several minutes once dismissed.
+ */
 
-  enable() {
-    if (this.isEnabled) return;
-    this.isEnabled = true;
-    document.addEventListener('pointermove', this.boundPointer, { passive: true });
-    document.addEventListener('click', this.boundClick, { passive: true });
-    window.addEventListener('scroll', this.boundScroll, { passive: true });
-    document.addEventListener('keydown', this.boundKey, { passive: true });
-  }
+(() => {
+  const { Feature, UI } = window.SETU;
 
-  disable() {
-    this.isEnabled = false;
-    document.removeEventListener('pointermove', this.boundPointer);
-    document.removeEventListener('click', this.boundClick);
-    window.removeEventListener('scroll', this.boundScroll);
-    document.removeEventListener('keydown', this.boundKey);
-    this.removeOverlay();
-    this.pointerSamples = [];
-    this.scrollSamples = [];
-    this.clicks = [];
-  }
+  const TRIGGER_SCORE = 100;
+  const REARM_MS = 4 * 60 * 1000;
+  const ARM_DELAY_MS = 12 * 1000;
 
-  recordPointer(event) {
-    const now = Date.now();
-    this.pointerSamples.push({ x: event.clientX, y: event.clientY, at: now });
-    this.pointerSamples = this.pointerSamples.filter((point) => now - point.at < 3000);
-    this.checkForOverload();
-  }
+  class BreatheProtocol extends Feature {
+    static key = 'breathe';
 
-  recordScroll() {
-    const now = Date.now();
-    this.scrollSamples.push({ y: window.scrollY, at: now });
-    this.scrollSamples = this.scrollSamples.filter((point) => now - point.at < 3000);
-    this.checkForOverload();
-  }
-
-  recordClick(event) {
-    if (event.target.closest('#setu-breathe-overlay, #setu-commander, #setu-task-path')) return;
-    const now = Date.now();
-    this.clicks.push({ x: event.clientX, y: event.clientY, at: now });
-    this.clicks = this.clicks.filter((click) => now - click.at < 1400);
-    this.checkForOverload();
-  }
-
-  recordKey(event) {
-    if (event.key === 'Escape') this.removeOverlay();
-  }
-
-  hasErraticPointer() {
-    if (this.pointerSamples.length < 14) return false;
-    let reversals = 0;
-    let previousDirection = null;
-    for (let index = 1; index < this.pointerSamples.length; index += 1) {
-      const previous = this.pointerSamples[index - 1];
-      const current = this.pointerSamples[index];
-      const dx = current.x - previous.x;
-      const dy = current.y - previous.y;
-      if (Math.abs(dx) + Math.abs(dy) < 12) continue;
-      const direction = Math.abs(dx) > Math.abs(dy) ? Math.sign(dx) : Math.sign(dy) * 2;
-      if (previousDirection && direction !== previousDirection) reversals += 1;
-      previousDirection = direction;
+    constructor() {
+      super();
+      this.score = 0;
+      this.armedAt = 0;
+      this.mutedUntil = 0;
+      this.active = false;
+      this.last = { x: 0, y: 0, dir: 0, moveAt: 0, scrollY: 0, scrollDir: 0, clickAt: 0, clickX: 0, clickY: 0 };
+      this.clickBurst = 0;
     }
-    return reversals >= 8;
-  }
 
-  hasChaoticScroll() {
-    if (this.scrollSamples.length < 5) return false;
-    let reversals = 0;
-    let previousDirection = 0;
-    for (let index = 1; index < this.scrollSamples.length; index += 1) {
-      const delta = this.scrollSamples[index].y - this.scrollSamples[index - 1].y;
-      if (Math.abs(delta) < 35) continue;
-      const direction = Math.sign(delta);
-      if (previousDirection && direction !== previousDirection) reversals += 1;
-      previousDirection = direction;
+    onEnable() {
+      this.armedAt = Date.now() + ARM_DELAY_MS;
+      this.bind();
+      this.loop(() => this.decay());
     }
-    return reversals >= 3;
-  }
 
-  hasRageClicks() {
-    if (this.clicks.length < 3) return false;
-    const first = this.clicks[0];
-    const last = this.clicks[this.clicks.length - 1];
-    const closeTogether = this.clicks.every((click) => Math.hypot(click.x - last.x, click.y - last.y) < 90);
-    return closeTogether && last.at - first.at < 1200;
-  }
+    onDisable() {
+      UI.destroyHost('breathe');
+      this.active = false;
+      this.score = 0;
+    }
 
-  checkForOverload() {
-    if (!this.isEnabled || this.overlay || Date.now() - this.lastPromptAt < 45000) return;
-    if (this.hasRageClicks() || this.hasErraticPointer() || this.hasChaoticScroll()) this.showPrompt();
-  }
+    bind() {
+      this.listen(
+        window,
+        'mousemove',
+        (event) => {
+          const now = performance.now();
+          const dx = event.clientX - this.last.x;
+          const dy = event.clientY - this.last.y;
+          const distance = Math.hypot(dx, dy);
+          const dt = now - this.last.moveAt;
 
-  showPrompt() {
-    this.lastPromptAt = Date.now();
-    this.overlay = document.createElement('section');
-    this.overlay.id = 'setu-breathe-overlay';
-    this.overlay.setAttribute('role', 'dialog');
-    this.overlay.setAttribute('aria-modal', 'true');
-    this.overlay.setAttribute('aria-labelledby', 'setu-breathe-title');
-    this.overlay.innerHTML = `
-      <div class="setu-breathe-card">
-        <button class="setu-dismiss" aria-label="Close">×</button>
-        <p class="setu-kicker">SETU noticed a lot of activity</p>
-        <h2 id="setu-breathe-title">Let’s take five calm breaths.</h2>
-        <div class="setu-breath" aria-label="Follow the box: breathe in, hold, breathe out, hold">
-          <span class="setu-breath-dot" aria-hidden="true"></span>
+          if (dt > 0 && dt < 120 && distance > 12) {
+            const direction = Math.atan2(dy, dx);
+            const turn = Math.abs(direction - this.last.dir);
+            // A near-reversal at speed reads as searching/agitation.
+            if (turn > 2.2 && turn < 4.1 && distance / dt > 1.4) {
+              this.add(7);
+            }
+            this.last.dir = direction;
+          }
+
+          this.last.x = event.clientX;
+          this.last.y = event.clientY;
+          this.last.moveAt = now;
+        },
+        { passive: true }
+      );
+
+      this.listen(
+        window,
+        'scroll',
+        () => {
+          const y = window.scrollY;
+          const direction = Math.sign(y - this.last.scrollY);
+          // Direction flips while moving fast = hunting for something.
+          if (direction !== 0 && direction !== this.last.scrollDir && Math.abs(y - this.last.scrollY) > 90) {
+            this.add(9);
+            this.last.scrollDir = direction;
+          }
+          this.last.scrollY = y;
+        },
+        { passive: true }
+      );
+
+      this.listen(
+        window,
+        'click',
+        (event) => {
+          const now = performance.now();
+          const near = Math.hypot(event.clientX - this.last.clickX, event.clientY - this.last.clickY) < 44;
+
+          if (now - this.last.clickAt < 600 && near) {
+            this.clickBurst += 1;
+            if (this.clickBurst >= 2) this.add(16); // third+ click in the same spot
+          } else {
+            this.clickBurst = 0;
+          }
+
+          this.last.clickAt = now;
+          this.last.clickX = event.clientX;
+          this.last.clickY = event.clientY;
+        },
+        { passive: true, capture: true }
+      );
+    }
+
+    add(points) {
+      if (this.active || Date.now() < this.armedAt || Date.now() < this.mutedUntil) return;
+
+      this.score += points;
+      if (this.score >= TRIGGER_SCORE) this.trigger();
+    }
+
+    /** Stress signals fade fast; a brief flurry should not accumulate forever. */
+    decay() {
+      if (this.score > 0) this.score = Math.max(0, this.score - 0.55);
+    }
+
+    trigger() {
+      this.active = true;
+      this.score = 0;
+      this.render();
+    }
+
+    dismiss(simplify) {
+      UI.destroyHost('breathe');
+      this.active = false;
+      this.mutedUntil = Date.now() + REARM_MS;
+
+      if (simplify) {
+        window.setuLens?.toggle('focus', true);
+        window.setuLens?.toggle('lineFocus', true);
+      }
+    }
+
+    render() {
+      const root = UI.host('breathe', { layer: 'panel', interactive: true });
+
+      const style = document.createElement('style');
+      style.textContent = `
+        .veil {
+          position: fixed; inset: 0;
+          background: rgba(6,10,24,.82);
+          backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px);
+          display: grid; place-items: center; pointer-events: auto;
+          animation: fade .5s ease;
+        }
+        @keyframes fade { from { opacity:0 } to { opacity:1 } }
+        .card { width: min(400px, 90vw); text-align: center; padding: 34px 30px; }
+        .orb { width:132px; height:132px; margin:0 auto 22px; position:relative; }
+        .ring {
+          position:absolute; inset:0; border-radius:50%;
+          border:2px solid var(--accent);
+          animation: breathe 16s ease-in-out infinite;
+        }
+        .ring:nth-child(2) { animation-delay:-1.2s; opacity:.5; }
+        @keyframes breathe {
+          0%,100% { transform:scale(.62); opacity:.55; }  /* rest */
+          25%     { transform:scale(1);   opacity:1; }    /* inhale 4s */
+          50%     { transform:scale(1);   opacity:1; }    /* hold 4s */
+          75%     { transform:scale(.62); opacity:.55; }  /* exhale 4s */
+        }
+        .phase {
+          position:absolute; inset:0; display:grid; place-items:center;
+          font-size:13px; font-weight:700; letter-spacing:.14em; color:var(--accent);
+        }
+        h2 { font-size:19px; font-weight:700; margin-bottom:9px; }
+        p  { font-size:14px; color:var(--text-dim); line-height:1.6; margin-bottom:22px; }
+        .row { display:flex; gap:9px; }
+        .row .setu-btn { flex:1; }
+      `;
+      root.appendChild(style);
+
+      const scope = document.createElement('div');
+      scope.className = 'setu-scope';
+      scope.innerHTML = `
+        <div class="veil" role="dialog" aria-modal="true" aria-label="Take a breath">
+          <div class="setu-card card">
+            <div class="orb">
+              <div class="ring"></div><div class="ring"></div>
+              <div class="phase">BREATHE</div>
+            </div>
+            <h2>This page looks a bit intense.</h2>
+            <p>Follow the circle for a few seconds — in as it grows, out as it shrinks.
+               When you're ready, I can simplify this page and mark your reading line.</p>
+            <div class="row">
+              <button class="setu-btn" data-act="dismiss">I'm okay</button>
+              <button class="setu-btn" data-variant="primary" data-act="simplify">Simplify this page</button>
+            </div>
+          </div>
         </div>
-        <p class="setu-breath-status" aria-live="polite">Breathe in</p>
-        <p class="setu-muted">This page can wait. Nothing was recorded or sent anywhere.</p>
-        <div class="setu-breathe-actions">
-          <button class="setu-primary" data-action="simplify">Simplify this page</button>
-          <button class="setu-secondary" data-action="continue">I’m okay, continue</button>
-        </div>
-      </div>`;
-    document.body.appendChild(this.overlay);
-    this.overlay.querySelector('.setu-dismiss').addEventListener('click', () => this.removeOverlay());
-    this.overlay.querySelector('[data-action="continue"]').addEventListener('click', () => this.removeOverlay());
-    this.overlay.querySelector('[data-action="simplify"]').addEventListener('click', () => {
-      this.removeOverlay();
-      window.setu?.activateSupportPath();
-    });
-    this.runBreathingCycle();
-    this.overlay.querySelector('.setu-primary').focus();
+      `;
+      root.appendChild(scope);
+
+      // Cycle the phase label in time with the 16s animation.
+      const phase = scope.querySelector('.phase');
+      const labels = ['BREATHE IN', 'HOLD', 'BREATHE OUT', 'REST'];
+      let index = 0;
+      const timer = setInterval(() => {
+        index = (index + 1) % labels.length;
+        phase.textContent = labels[index];
+      }, 4000);
+      this.cleanup(() => clearInterval(timer));
+
+      scope.querySelector('[data-act="dismiss"]').onclick = () => {
+        clearInterval(timer);
+        this.dismiss(false);
+      };
+      scope.querySelector('[data-act="simplify"]').onclick = () => {
+        clearInterval(timer);
+        this.dismiss(true);
+      };
+    }
   }
 
-  runBreathingCycle() {
-    const status = this.overlay?.querySelector('.setu-breath-status');
-    if (!status) return;
-    const phases = ['Breathe in', 'Hold', 'Breathe out', 'Hold'];
-    let phase = 0;
-    status.textContent = phases[phase];
-    this.breathInterval = window.setInterval(() => {
-      if (!this.overlay) return;
-      phase = (phase + 1) % phases.length;
-      status.textContent = phases[phase];
-    }, 1250);
-  }
-
-  removeOverlay() {
-    if (this.breathInterval) window.clearInterval(this.breathInterval);
-    this.breathInterval = null;
-    this.overlay?.remove();
-    this.overlay = null;
-  }
-}
-
-window.BreatheProtocol = BreatheProtocol;
+  window.SETU.features.set('breathe', BreatheProtocol);
+})();

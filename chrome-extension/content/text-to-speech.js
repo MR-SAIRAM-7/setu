@@ -1,385 +1,412 @@
-// Text to Speech - Read content aloud with word highlighting
-// Uses Web Speech API for natural voice synthesis
+/**
+ * Text to Speech — reads the page aloud and highlights each spoken word.
+ *
+ * The word highlight is drawn as an overlay positioned over a live Range,
+ * rather than by wrapping words in <span>s. That matters for composability:
+ * wrapping would fight Bionic Reading for the same text nodes and corrupt both.
+ * Here TTS never touches the page DOM at all.
+ */
 
-class TextToSpeech {
-  constructor() {
-    this.isEnabled = false;
-    this.synth = window.speechSynthesis;
-    this.voices = [];
-    this.currentUtterance = null;
-    this.isSpeaking = false;
-    this.isPaused = false;
-    
-    // Settings
-    this.rate = 1.0;
-    this.pitch = 1.0;
-    this.volume = 1.0;
-    this.selectedVoice = null;
-    
-    // Word highlighting
-    this.currentWordIndex = 0;
-    this.words = [];
-    this.highlightElements = [];
-    
-    // Controls
-    this.ttsOverlay = null;
-    
-    this.init();
-  }
+(() => {
+  const { Feature, UI, Store, Text } = window.SETU;
 
-  init() {
-    // Load voices when available
-    if (this.synth.onvoiceschanged !== undefined) {
-      this.synth.onvoiceschanged = () => this.loadVoices();
+  class TextToSpeech extends Feature {
+    static key = 'tts';
+
+    constructor() {
+      super();
+      this.synth = window.speechSynthesis;
+      this.voices = [];
+      this.utterance = null;
+      this.speaking = false;
+      this.paused = false;
+      this.rate = 1;
+      this.pitch = 1;
+      this.segments = []; // { node, start, end, charIndex } over the spoken text
+      this.spokenText = '';
     }
-    this.loadVoices();
-  }
 
-  loadVoices() {
-    this.voices = this.synth.getVoices();
-    
-    // Prefer natural-sounding voices
-    const preferredVoices = [
-      'Google US English',
-      'Microsoft David',
-      'Microsoft Zira',
-      'Samantha',
-      'Alex'
-    ];
-    
-    for (const voiceName of preferredVoices) {
-      const voice = this.voices.find(v => v.name.includes(voiceName));
-      if (voice) {
-        this.selectedVoice = voice;
-        break;
+    onEnable() {
+      this.rate = Store.getSetting('ttsRate') || 1;
+      this.pitch = Store.getSetting('ttsPitch') || 1;
+      this.loadVoices();
+      this.build();
+      UI.toast('Read Aloud ready — press play', { tone: 'success' });
+    }
+
+    onDisable() {
+      this.stop();
+      UI.destroyHost('tts');
+      UI.destroyHost('tts-mark');
+    }
+
+    onSettings() {
+      this.rate = Store.getSetting('ttsRate') || 1;
+      this.pitch = Store.getSetting('ttsPitch') || 1;
+      this.renderRate();
+    }
+
+    /* ------------------------------------------------------------------ */
+
+    loadVoices() {
+      const read = () => {
+        this.voices = this.synth.getVoices();
+        this.populateVoiceList();
+      };
+      read();
+      // Chrome populates voices asynchronously on first call.
+      if (this.synth.onvoiceschanged !== undefined) {
+        this.synth.onvoiceschanged = read;
+        this.cleanup(() => {
+          this.synth.onvoiceschanged = null;
+        });
       }
     }
-    
-    // Fallback to first English voice
-    if (!this.selectedVoice) {
-      this.selectedVoice = this.voices.find(v => v.lang.startsWith('en')) || this.voices[0];
+
+    pickVoice() {
+      const preferred = Store.getSetting('ttsVoice');
+      if (preferred) {
+        const match = this.voices.find((v) => v.name === preferred);
+        if (match) return match;
+      }
+      const lang = document.documentElement.lang || navigator.language || 'en';
+      return (
+        this.voices.find((v) => v.lang.startsWith(lang.slice(0, 2)) && v.localService) ||
+        this.voices.find((v) => v.lang.startsWith(lang.slice(0, 2))) ||
+        this.voices[0] ||
+        null
+      );
     }
-  }
 
-  enable() {
-    this.isEnabled = true;
-    console.log('[TextToSpeech] Enabled');
-    this.createControls();
-  }
+    /* ------------------------------------------------------------------ */
+    /* Controls                                                           */
+    /* ------------------------------------------------------------------ */
 
-  disable() {
-    this.isEnabled = false;
-    this.stop();
-    this.removeControls();
-    console.log('[TextToSpeech] Disabled');
-  }
+    build() {
+      const root = UI.host('tts', { layer: 'control', interactive: true });
 
-  createControls() {
-    this.ttsOverlay = document.createElement('div');
-    this.ttsOverlay.id = 'setu-tts-controls';
-    this.ttsOverlay.innerHTML = `
-      <div class="tts-panel">
-        <button class="tts-btn tts-play" title="Play">
-          <span>&#9654;</span>
-        </button>
-        <button class="tts-btn tts-pause" title="Pause" style="display: none;">
-          <span>&#10074;&#10074;</span>
-        </button>
-        <button class="tts-btn tts-stop" title="Stop">
-          <span>&#9632;</span>
-        </button>
-        <div class="tts-speed">
-          <button class="tts-btn tts-speed-down" title="Slower">&minus;</button>
-          <span class="tts-rate">1.0x</span>
-          <button class="tts-btn tts-speed-up" title="Faster">+</button>
+      const style = document.createElement('style');
+      style.textContent = `
+        .bar {
+          position: fixed; bottom: 24px; left: 24px;
+          display: flex; align-items: center; gap: 8px;
+          padding: 9px 12px; background: var(--bg-soft);
+          border: 1px solid var(--border); border-radius: 999px;
+          box-shadow: var(--shadow); pointer-events: auto;
+        }
+        .icon {
+          width: 36px; height: 36px; border-radius: 50%;
+          display: grid; place-items: center;
+          background: transparent; border: 1px solid var(--border);
+          color: var(--text); cursor: pointer; font-size: 13px;
+        }
+        .icon:hover { background: rgba(255,255,255,.1); border-color: var(--accent); }
+        .icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        .icon[data-primary] { background: var(--accent); border-color: var(--accent); color: #0b1020; }
+        .sep { width:1px; height:20px; background:var(--border); }
+        .rate { font-size:12px; font-weight:700; min-width:38px; text-align:center; color:var(--text-dim); }
+        select {
+          max-width: 140px; padding: 5px 7px; font-size: 12px;
+          background: var(--surface); color: var(--text);
+          border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+        }
+        .progress { position:absolute; left:14px; right:14px; bottom:4px; height:2px; background:var(--border); border-radius:2px; }
+        .progress-fill { height:100%; width:0; background:var(--accent-2); border-radius:2px; transition:width .2s linear; }
+      `;
+      root.appendChild(style);
+
+      const scope = document.createElement('div');
+      scope.className = 'setu-scope';
+      scope.innerHTML = `
+        <div class="bar" role="group" aria-label="Read aloud controls">
+          <button class="icon" data-primary data-act="play" aria-label="Play" title="Play / Pause">▶</button>
+          <button class="icon" data-act="stop" aria-label="Stop" title="Stop">■</button>
+          <div class="sep"></div>
+          <button class="icon" data-act="slower" aria-label="Slower" title="Slower">−</button>
+          <span class="rate">1.0×</span>
+          <button class="icon" data-act="faster" aria-label="Faster" title="Faster">+</button>
+          <div class="sep"></div>
+          <select data-act="voice" aria-label="Voice"></select>
+          <button class="icon" data-act="close" aria-label="Close read aloud" title="Close">×</button>
+          <div class="progress"><div class="progress-fill"></div></div>
         </div>
-        <button class="tts-btn tts-close" title="Close">&times;</button>
-      </div>
-      <div class="tts-progress">
-        <div class="tts-progress-bar"></div>
-      </div>
-    `;
-    
-    document.body.appendChild(this.ttsOverlay);
-    this.setupControls();
-  }
+      `;
+      root.appendChild(scope);
+      this.scope = scope;
 
-  setupControls() {
-    // Play
-    this.ttsOverlay.querySelector('.tts-play').addEventListener('click', () => {
-      this.resume();
-    });
-    
-    // Pause
-    this.ttsOverlay.querySelector('.tts-pause').addEventListener('click', () => {
-      this.pause();
-    });
-    
-    // Stop
-    this.ttsOverlay.querySelector('.tts-stop').addEventListener('click', () => {
-      this.stop();
-    });
-    
-    // Speed controls
-    this.ttsOverlay.querySelector('.tts-speed-down').addEventListener('click', () => {
-      this.setRate(this.rate - 0.1);
-    });
-    
-    this.ttsOverlay.querySelector('.tts-speed-up').addEventListener('click', () => {
-      this.setRate(this.rate + 0.1);
-    });
-    
-    // Close
-    this.ttsOverlay.querySelector('.tts-close').addEventListener('click', () => {
-      this.disable();
-    });
-  }
+      const on = (act, fn) => scope.querySelector(`[data-act="${act}"]`).addEventListener('click', fn);
+      on('play', () => this.togglePlay());
+      on('stop', () => this.stop());
+      on('slower', () => this.changeRate(-0.1));
+      on('faster', () => this.changeRate(0.1));
+      on('close', () => window.setuLens?.toggle('tts', false));
 
-  removeControls() {
-    if (this.ttsOverlay) {
-      this.ttsOverlay.remove();
-      this.ttsOverlay = null;
+      scope.querySelector('[data-act="voice"]').addEventListener('change', (event) => {
+        Store.set({ settings: { ttsVoice: event.target.value } });
+        if (this.speaking) this.restart();
+      });
+
+      this.populateVoiceList();
+      this.renderRate();
     }
-  }
 
-  updateControls() {
-    if (!this.ttsOverlay) return;
-    
-    const playBtn = this.ttsOverlay.querySelector('.tts-play');
-    const pauseBtn = this.ttsOverlay.querySelector('.tts-pause');
-    const rateDisplay = this.ttsOverlay.querySelector('.tts-rate');
-    
-    if (this.isSpeaking && !this.isPaused) {
-      playBtn.style.display = 'none';
-      pauseBtn.style.display = 'flex';
-    } else {
-      playBtn.style.display = 'flex';
-      pauseBtn.style.display = 'none';
+    populateVoiceList() {
+      const select = this.scope?.querySelector('[data-act="voice"]');
+      if (!select) return;
+
+      const current = Store.getSetting('ttsVoice');
+      select.innerHTML = this.voices
+        .map(
+          (v) =>
+            `<option value="${Text.escape(v.name)}"${v.name === current ? ' selected' : ''}>${Text.escape(
+              v.name
+            )}</option>`
+        )
+        .join('');
     }
-    
-    rateDisplay.textContent = `${this.rate.toFixed(1)}x`;
-  }
 
-  speak(text) {
-    if (!text) return;
-    
-    // Stop any current speech
-    this.stop();
-    
-    // Prepare text
-    this.words = text.split(/\s+/);
-    this.currentWordIndex = 0;
-    
-    // Create utterance
-    this.currentUtterance = new SpeechSynthesisUtterance(text);
-    this.currentUtterance.voice = this.selectedVoice;
-    this.currentUtterance.rate = this.rate;
-    this.currentUtterance.pitch = this.pitch;
-    this.currentUtterance.volume = this.volume;
-    
-    // Event handlers
-    this.currentUtterance.onstart = () => {
-      this.isSpeaking = true;
-      this.isPaused = false;
-      this.updateControls();
-      document.body.classList.add('setu-tts-speaking');
-    };
-    
-    this.currentUtterance.onend = () => {
-      this.isSpeaking = false;
-      this.isPaused = false;
-      this.updateControls();
-      this.clearHighlight();
-      document.body.classList.remove('setu-tts-speaking');
-    };
-    
-    this.currentUtterance.onpause = () => {
-      this.isPaused = true;
-      this.updateControls();
-    };
-    
-    this.currentUtterance.onresume = () => {
-      this.isPaused = false;
-      this.updateControls();
-    };
-    
-    this.currentUtterance.onboundary = (event) => {
-      // Highlight current word
-      if (event.name === 'word') {
-        this.highlightWordAtPosition(event.charIndex);
-        this.updateProgress(event.charIndex / text.length);
+    renderRate() {
+      const el = this.scope?.querySelector('.rate');
+      if (el) el.textContent = `${this.rate.toFixed(1)}×`;
+    }
+
+    changeRate(delta) {
+      this.rate = Math.max(0.5, Math.min(2.5, Number((this.rate + delta).toFixed(1))));
+      this.renderRate();
+      Store.set({ settings: { ttsRate: this.rate } });
+      if (this.speaking) this.restart();
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Speech                                                             */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Build the spoken string and a char-offset index back into live text
+     * nodes, so a boundary event can be mapped to an exact on-screen Range.
+     */
+    prepare(text) {
+      this.segments = [];
+
+      if (text) {
+        this.spokenText = text;
+        return;
       }
-    };
-    
-    // Speak
-    this.synth.speak(this.currentUtterance);
-  }
 
-  pause() {
-    if (this.synth.speaking && !this.synth.paused) {
-      this.synth.pause();
+      const nodes = Text.collect(document.body, { minLength: 2 });
+      let buffer = '';
+
+      for (const node of nodes) {
+        const content = node.textContent.replace(/\s+/g, ' ');
+        if (!content.trim()) continue;
+        this.segments.push({ node, charIndex: buffer.length, length: content.length });
+        buffer += content;
+        if (!/\s$/.test(buffer)) buffer += ' ';
+      }
+
+      this.spokenText = buffer.trim();
     }
-  }
 
-  resume() {
-    if (this.synth.paused) {
-      this.synth.resume();
-    } else if (!this.synth.speaking) {
-      // Restart if stopped
-      const selection = window.getSelection().toString();
-      if (selection) {
-        this.speak(selection);
-      } else {
-        // Get article content
-        const article = document.querySelector('article, main, .article');
-        if (article) {
-          this.speak(article.textContent);
+    speak(text = null) {
+      this.stop();
+      this.prepare(text);
+
+      if (!this.spokenText) {
+        UI.toast('No readable text found on this page.', { tone: 'warn' });
+        return;
+      }
+
+      // Chrome truncates very long utterances; chunk on sentence boundaries.
+      this.queue = this.chunk(this.spokenText);
+      this.queueIndex = 0;
+      this.speakNext();
+    }
+
+    chunk(text, size = 3000) {
+      const parts = [];
+      let offset = 0;
+
+      while (offset < text.length) {
+        let end = Math.min(offset + size, text.length);
+        if (end < text.length) {
+          const boundary = text.lastIndexOf('. ', end);
+          if (boundary > offset + size * 0.5) end = boundary + 1;
         }
+        parts.push({ text: text.slice(offset, end), offset });
+        offset = end;
+      }
+      return parts;
+    }
+
+    speakNext() {
+      if (this.queueIndex >= this.queue.length) {
+        this.finish();
+        return;
+      }
+
+      const part = this.queue[this.queueIndex];
+      const utterance = new SpeechSynthesisUtterance(part.text);
+      utterance.rate = this.rate;
+      utterance.pitch = this.pitch;
+      utterance.volume = 1;
+
+      const voice = this.pickVoice();
+      if (voice) {
+        utterance.voice = voice;
+        utterance.lang = voice.lang;
+      }
+
+      utterance.onboundary = (event) => {
+        if (event.name && event.name !== 'word') return;
+        this.markWord(part.offset + event.charIndex);
+        this.renderProgress(part.offset + event.charIndex);
+      };
+
+      utterance.onend = () => {
+        if (!this.speaking) return;
+        this.queueIndex += 1;
+        this.speakNext();
+      };
+
+      utterance.onerror = (event) => {
+        // 'interrupted'/'canceled' are our own stop() — not real failures.
+        if (event.error === 'interrupted' || event.error === 'canceled') return;
+        console.warn('[SETU:tts]', event.error);
+        UI.toast('Speech failed on this page.', { tone: 'error' });
+        this.finish();
+      };
+
+      this.utterance = utterance;
+      this.speaking = true;
+      this.paused = false;
+      this.setPlayIcon('❚❚');
+      this.synth.speak(utterance);
+    }
+
+    /** Draw the highlight over the word at `charIndex` of the spoken text. */
+    markWord(charIndex) {
+      if (!this.segments.length) return;
+
+      const segment = [...this.segments].reverse().find((s) => charIndex >= s.charIndex);
+      if (!segment || !segment.node.isConnected) return;
+
+      const local = charIndex - segment.charIndex;
+      const content = segment.node.textContent;
+      if (local < 0 || local >= content.length) return;
+
+      let start = local;
+      let end = local;
+      while (start > 0 && /\S/.test(content[start - 1])) start -= 1;
+      while (end < content.length && /\S/.test(content[end])) end += 1;
+      if (start === end) return;
+
+      const range = document.createRange();
+      try {
+        range.setStart(segment.node, start);
+        range.setEnd(segment.node, end);
+      } catch (_) {
+        return;
+      }
+
+      const rect = range.getBoundingClientRect();
+      if (!rect.width) return;
+
+      this.paintMark(rect);
+
+      // Keep the spoken word comfortably in view.
+      if (rect.top < 80 || rect.bottom > window.innerHeight - 80) {
+        segment.node.parentElement?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
     }
-  }
 
-  stop() {
-    this.synth.cancel();
-    this.isSpeaking = false;
-    this.isPaused = false;
-    this.clearHighlight();
-    this.updateControls();
-    document.body.classList.remove('setu-tts-speaking');
-  }
+    paintMark(rect) {
+      const root = UI.host('tts-mark', { layer: 'reading', interactive: false });
 
-  setRate(rate) {
-    this.rate = Math.max(0.5, Math.min(3, rate));
-    
-    // Update current utterance if speaking
-    if (this.currentUtterance && this.isSpeaking) {
-      // Need to restart with new rate
-      const wasPaused = this.isPaused;
-      this.stop();
-      
-      // Reconstruct remaining text
-      const remainingText = this.words.slice(this.currentWordIndex).join(' ');
-      setTimeout(() => this.speak(remainingText), 100);
-      
-      if (wasPaused) {
-        setTimeout(() => this.pause(), 200);
-      }
-    }
-    
-    this.updateControls();
-  }
-
-  highlightWordAtPosition(charIndex) {
-    this.clearHighlight();
-    
-    // Find the word at this character position
-    let currentIndex = 0;
-    let wordIndex = 0;
-    
-    for (let i = 0; i < this.words.length; i++) {
-      if (currentIndex >= charIndex) {
-        wordIndex = i;
-        break;
-      }
-      currentIndex += this.words[i].length + 1; // +1 for space
-    }
-    
-    this.currentWordIndex = wordIndex;
-    
-    // Highlight in DOM
-    this.highlightWordInDOM(this.words[wordIndex]);
-  }
-
-  highlightWordInDOM(word) {
-    if (!word || word.length < 2) return;
-    
-    // Find text nodes containing this word
-    const walker = document.createTreeWalker(
-      document.body,
-      NodeFilter.SHOW_TEXT,
-      null
-    );
-    
-    const cleanWord = word.replace(/[^a-zA-Z0-9]/g, '');
-    if (cleanWord.length < 2) return;
-    
-    let node;
-    while (node = walker.nextNode()) {
-      const text = node.textContent;
-      const regex = new RegExp(`\\b${cleanWord}\\b`, 'i');
-      
-      if (regex.test(text)) {
-        const parent = node.parentElement;
-        if (parent && !parent.closest('#setu-*')) {
-          // Create highlight
-          const span = document.createElement('span');
-          span.className = 'setu-tts-highlight';
-          
-          const parts = text.split(regex);
-          const match = text.match(regex);
-          
-          if (parts.length > 1 && match) {
-            span.textContent = match[0];
-            
-            const before = document.createTextNode(parts[0]);
-            const after = document.createTextNode(parts.slice(1).join(match[0]));
-            
-            const wrapper = document.createElement('span');
-            wrapper.appendChild(before);
-            wrapper.appendChild(span);
-            wrapper.appendChild(after);
-            
-            node.parentNode.replaceChild(wrapper, node);
-            
-            // Scroll to highlighted word
-            span.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            
-            this.highlightElements.push(span);
-            break;
+      if (!this.mark) {
+        const style = document.createElement('style');
+        style.textContent = `
+          .mark {
+            position: fixed; border-radius: 4px;
+            background: color-mix(in srgb, var(--accent-2) 34%, transparent);
+            box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-2) 55%, transparent);
+            pointer-events: none;
+            transition: top .1s ease, left .1s ease, width .1s ease, height .1s ease;
           }
-        }
+        `;
+        root.appendChild(style);
+
+        const scope = document.createElement('div');
+        scope.className = 'setu-scope';
+        this.mark = document.createElement('div');
+        this.mark.className = 'mark';
+        scope.appendChild(this.mark);
+        root.appendChild(scope);
+      }
+
+      Object.assign(this.mark.style, {
+        top: `${rect.top - 2}px`,
+        left: `${rect.left - 2}px`,
+        width: `${rect.width + 4}px`,
+        height: `${rect.height + 4}px`,
+        display: 'block'
+      });
+    }
+
+    renderProgress(charIndex) {
+      const fill = this.scope?.querySelector('.progress-fill');
+      if (fill && this.spokenText.length) {
+        fill.style.width = `${Math.min(100, (charIndex / this.spokenText.length) * 100)}%`;
+      }
+    }
+
+    togglePlay() {
+      if (!this.speaking) {
+        this.speak();
+      } else if (this.paused) {
+        this.synth.resume();
+        this.paused = false;
+        this.setPlayIcon('❚❚');
+      } else {
+        this.synth.pause();
+        this.paused = true;
+        this.setPlayIcon('▶');
+      }
+    }
+
+    restart() {
+      const wasSpeaking = this.speaking;
+      this.stop();
+      if (wasSpeaking) this.speak();
+    }
+
+    stop() {
+      this.speaking = false;
+      this.paused = false;
+      try {
+        this.synth.cancel();
+      } catch (_) {
+        /* already idle */
+      }
+      this.utterance = null;
+      this.finish();
+    }
+
+    finish() {
+      this.speaking = false;
+      this.setPlayIcon('▶');
+      if (this.mark) this.mark.style.display = 'none';
+      const fill = this.scope?.querySelector('.progress-fill');
+      if (fill) fill.style.width = '0%';
+    }
+
+    setPlayIcon(glyph) {
+      const btn = this.scope?.querySelector('[data-act="play"]');
+      if (btn) {
+        btn.textContent = glyph;
+        btn.setAttribute('aria-label', glyph === '▶' ? 'Play' : 'Pause');
       }
     }
   }
 
-  clearHighlight() {
-    this.highlightElements.forEach(el => {
-      const wrapper = el.parentElement;
-      if (wrapper && wrapper.parentNode) {
-        const text = wrapper.textContent;
-        const textNode = document.createTextNode(text);
-        wrapper.parentNode.replaceChild(textNode, wrapper);
-      }
-    });
-    this.highlightElements = [];
-  }
-
-  updateProgress(percent) {
-    if (!this.ttsOverlay) return;
-    
-    const progressBar = this.ttsOverlay.querySelector('.tts-progress-bar');
-    progressBar.style.width = `${percent * 100}%`;
-  }
-
-  // Read selected text
-  speakSelection() {
-    const selection = window.getSelection().toString();
-    if (selection) {
-      this.speak(selection);
-    }
-  }
-
-  // Read article
-  speakArticle() {
-    const article = document.querySelector('article, main, .article, .post-content, .entry-content');
-    if (article) {
-      this.speak(article.textContent);
-    } else {
-      // Fallback to main content
-      this.speak(document.body.textContent.substring(0, 5000));
-    }
-  }
-}
-
-// Make available globally
-window.TextToSpeech = TextToSpeech;
+  window.SETU.features.set('tts', TextToSpeech);
+})();

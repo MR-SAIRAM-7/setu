@@ -1,625 +1,759 @@
 /**
- * NeuroRead Fully Autonomous In-Page AI Agent & Navigation Copilot
+ * SETU Commander — the in-page AI agent.
  *
- * Fully autonomous browser agent capable of executing multi-step goals on any webpage.
- * Automatically plans, navigates, auto-fills forms, clicks buttons, scrolls, extracts data,
- * and recovers gracefully across DOM changes.
+ * Rebuilt in v3 as a conversational agent rather than a form with buttons.
+ * The user states a goal in words (typed or spoken), the engine reads the live
+ * page and returns a plan, and each step is executed against the real DOM.
+ *
+ * Safety is the defining constraint here. This runs on every site, including
+ * banking and government portals, so:
+ *   - The agent may only target controls it was actually shown.
+ *   - Steps the backend flags `requiresConfirmation` (submit, pay, delete,
+ *     send) never fire automatically — not even during Auto-Run. The run pauses
+ *     and waits for a deliberate click.
+ *   - Nothing is auto-filled with invented personal data. The previous build
+ *     typed a fake identity ("Alex Morgan", a fake address and phone number)
+ *     into arbitrary forms and could then click Submit unattended.
  */
 
-class NeuroBridgeAgentCopilot {
-  constructor() {
-    this.overlay = null;
-    this.currentPlan = null;
-    this.currentStepIdx = 0;
-    this.activeHighlightEl = null;
-    this.badgeTooltip = null;
-    this.recognition = null;
-    this.apiHost = 'http://localhost:3000';
-    this.targetClickListener = null;
-    this.isAutoRunning = false;
-    this.autoRunTimer = null;
-    this.init();
-  }
+(() => {
+  const { Feature, UI, API, Text, Store } = window.SETU;
 
-  async init() {
-    try {
-      const { apiHost } = await chrome.storage.sync.get('apiHost');
-      if (apiHost) this.apiHost = apiHost;
-    } catch (_) {}
+  class Commander extends Feature {
+    static key = 'commander';
 
-    chrome.runtime.onMessage?.addListener((request, _sender, sendResponse) => {
-      if (request.action === 'openAgentCopilot') {
-        this.openOverlay(request.initialTask || '');
-        sendResponse({ success: true });
-      } else if (request.action === 'startAgentTask') {
-        this.openOverlay(request.task || '');
-        if (request.task) this.executeTask(request.task, true);
-        sendResponse({ success: true });
-      } else if (request.action === 'autoFillForm') {
-        this.autoFillEntireForm();
-        sendResponse({ success: true });
-      }
-    });
-
-    // Auto-detect page URL navigation for step advancement
-    window.addEventListener('beforeunload', () => {
-      if (this.currentPlan) {
-        sessionStorage.setItem('nb_agent_active_plan', JSON.stringify({
-          plan: this.currentPlan,
-          stepIdx: Math.min(this.currentStepIdx + 1, this.currentPlan.steps.length - 1)
-        }));
-      }
-    });
-
-    this.restoreActiveSession();
-  }
-
-  restoreActiveSession() {
-    try {
-      const saved = sessionStorage.getItem('nb_agent_active_plan');
-      if (saved) {
-        const { plan, stepIdx } = JSON.parse(saved);
-        sessionStorage.removeItem('nb_agent_active_plan');
-        if (plan && plan.steps?.length) {
-          this.currentPlan = plan;
-          this.currentStepIdx = stepIdx || 0;
-          this.openOverlay();
-          this.renderCurrentStep();
-        }
-      }
-    } catch (e) {
-      console.warn("[NeuroRead Agent] Could not restore session:", e);
-    }
-  }
-
-  openOverlay(initialTask = '') {
-    if (this.overlay) {
-      this.overlay.style.display = 'flex';
-      const input = this.overlay.querySelector('.nb-agent-input');
-      if (input && initialTask) input.value = initialTask;
-      return;
+    constructor() {
+      super();
+      this.plan = null;
+      this.stepIndex = 0;
+      this.autoRun = false;
+      this.busy = false;
+      this.messages = [];
+      this.highlighted = null;
+      this.recognition = null;
     }
 
-    this.overlay = document.createElement('div');
-    this.overlay.id = 'nb-agent-overlay';
-    this.overlay.innerHTML = `
-      <div class="nb-agent-header">
-        <div class="nb-agent-title-box">
-          <span class="nb-agent-badge-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>
-          </span>
-          <div>
-            <h3>NeuroRead AI Autonomous Agent</h3>
-            <span class="nb-agent-subtitle">Fully Autonomous Web Task Execution</span>
-          </div>
-        </div>
-        <button class="nb-agent-close-btn" title="Close Agent">&times;</button>
-      </div>
-
-      <div class="nb-agent-input-container">
-        <div class="nb-agent-input-row">
-          <input type="text" class="nb-agent-input" placeholder="e.g. Fill form, search article, apply for passbook..." value="${initialTask}" />
-          <button class="nb-agent-mic-btn" title="Speak command (Voice input)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
-          </button>
-        </div>
-        <div style="display: flex; gap: 8px; margin-top: 8px;">
-          <button class="nb-agent-start-btn" style="flex: 1; background: #059669;" id="btn-autorun-task">Auto-Run Agent</button>
-          <button class="nb-agent-start-btn" style="flex: 1;" id="btn-plan-task">Step Plan</button>
-          <button class="nb-agent-start-btn" id="btn-autofill-form" style="background: #2563eb; flex: 1;">Auto-Fill Form</button>
-        </div>
-      </div>
-
-      <div class="nb-agent-step-area" style="display: none;">
-        <div class="nb-agent-progress-bar">
-          <div class="nb-agent-progress-fill" style="width: 0%;"></div>
-        </div>
-        <div class="nb-agent-step-counter" style="display: flex; justify-content: space-between; align-items: center;">
-          <span>Step <span id="nb-step-num">1</span> of <span id="nb-step-total">1</span></span>
-          <span id="nb-autorun-status" style="font-size: 11px; color: #059669; font-weight: 700;"></span>
-        </div>
-        
-        <div class="nb-agent-instruction-card">
-          <p class="nb-agent-instruction-text" id="nb-instruction"></p>
-          <div class="nb-agent-tip-text" id="nb-tip"></div>
-        </div>
-
-        <div class="nb-agent-control-buttons">
-          <button class="nb-agent-action-btn highlight" id="btn-execute-step" style="background: #059669; color: #fff; border: none; font-weight: 700;">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            Execute Step
-          </button>
-          <button class="nb-agent-action-btn highlight" id="btn-toggle-autorun" style="background: #6366f1; color: #fff; border: none; font-weight: 700;">
-            Auto-Run All
-          </button>
-          <button class="nb-agent-action-btn speak" id="btn-speak-step">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-            Read Aloud
-          </button>
-        </div>
-
-        <div class="nb-agent-nav-footer">
-          <button class="nb-agent-nav-btn prev" id="btn-prev-step" disabled>&larr; Previous</button>
-          <button class="nb-agent-nav-btn next" id="btn-next-step">Next Step &rarr;</button>
-        </div>
-      </div>
-    `;
-
-    document.body.appendChild(this.overlay);
-    this.attachOverlayListeners();
-  }
-
-  attachOverlayListeners() {
-    this.overlay.querySelector('.nb-agent-close-btn').onclick = () => this.closeOverlay();
-    
-    this.overlay.querySelector('#btn-autorun-task').onclick = () => {
-      const task = this.overlay.querySelector('.nb-agent-input').value.trim();
-      if (task) this.executeTask(task, true);
-    };
-
-    this.overlay.querySelector('#btn-plan-task').onclick = () => {
-      const task = this.overlay.querySelector('.nb-agent-input').value.trim();
-      if (task) this.executeTask(task, false);
-    };
-
-    this.overlay.querySelector('#btn-autofill-form').onclick = () => this.autoFillEntireForm();
-    this.overlay.querySelector('.nb-agent-mic-btn').onclick = () => this.startVoiceRecognition();
-    
-    this.overlay.querySelector('#btn-execute-step').onclick = () => this.executeCurrentStep();
-    this.overlay.querySelector('#btn-toggle-autorun').onclick = () => {
-      if (this.isAutoRunning) {
-        this.stopAutoRun();
-      } else {
-        this.startAutoRun();
-      }
-    };
-    this.overlay.querySelector('#btn-speak-step').onclick = () => this.speakCurrentStep();
-    this.overlay.querySelector('#btn-prev-step').onclick = () => this.navigateStep(-1);
-    this.overlay.querySelector('#btn-next-step').onclick = () => this.navigateStep(1);
-
-    this.overlay.querySelector('.nb-agent-input').onkeydown = (e) => {
-      if (e.key === 'Enter') {
-        const task = e.target.value.trim();
-        if (task) this.executeTask(task, true);
-      }
-    };
-  }
-
-  closeOverlay() {
-    this.stopAutoRun();
-    if (this.overlay) {
-      this.overlay.style.display = 'none';
-    }
-    this.clearHighlight();
-  }
-
-  // Full Autonomous Loop Controller
-  async startAutoRun() {
-    if (!this.currentPlan || !this.currentPlan.steps?.length) return;
-    this.isAutoRunning = true;
-    
-    const autoBtn = this.overlay.querySelector('#btn-toggle-autorun');
-    if (autoBtn) {
-      autoBtn.textContent = 'Pause Auto-Run';
-      autoBtn.style.background = '#f43f5e';
+    onEnable() {
+      this.build();
+      this.restore();
     }
 
-    const statusEl = this.overlay.querySelector('#nb-autorun-status');
-    if (statusEl) statusEl.textContent = 'AUTONOMOUS RUNNING...';
-
-    while (this.isAutoRunning && this.currentStepIdx < this.currentPlan.steps.length) {
-      await this.executeCurrentStepAsync();
-      await new Promise(r => setTimeout(r, 1400));
-    }
-
-    this.stopAutoRun();
-  }
-
-  stopAutoRun() {
-    this.isAutoRunning = false;
-    if (this.autoRunTimer) {
-      clearTimeout(this.autoRunTimer);
-      this.autoRunTimer = null;
-    }
-    const autoBtn = this.overlay?.querySelector('#btn-toggle-autorun');
-    if (autoBtn) {
-      autoBtn.textContent = 'Auto-Run All';
-      autoBtn.style.background = '#6366f1';
-    }
-    const statusEl = this.overlay?.querySelector('#nb-autorun-status');
-    if (statusEl) statusEl.textContent = '';
-  }
-
-  // Smart Autonomous Form Auto-Fill Engine
-  autoFillEntireForm() {
-    const fields = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]), select, textarea'))
-      .filter(el => el.offsetParent !== null && !el.disabled && !el.readOnly && !el.closest('#nb-agent-overlay'));
-
-    if (!fields.length) {
-      alert("No fillable form fields found on this page.");
-      return;
-    }
-
-    let filledCount = 0;
-    fields.forEach(field => {
-      const labelText = (
-        field.id ? (document.querySelector(`label[for="${CSS.escape(field.id)}"]`)?.innerText || '') : ''
-      ) || field.getAttribute('aria-label') || field.placeholder || field.name || field.type || '';
-
-      const lower = labelText.toLowerCase();
-      let fillVal = '';
-
-      if (/email/i.test(lower) || field.type === 'email') {
-        fillVal = 'alex.morgan@example.com';
-      } else if (/first.*name|fname/i.test(lower)) {
-        fillVal = 'Alex';
-      } else if (/last.*name|lname/i.test(lower)) {
-        fillVal = 'Morgan';
-      } else if (/name/i.test(lower)) {
-        fillVal = 'Alex Morgan';
-      } else if (/phone|mobile|tel/i.test(lower) || field.type === 'tel') {
-        fillVal = '+1 (555) 019-2834';
-      } else if (/address|street/i.test(lower)) {
-        fillVal = '123 Innovation Blvd, Suite 400';
-      } else if (/city/i.test(lower)) {
-        fillVal = 'San Francisco';
-      } else if (/zip|postal/i.test(lower)) {
-        fillVal = '94107';
-      } else if (/state|province/i.test(lower)) {
-        fillVal = 'California';
-      } else if (/company|organization/i.test(lower)) {
-        fillVal = 'NeuroRead Technologies';
-      } else if (/subject|title/i.test(lower)) {
-        fillVal = 'Accessibility Support Request';
-      } else if (/comment|message|description|feedback|note/i.test(lower) || field.tagName === 'TEXTAREA') {
-        fillVal = 'This form has been automatically populated by the NeuroRead Autonomous Accessibility Copilot.';
-      } else if (field.type === 'checkbox') {
-        field.checked = true;
-        filledCount++;
-      } else if (field.tagName === 'SELECT') {
-        if (field.options.length > 1) {
-          field.selectedIndex = 1;
-          filledCount++;
-        }
-      } else if (!field.value) {
-        fillVal = 'Sample Information';
-      }
-
-      if (fillVal && field.tagName !== 'SELECT' && field.type !== 'checkbox') {
-        field.focus();
-        field.value = fillVal;
-        field.dispatchEvent(new Event('input', { bubbles: true }));
-        field.dispatchEvent(new Event('change', { bubbles: true }));
-        field.classList.add('nb-agent-target-highlight');
-        setTimeout(() => field.classList.remove('nb-agent-target-highlight'), 2000);
-        filledCount++;
-      }
-    });
-
-    const stepArea = this.overlay.querySelector('.nb-agent-step-area');
-    stepArea.style.display = 'block';
-    this.overlay.querySelector('#nb-instruction').textContent = `Success! Auto-filled ${filledCount} form fields on this page.`;
-    this.overlay.querySelector('#nb-tip').textContent = "Review the populated details and click Submit when ready.";
-    this.speakText(`Auto-filled ${filledCount} form fields on this page.`);
-  }
-
-  // Live Page DOM Extraction Engine
-  extractPageContext() {
-    const title = document.title || '';
-    const headings = Array.from(document.querySelectorAll('h1, h2, h3'))
-      .filter(el => el.offsetParent !== null)
-      .map(el => el.innerText.trim())
-      .filter(Boolean)
-      .slice(0, 10);
-
-    const controls = Array.from(document.querySelectorAll('a, button, input, select, textarea, [role="button"]'))
-      .filter(el => {
-        if (!el.offsetParent) return false;
-        if (el.closest('#nb-agent-overlay') || el.closest('#setu-container') || el.closest('#nb-line-focus-root')) return false;
-        return true;
-      })
-      .slice(0, 30)
-      .map((el, idx) => {
-        let selector = el.id ? `#${CSS.escape(el.id)}` : el.className ? `.${CSS.escape(el.className.split(' ')[0])}` : el.tagName.toLowerCase();
-        let label = el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || el.name || `Element ${idx + 1}`;
-        return { selector, label: label.trim().slice(0, 40), tag: el.tagName.toLowerCase(), type: el.type || '' };
-      });
-
-    return { title, headings, controls };
-  }
-
-  async executeTask(task, autoRun = false) {
-    const stepArea = this.overlay.querySelector('.nb-agent-step-area');
-    stepArea.style.display = 'block';
-    this.overlay.querySelector('#nb-instruction').textContent = "Analyzing page DOM & generating autonomous action plan...";
-    this.overlay.querySelector('#nb-tip').textContent = "Please wait a moment.";
-
-    const pageContext = this.extractPageContext();
-
-    try {
-      const res = await fetch(`${this.apiHost}/api/agent/navigate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task, pageContext })
-      });
-      if (!res.ok) throw new Error("Backend error");
-      this.currentPlan = await res.json();
-    } catch (e) {
-      console.warn("[NeuroRead Agent] Using L0 Local DOM Engine:", e.message);
-      this.currentPlan = this.generateLocalDOMPlan(task, pageContext);
-    }
-
-    this.currentStepIdx = 0;
-    this.renderCurrentStep();
-
-    if (autoRun) {
-      setTimeout(() => this.startAutoRun(), 600);
-    }
-  }
-
-  renderCurrentStep() {
-    if (!this.currentPlan || !this.currentPlan.steps?.length) return;
-
-    const total = this.currentPlan.steps.length;
-    const step = this.currentPlan.steps[this.currentStepIdx];
-
-    this.overlay.querySelector('#nb-step-num').textContent = this.currentStepIdx + 1;
-    this.overlay.querySelector('#nb-step-total').textContent = total;
-    this.overlay.querySelector('#nb-instruction').textContent = step.instruction;
-    this.overlay.querySelector('#nb-tip').textContent = `Tip: ${step.tip}`;
-
-    const progressPct = ((this.currentStepIdx + 1) / total) * 100;
-    this.overlay.querySelector('.nb-agent-progress-fill').style.width = `${progressPct}%`;
-
-    this.overlay.querySelector('#btn-prev-step').disabled = this.currentStepIdx === 0;
-    const nextBtn = this.overlay.querySelector('#btn-next-step');
-    nextBtn.textContent = this.currentStepIdx === total - 1 ? "Finish Task" : "Next Step \u2192";
-
-    // Auto highlight current step target on live DOM
-    this.highlightCurrentTarget();
-
-    // Auto read step aloud
-    this.speakCurrentStep();
-  }
-
-  navigateStep(delta) {
-    if (!this.currentPlan) return;
-    const newIdx = this.currentStepIdx + delta;
-    if (newIdx >= 0 && newIdx < this.currentPlan.steps.length) {
-      this.currentStepIdx = newIdx;
-      this.renderCurrentStep();
-    } else if (newIdx >= this.currentPlan.steps.length) {
+    onDisable() {
       this.stopAutoRun();
-      alert("Autonomous task complete! All steps executed.");
-      this.closeOverlay();
+      this.clearHighlight();
+      this.stopVoice();
+      UI.destroyHost('commander');
     }
-  }
 
-  // Find target element on page with fuzzy matching fallbacks
-  findTargetElement(step) {
-    let target = null;
-    if (step.targetSelector) {
+    open(initial = '') {
+      if (!this.enabled) this.enable();
+      // Clear any inline hide; the stylesheet owns the layout (display: flex).
+      this.dock.style.display = '';
+      const input = this.scope.querySelector('.composer input');
+      if (initial) input.value = initial;
+      input.focus();
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Session continuity across navigations                              */
+    /* ------------------------------------------------------------------ */
+
+    persist() {
       try {
-        target = document.querySelector(step.targetSelector);
-      } catch (_) {}
+        sessionStorage.setItem(
+          'setu_agent_session',
+          JSON.stringify({ plan: this.plan, stepIndex: this.stepIndex, messages: this.messages.slice(-12) })
+        );
+      } catch (_) {
+        /* storage full or blocked */
+      }
     }
 
-    if (!target && step.targetText) {
-      const lower = step.targetText.toLowerCase();
-      const candidates = Array.from(document.querySelectorAll('a, button, input, select, textarea, label, h1, h2, h3, [role="button"]'))
-        .filter(el => !el.closest('#nb-agent-overlay') && el.offsetParent !== null);
-      
-      target = candidates.find(el => (el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || '').toLowerCase().includes(lower));
+    restore() {
+      try {
+        const raw = sessionStorage.getItem('setu_agent_session');
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        sessionStorage.removeItem('setu_agent_session');
+
+        if (saved.plan?.steps?.length) {
+          this.plan = saved.plan;
+          this.stepIndex = Math.min(saved.stepIndex || 0, saved.plan.steps.length - 1);
+          this.messages = saved.messages || [];
+          this.messages.forEach((m) => this.appendMessage(m.role, m.text, { silent: true }));
+          this.renderPlan();
+          this.say('agent', 'Picking up where we left off after the page changed.');
+        }
+      } catch (_) {
+        /* corrupt session — ignore */
+      }
     }
 
-    return target;
-  }
+    /* ------------------------------------------------------------------ */
+    /* Page snapshot                                                      */
+    /* ------------------------------------------------------------------ */
 
-  // Async Step Execution Promise for Autonomous Loop
-  async executeCurrentStepAsync() {
-    return new Promise((resolve) => {
-      this.executeCurrentStep();
-      setTimeout(resolve, 800);
-    });
-  }
+    /**
+     * Describe the page to the model as a list of addressable controls.
+     * Each gets a `ref` and a data attribute, so a plan can name a control
+     * unambiguously without brittle CSS selectors.
+     */
+    snapshot({ maxControls = 60 } = {}) {
+      document.querySelectorAll('[data-setu-ref]').forEach((el) => el.removeAttribute('data-setu-ref'));
 
-  // Execute Action directly on DOM target
-  executeCurrentStep() {
-    if (!this.currentPlan || !this.currentPlan.steps?.length) return;
-    const step = this.currentPlan.steps[this.currentStepIdx];
-    const target = this.findTargetElement(step);
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 2 || rect.height < 2) return false;
+        const style = getComputedStyle(el);
+        return style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) > 0.05;
+      };
 
-    if (!target) {
-      if (step.actionType === 'scroll') {
-        window.scrollBy({ top: window.innerHeight * 0.6, behavior: 'smooth' });
-        this.navigateStep(1);
+      const controls = [];
+      const nodes = document.querySelectorAll(
+        'a[href], button, input:not([type="hidden"]), select, textarea, [role="button"], [role="link"], [role="tab"], [role="checkbox"], summary'
+      );
+
+      for (const el of nodes) {
+        if (controls.length >= maxControls) break;
+        if (Text.isOurs(el) || el.disabled || !isVisible(el)) continue;
+
+        const label = (
+          el.getAttribute('aria-label') ||
+          el.innerText ||
+          el.value ||
+          el.placeholder ||
+          el.title ||
+          el.name ||
+          (el.id ? document.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.innerText : '') ||
+          el.getAttribute('alt') ||
+          ''
+        )
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 70);
+
+        if (!label) continue;
+
+        const ref = `r${controls.length}`;
+        el.setAttribute('data-setu-ref', ref);
+
+        controls.push({
+          ref,
+          tag: el.tagName.toLowerCase(),
+          type: el.type || '',
+          label,
+          value: el.tagName === 'INPUT' && el.type !== 'password' ? String(el.value || '').slice(0, 40) : ''
+        });
+      }
+
+      return {
+        url: location.href,
+        title: document.title,
+        headings: [...document.querySelectorAll('h1, h2, h3')]
+          .filter((el) => !Text.isOurs(el) && el.getClientRects().length)
+          .map((el) => el.innerText.trim())
+          .filter(Boolean)
+          .slice(0, 14),
+        controls,
+        text: Text.pageText(3000)
+      };
+    }
+
+    resolve(step) {
+      if (step.targetRef) {
+        const el = document.querySelector(`[data-setu-ref="${CSS.escape(step.targetRef)}"]`);
+        if (el?.isConnected) return el;
+      }
+
+      // The page re-rendered and dropped our refs — fall back to the label.
+      if (step.targetText) {
+        const needle = step.targetText.toLowerCase();
+        const candidates = [...document.querySelectorAll('a, button, input, select, textarea, [role="button"]')];
+        return (
+          candidates.find((el) => {
+            if (Text.isOurs(el) || !el.getClientRects().length) return false;
+            const label = (el.getAttribute('aria-label') || el.innerText || el.value || el.placeholder || '')
+              .toLowerCase()
+              .trim();
+            return label === needle;
+          }) ||
+          candidates.find((el) => {
+            if (Text.isOurs(el) || !el.getClientRects().length) return false;
+            const label = (el.getAttribute('aria-label') || el.innerText || el.value || el.placeholder || '')
+              .toLowerCase();
+            return label.includes(needle);
+          }) ||
+          null
+        );
+      }
+      return null;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Conversation                                                       */
+    /* ------------------------------------------------------------------ */
+
+    async submit(text) {
+      const goal = text.trim();
+      if (!goal || this.busy) return;
+
+      this.say('user', goal);
+      this.busy = true;
+      this.setThinking(true);
+
+      try {
+        const plan = await API.post('/api/agent/plan', { task: goal, pageContext: this.snapshot() });
+
+        if (!plan.feasible) {
+          this.say('agent', plan.blockedReason || "I can't do that from this page.");
+          this.plan = null;
+          this.renderPlan();
+          return;
+        }
+
+        if (!plan.steps?.length) {
+          this.say('agent', "I couldn't find the controls needed for that on this page.");
+          return;
+        }
+
+        this.plan = plan;
+        this.stepIndex = 0;
+        this.say('agent', plan.understanding || `Here's my plan for "${goal}".`);
+        if (plan.fallback) {
+          this.say('agent', `Note: the AI engine was unreachable (${plan.fallbackReason || 'offline'}), so this is a basic local plan.`);
+        }
+        this.renderPlan();
+        this.highlightCurrent();
+      } catch (error) {
+        this.say('agent', `I couldn't reach the SETU engine. ${error.message}`);
+      } finally {
+        this.busy = false;
+        this.setThinking(false);
+      }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Execution                                                          */
+    /* ------------------------------------------------------------------ */
+
+    currentStep() {
+      return this.plan?.steps?.[this.stepIndex] || null;
+    }
+
+    /**
+     * Execute the current step.
+     * @param {boolean} confirmed set only by an explicit user click on a
+     *   step the backend flagged as irreversible.
+     */
+    async execute({ confirmed = false } = {}) {
+      const step = this.currentStep();
+      if (!step || this.busy) return;
+
+      if (step.requiresConfirmation && !confirmed) {
+        this.stopAutoRun();
+        this.renderPlan();
+        this.say(
+          'agent',
+          `This step will "${step.targetText || step.instruction}", which I can't undo. Press Confirm below if you want me to do it.`
+        );
         return;
       }
-      this.navigateStep(1);
-      return;
-    }
 
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const selfContained = ['scroll', 'read', 'wait'];
+      const target = selfContained.includes(step.actionType) ? null : this.resolve(step);
 
-    if (step.actionType === 'click' || target.tagName === 'BUTTON' || target.tagName === 'A' || target.getAttribute('role') === 'button') {
-      target.classList.add('nb-agent-target-highlight');
-      setTimeout(() => {
-        try {
-          target.click();
-        } catch (err) {
-          console.warn("Click failed:", err);
-        }
-        this.navigateStep(1);
-      }, 400);
-    } else if (step.actionType === 'fill' || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
-      target.focus();
-      target.select?.();
-      
-      let fillVal = step.valueToFill || target.value || '';
-      if (!fillVal) {
-        const label = (target.placeholder || target.name || target.id || '').toLowerCase();
-        if (/email/i.test(label)) fillVal = 'alex.morgan@example.com';
-        else if (/name/i.test(label)) fillVal = 'Alex Morgan';
-        else if (/phone|tel/i.test(label)) fillVal = '+1 (555) 019-2834';
-        else fillVal = 'Sample Input';
+      if (!target && !selfContained.includes(step.actionType)) {
+        this.say('agent', `I couldn't find "${step.targetText}" on the page any more. It may have moved.`);
+        this.stopAutoRun();
+        return;
       }
 
-      target.value = fillVal;
+      this.busy = true;
+
+      try {
+        switch (step.actionType) {
+          case 'scroll':
+            window.scrollBy({ top: window.innerHeight * 0.75, behavior: 'smooth' });
+            break;
+
+          case 'wait':
+            await new Promise((resolve) => setTimeout(resolve, 1200));
+            break;
+
+          case 'read':
+            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            break;
+
+          case 'fill':
+          case 'select':
+            await this.fill(target, step);
+            break;
+
+          case 'click':
+          case 'submit':
+          case 'navigate':
+          default:
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            await new Promise((resolve) => setTimeout(resolve, 320));
+            // A navigation may tear down this context — save first.
+            this.persist();
+            target.click();
+            break;
+        }
+
+        this.advance();
+      } catch (error) {
+        this.say('agent', `That step didn't work: ${error.message}`);
+        this.stopAutoRun();
+      } finally {
+        this.busy = false;
+      }
+    }
+
+    async fill(target, step) {
+      target.focus();
+
+      if (target.tagName === 'SELECT') {
+        const wanted = String(step.valueToFill || '').toLowerCase();
+        const option =
+          [...target.options].find((o) => o.value.toLowerCase() === wanted) ||
+          [...target.options].find((o) => o.text.toLowerCase().includes(wanted));
+        if (!option) throw new Error(`no option matching "${step.valueToFill}"`);
+        target.value = option.value;
+      } else if (target.type === 'checkbox' || target.type === 'radio') {
+        target.checked = step.valueToFill !== 'false';
+      } else {
+        // Without a supplied value we hand control back rather than inventing
+        // personal data — this is someone's real form.
+        if (!step.valueToFill) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          this.flash(target);
+          this.say('agent', `Please type your ${step.targetText || 'details'} here — I won't guess personal information.`);
+          this.stopAutoRun();
+          throw new Error('needs-user-input');
+        }
+        target.value = step.valueToFill;
+      }
+
+      // Fire the events frameworks listen for, so React/Vue see the change.
       target.dispatchEvent(new Event('input', { bubbles: true }));
       target.dispatchEvent(new Event('change', { bubbles: true }));
-      target.classList.add('nb-agent-target-highlight');
-      setTimeout(() => target.classList.remove('nb-agent-target-highlight'), 1200);
-
-      this.navigateStep(1);
-    } else if (step.actionType === 'scroll') {
-      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      this.navigateStep(1);
-    } else {
-      target.focus();
-      this.navigateStep(1);
+      this.flash(target);
     }
-  }
 
-  // High-Contrast DOM Target Element Highlighter & Floating Badge Tooltip
-  highlightCurrentTarget() {
-    this.clearHighlight();
-    if (!this.currentPlan || !this.currentPlan.steps?.length) return;
+    advance() {
+      this.clearHighlight();
 
-    const step = this.currentPlan.steps[this.currentStepIdx];
-    const target = this.findTargetElement(step);
+      if (this.stepIndex >= this.plan.steps.length - 1) {
+        this.stopAutoRun();
+        this.say('agent', this.plan.supportiveMessage || 'That is everything on my list. Nicely done.');
+        this.renderPlan();
+        return;
+      }
 
-    if (target) {
+      this.stepIndex += 1;
+      this.renderPlan();
+      this.highlightCurrent();
+      this.persist();
+    }
+
+    goTo(index) {
+      if (!this.plan) return;
+      this.stepIndex = Math.max(0, Math.min(this.plan.steps.length - 1, index));
+      this.clearHighlight();
+      this.renderPlan();
+      this.highlightCurrent();
+    }
+
+    async startAutoRun() {
+      if (!this.plan || this.autoRun) return;
+      this.autoRun = true;
+      this.renderPlan();
+
+      while (this.autoRun && this.plan && this.stepIndex < this.plan.steps.length) {
+        const step = this.currentStep();
+
+        // Auto-run stops dead at anything irreversible.
+        if (step.requiresConfirmation) {
+          this.stopAutoRun();
+          this.say('agent', `Stopping here — "${step.instruction}" needs your confirmation.`);
+          this.renderPlan();
+          return;
+        }
+
+        const before = this.stepIndex;
+        await this.execute();
+        await new Promise((resolve) => setTimeout(resolve, 900));
+
+        // No forward progress means we are stuck; do not spin.
+        if (this.stepIndex === before) break;
+      }
+
+      this.stopAutoRun();
+    }
+
+    stopAutoRun() {
+      this.autoRun = false;
+      this.renderPlan();
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Target highlighting                                                */
+    /* ------------------------------------------------------------------ */
+
+    highlightCurrent() {
+      const step = this.currentStep();
+      if (!step) return;
+
+      const target = this.resolve(step);
+      if (!target) return;
+
       target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      target.classList.add('nb-agent-target-highlight');
-      this.activeHighlightEl = target;
+      this.highlighted = target;
+      this.paintRing(target);
+      this.ringTimer = setInterval(() => this.paintRing(target), 260);
+      this.cleanup(() => clearInterval(this.ringTimer));
+    }
 
-      // Attach auto-step listener: when user clicks target manually, auto advance step!
-      this.targetClickListener = () => {
-        setTimeout(() => this.navigateStep(1), 300);
-      };
-      target.addEventListener('click', this.targetClickListener, { once: true });
+    /** Ring is drawn in our own shadow layer, so page CSS can't hide it. */
+    paintRing(target) {
+      if (!target?.isConnected) return;
 
-      // Attach floating step badge tooltip directly over element
-      this.badgeTooltip = document.createElement('div');
-      this.badgeTooltip.className = 'nb-agent-floating-badge';
-      this.badgeTooltip.style.pointerEvents = 'auto';
-      this.badgeTooltip.innerHTML = `
-        <span>Step ${step.stepNumber}: ${step.actionType?.toUpperCase() || 'ACTION'}</span>
-        <button id="nb-badge-exec-btn" style="background:#ffffff; color:#059669; border:none; padding:2px 8px; border-radius:10px; font-weight:700; cursor:pointer; margin-left:6px;">Execute</button>
-      `;
-      document.body.appendChild(this.badgeTooltip);
-
-      this.badgeTooltip.querySelector('#nb-badge-exec-btn').onclick = (e) => {
-        e.stopPropagation();
-        this.executeCurrentStep();
-      };
+      const root = UI.host('agent-ring', { layer: 'reading', interactive: false });
+      if (!this.ring) {
+        const style = document.createElement('style');
+        style.textContent = `
+          .ring {
+            position: fixed; border-radius: 8px; pointer-events: none;
+            border: 3px solid var(--accent-2);
+            box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-2) 25%, transparent), 0 0 22px var(--accent-2);
+            animation: throb 1.7s ease-in-out infinite;
+            transition: top .18s ease, left .18s ease, width .18s ease, height .18s ease;
+          }
+          @keyframes throb { 0%,100%{opacity:1} 50%{opacity:.55} }
+        `;
+        root.appendChild(style);
+        const scope = document.createElement('div');
+        scope.className = 'setu-scope';
+        this.ring = document.createElement('div');
+        this.ring.className = 'ring';
+        scope.appendChild(this.ring);
+        root.appendChild(scope);
+      }
 
       const rect = target.getBoundingClientRect();
-      this.badgeTooltip.style.top = `${Math.max(10, window.scrollY + rect.top - 40)}px`;
-      this.badgeTooltip.style.left = `${Math.max(10, window.scrollX + rect.left)}px`;
-    }
-  }
-
-  clearHighlight() {
-    if (this.activeHighlightEl) {
-      if (this.targetClickListener) {
-        this.activeHighlightEl.removeEventListener('click', this.targetClickListener);
-        this.targetClickListener = null;
-      }
-      this.activeHighlightEl.classList.remove('nb-agent-target-highlight');
-      this.activeHighlightEl = null;
-    }
-    if (this.badgeTooltip) {
-      this.badgeTooltip.remove();
-      this.badgeTooltip = null;
-    }
-  }
-
-  speakText(text) {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 0.95;
-      window.speechSynthesis.speak(utterance);
-    }
-  }
-
-  speakCurrentStep() {
-    if (!this.currentPlan || !this.currentPlan.steps?.length) return;
-    const step = this.currentPlan.steps[this.currentStepIdx];
-    this.speakText(`Step ${step.stepNumber}. ${step.instruction}`);
-  }
-
-  startVoiceRecognition() {
-    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!Recognition) {
-      alert("Voice recognition is not supported in this browser. Please type your task.");
-      return;
-    }
-
-    const recognition = new Recognition();
-    recognition.lang = 'en-US';
-    recognition.interimResults = false;
-    
-    const input = this.overlay.querySelector('.nb-agent-input');
-    input.placeholder = "Listening... Speak your task now!";
-
-    recognition.onresult = (event) => {
-      const speechResult = event.results[0][0].transcript;
-      input.value = speechResult;
-      if (/fill|form|input/i.test(speechResult)) {
-        this.autoFillEntireForm();
-      } else {
-        this.executeTask(speechResult, true);
-      }
-    };
-
-    recognition.onerror = () => {
-      input.placeholder = "Could not hear speech. Please type your task.";
-    };
-
-    recognition.start();
-  }
-
-  generateLocalDOMPlan(task, pageContext) {
-    const controls = pageContext.controls || [];
-    const login = controls.find(c => /login|sign in|member|passbook|portal|log in/i.test(c.label));
-    const submit = controls.find(c => /submit|apply|proceed|next|register|search|send/i.test(c.label));
-
-    const steps = [];
-    if (login) {
-      steps.push({
-        stepNumber: 1,
-        instruction: `Click the "${login.label}" link highlighted on the page to open access portal.`,
-        targetSelector: login.selector,
-        targetText: login.label,
-        actionType: 'click',
-        tip: 'Target element is surrounded by a glowing green ring.'
+      Object.assign(this.ring.style, {
+        top: `${rect.top - 4}px`,
+        left: `${rect.left - 4}px`,
+        width: `${rect.width + 8}px`,
+        height: `${rect.height + 8}px`,
+        display: rect.width ? 'block' : 'none'
       });
     }
-    steps.push({
-      stepNumber: steps.length + 1,
-      instruction: `Enter your details into the primary form field on the screen.`,
-      targetSelector: 'input[type="text"], input[type="search"], textarea',
-      targetText: 'Input field',
-      actionType: 'fill',
-      valueToFill: 'Alex Morgan',
-      tip: 'Take your time entering text or click Auto-Fill Form.'
-    });
-    steps.push({
-      stepNumber: steps.length + 1,
-      instruction: `Click "${submit ? submit.label : 'Submit'}" to complete your task for "${task}".`,
-      targetSelector: submit ? submit.selector : 'button[type="submit"]',
-      targetText: submit ? submit.label : 'Submit',
-      actionType: 'click',
-      tip: 'Check all details before submitting.'
-    });
 
-    return { goal: task, totalSteps: steps.length, currentStepIndex: 0, steps, supportiveMessage: `Guiding you step-by-step through ${task}.` };
+    clearHighlight() {
+      clearInterval(this.ringTimer);
+      UI.destroyHost('agent-ring');
+      this.ring = null;
+      this.highlighted = null;
+    }
+
+    flash(el) {
+      const original = el.style.outline;
+      el.style.outline = '3px solid #4ade80';
+      setTimeout(() => {
+        el.style.outline = original;
+      }, 900);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Voice                                                              */
+    /* ------------------------------------------------------------------ */
+
+    toggleVoice() {
+      if (this.recognition) return this.stopVoice();
+
+      const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!Recognition) {
+        this.say('agent', 'Voice input is not supported in this browser — please type instead.');
+        return;
+      }
+
+      const recognition = new Recognition();
+      recognition.lang = navigator.language || 'en-US';
+      recognition.interimResults = true;
+      recognition.continuous = false;
+
+      const input = this.scope.querySelector('.composer input');
+      const micButton = this.scope.querySelector('[data-act="mic"]');
+      micButton.dataset.active = 'true';
+
+      recognition.onresult = (event) => {
+        const transcript = [...event.results].map((r) => r[0].transcript).join('');
+        input.value = transcript;
+        if (event.results[event.results.length - 1].isFinal) {
+          this.stopVoice();
+          this.submit(transcript);
+        }
+      };
+      recognition.onerror = (event) => {
+        this.stopVoice();
+        if (event.error !== 'aborted') {
+          this.say('agent', `I couldn't hear that (${event.error}). Please type your goal.`);
+        }
+      };
+      recognition.onend = () => this.stopVoice();
+
+      this.recognition = recognition;
+      recognition.start();
+    }
+
+    stopVoice() {
+      if (this.recognition) {
+        try {
+          this.recognition.abort();
+        } catch (_) {
+          /* already stopped */
+        }
+        this.recognition = null;
+      }
+      const micButton = this.scope?.querySelector('[data-act="mic"]');
+      if (micButton) micButton.dataset.active = 'false';
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* View                                                               */
+    /* ------------------------------------------------------------------ */
+
+    say(role, text) {
+      this.messages.push({ role, text });
+      this.appendMessage(role, text);
+    }
+
+    appendMessage(role, text, { silent = false } = {}) {
+      const log = this.scope?.querySelector('.log');
+      if (!log) return;
+
+      const bubble = document.createElement('div');
+      bubble.className = `msg ${role}`;
+      bubble.textContent = text;
+      log.appendChild(bubble);
+      log.scrollTop = log.scrollHeight;
+
+      if (!silent && role === 'agent') {
+        log.setAttribute('aria-busy', 'false');
+      }
+    }
+
+    setThinking(on) {
+      const el = this.scope?.querySelector('.thinking');
+      if (el) el.style.display = on ? 'flex' : 'none';
+    }
+
+    renderPlan() {
+      const wrap = this.scope?.querySelector('.plan');
+      if (!wrap) return;
+
+      if (!this.plan?.steps?.length) {
+        wrap.innerHTML = '';
+        wrap.style.display = 'none';
+        return;
+      }
+
+      wrap.style.display = 'block';
+      const step = this.currentStep();
+      const total = this.plan.steps.length;
+      const finished = this.stepIndex >= total - 1 && !this.autoRun;
+
+      wrap.innerHTML = `
+        <div class="plan-bar"><div class="plan-fill" style="width:${((this.stepIndex + 1) / total) * 100}%"></div></div>
+        <div class="plan-head">
+          <span>Step ${this.stepIndex + 1} of ${total}</span>
+          ${this.autoRun ? '<span class="running">AUTO-RUNNING</span>' : ''}
+        </div>
+        <ol class="plan-steps">
+          ${this.plan.steps
+            .map(
+              (s, i) => `
+            <li class="plan-step" data-index="${i}" data-state="${
+                i < this.stepIndex ? 'done' : i === this.stepIndex ? 'current' : 'todo'
+              }">
+              <span class="dot">${i < this.stepIndex ? '✓' : i + 1}</span>
+              <span class="plan-text">${Text.escape(s.instruction)}${
+                s.requiresConfirmation ? '<em class="warn">needs confirmation</em>' : ''
+              }</span>
+            </li>`
+            )
+            .join('')}
+        </ol>
+        ${step?.tip ? `<p class="tip">${Text.escape(step.tip)}</p>` : ''}
+        <div class="plan-acts">
+          <button class="setu-btn" data-act="prev" ${this.stepIndex === 0 ? 'disabled' : ''}>Back</button>
+          ${
+            step?.requiresConfirmation
+              ? `<button class="setu-btn" data-variant="danger" data-act="confirm">Confirm &amp; do it</button>`
+              : `<button class="setu-btn" data-variant="primary" data-act="do" ${finished ? 'disabled' : ''}>Do this step</button>`
+          }
+          <button class="setu-btn" data-act="auto">${this.autoRun ? 'Pause' : 'Auto-run'}</button>
+          <button class="setu-btn" data-act="skip" ${finished ? 'disabled' : ''}>Skip</button>
+        </div>
+      `;
+
+      wrap.querySelectorAll('.plan-step').forEach((el) => {
+        el.onclick = () => this.goTo(Number(el.dataset.index));
+      });
+
+      const act = (name, fn) => {
+        const el = wrap.querySelector(`[data-act="${name}"]`);
+        if (el) el.onclick = fn;
+      };
+      act('prev', () => this.goTo(this.stepIndex - 1));
+      act('do', () => this.execute());
+      act('confirm', () => this.execute({ confirmed: true }));
+      act('skip', () => this.advance());
+      act('auto', () => (this.autoRun ? this.stopAutoRun() : this.startAutoRun()));
+    }
+
+    build() {
+      const root = UI.host('commander', { layer: 'panel', interactive: true });
+      root.appendChild(this.styles());
+
+      const scope = document.createElement('div');
+      scope.className = 'setu-scope';
+      scope.innerHTML = `
+        <div class="dock" role="dialog" aria-label="SETU Commander">
+          <header class="head">
+            <div class="id">
+              <span class="pulse"></span>
+              <div>
+                <strong>SETU Commander</strong>
+                <small>Tell me what you want to do on this page</small>
+              </div>
+            </div>
+            <button class="x" data-act="close" aria-label="Close Commander">×</button>
+          </header>
+
+          <div class="log" role="log" aria-live="polite"></div>
+          <div class="thinking"><span></span><span></span><span></span></div>
+          <div class="plan" style="display:none"></div>
+
+          <div class="composer">
+            <input type="text" placeholder="e.g. find the login button, summarise this page…" aria-label="Your goal" />
+            <button data-act="mic" data-active="false" aria-label="Speak your goal" title="Speak">🎤</button>
+            <button data-act="send" data-variant="primary" aria-label="Send">↑</button>
+          </div>
+          <div class="quick">
+            <button data-goal="Summarise this page for me">Summarise</button>
+            <button data-goal="Break this page into simple steps">Break it down</button>
+            <button data-goal="Find the main action button on this page">Find the button</button>
+          </div>
+        </div>
+      `;
+      root.appendChild(scope);
+
+      this.scope = scope;
+      this.dock = scope.querySelector('.dock');
+
+      const input = scope.querySelector('.composer input');
+      const send = () => {
+        const value = input.value;
+        input.value = '';
+        this.submit(value);
+      };
+
+      scope.querySelector('[data-act="send"]').onclick = send;
+      scope.querySelector('[data-act="mic"]').onclick = () => this.toggleVoice();
+      scope.querySelector('[data-act="close"]').onclick = () => this.disable();
+      input.onkeydown = (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          send();
+        }
+      };
+      scope.querySelectorAll('.quick button').forEach((btn) => {
+        btn.onclick = () => this.submit(btn.dataset.goal);
+      });
+
+      this.say('agent', "Tell me what you'd like to do on this page and I'll walk you through it.");
+    }
+
+    styles() {
+      const style = document.createElement('style');
+      style.textContent = `
+        .dock {
+          position: fixed; right: 20px; bottom: 20px;
+          width: min(388px, calc(100vw - 32px)); max-height: min(680px, calc(100vh - 40px));
+          display: flex; flex-direction: column;
+          background: var(--bg-soft); border: 1px solid var(--border);
+          border-radius: 18px; box-shadow: var(--shadow); overflow: hidden; pointer-events: auto;
+        }
+        .head { display:flex; align-items:center; justify-content:space-between; gap:10px;
+                padding:14px 16px; border-bottom:1px solid var(--border); }
+        .id { display:flex; align-items:center; gap:10px; }
+        .id strong { display:block; font-size:14px; }
+        .id small { display:block; font-size:11.5px; color:var(--text-dim); }
+        .pulse { width:9px; height:9px; border-radius:50%; background:var(--accent-2);
+                 box-shadow:0 0 9px var(--accent-2); animation:throb 2.2s ease-in-out infinite; }
+        @keyframes throb { 0%,100%{opacity:1} 50%{opacity:.4} }
+        .x { background:none; border:none; color:var(--text-dim); font-size:19px; cursor:pointer; line-height:1; }
+        .x:hover { color:var(--danger); }
+
+        .log { flex:1; min-height:120px; max-height:250px; overflow-y:auto;
+               padding:14px 16px; display:flex; flex-direction:column; gap:9px; }
+        .msg { max-width:88%; padding:9px 13px; border-radius:13px; font-size:13.2px; line-height:1.55; white-space:pre-wrap; }
+        .msg.agent { align-self:flex-start; background:var(--surface); border:1px solid var(--border); border-bottom-left-radius:5px; }
+        .msg.user  { align-self:flex-end; background:var(--accent); color:#0b1020; font-weight:500; border-bottom-right-radius:5px; }
+
+        .thinking { display:none; gap:4px; padding:0 20px 10px; }
+        .thinking span { width:6px; height:6px; border-radius:50%; background:var(--text-dim); animation:bounce 1.3s ease-in-out infinite; }
+        .thinking span:nth-child(2){ animation-delay:.18s } .thinking span:nth-child(3){ animation-delay:.36s }
+        @keyframes bounce { 0%,60%,100%{transform:translateY(0);opacity:.4} 30%{transform:translateY(-5px);opacity:1} }
+
+        .plan { border-top:1px solid var(--border); padding:13px 16px; max-height:290px; overflow-y:auto; }
+        .plan-bar { height:3px; background:var(--surface); border-radius:2px; overflow:hidden; margin-bottom:10px; }
+        .plan-fill { height:100%; background:var(--accent-2); transition:width .3s ease; }
+        .plan-head { display:flex; justify-content:space-between; align-items:center;
+                     font-size:11px; font-weight:700; letter-spacing:.05em; color:var(--text-dim); margin-bottom:9px; }
+        .running { color:var(--accent-2); }
+        .plan-steps { list-style:none; display:flex; flex-direction:column; gap:6px; margin-bottom:10px; }
+        .plan-step { display:flex; gap:9px; align-items:flex-start; padding:7px 9px; border-radius:9px; cursor:pointer; }
+        .plan-step:hover { background:rgba(255,255,255,.05); }
+        .plan-step[data-state="current"] { background:rgba(124,140,255,.14); border:1px solid var(--accent); }
+        .plan-step[data-state="done"] { opacity:.5; }
+        .dot { flex-shrink:0; width:19px; height:19px; border-radius:50%; background:var(--surface);
+               border:1px solid var(--border); font-size:10.5px; font-weight:800; display:grid; place-items:center; }
+        .plan-step[data-state="done"] .dot { background:var(--accent-2); color:#0b1020; border-color:var(--accent-2); }
+        .plan-step[data-state="current"] .dot { background:var(--accent); color:#0b1020; border-color:var(--accent); }
+        .plan-text { font-size:12.8px; line-height:1.5; }
+        .warn { display:block; font-size:10.5px; color:var(--warn); font-style:normal; font-weight:700; margin-top:2px; }
+        .tip { font-size:11.8px; color:var(--text-dim); font-style:italic; margin-bottom:10px; line-height:1.5; }
+        .plan-acts { display:flex; gap:6px; flex-wrap:wrap; }
+        .plan-acts .setu-btn { flex:1; min-width:78px; min-height:32px; font-size:12px; padding:6px 9px; }
+
+        .composer { display:flex; gap:7px; padding:12px 14px; border-top:1px solid var(--border); }
+        .composer input {
+          flex:1; padding:10px 13px; background:var(--surface); color:var(--text);
+          border:1px solid var(--border); border-radius:10px; font-size:13px;
+        }
+        .composer input:focus { outline:none; border-color:var(--accent); }
+        .composer button {
+          width:38px; border-radius:10px; background:var(--surface);
+          border:1px solid var(--border); color:var(--text); cursor:pointer; font-size:14px;
+        }
+        .composer button:hover { border-color:var(--accent); }
+        .composer button[data-variant="primary"] { background:var(--accent); border-color:var(--accent); color:#0b1020; font-weight:800; }
+        .composer button[data-active="true"] { background:var(--danger); border-color:var(--danger); }
+
+        .quick { display:flex; gap:6px; padding:0 14px 13px; flex-wrap:wrap; }
+        .quick button {
+          background:transparent; border:1px solid var(--border); color:var(--text-dim);
+          border-radius:999px; padding:5px 11px; font-size:11.5px; cursor:pointer;
+        }
+        .quick button:hover { border-color:var(--accent); color:var(--text); }
+      `;
+      return style;
+    }
   }
-}
 
-// Instantiate In-Page Agent
-if (typeof window !== 'undefined') {
-  window.nbAgentCopilot = new NeuroBridgeAgentCopilot();
-}
+  window.SETU.features.set('commander', Commander);
+})();

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "SETU Lens — Cognitive Accessibility",
-  "version": "2.5.0",
-  "description": "A unified cognitive accessibility layer that converts digital overwhelm into structured, actionable next steps.",
+  "version": "3.0.0",
+  "description": "Reshape any website for how your brain actually reads. Bionic text, line focus, read aloud, and an AI agent that navigates pages for you.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -13,14 +13,12 @@
     "storage",
     "scripting",
     "tabs",
-    "contextMenus",
-    "notifications"
+    "contextMenus"
   ],
-  "host_permissions": [
-    "<all_urls>"
-  ],
+  "host_permissions": ["<all_urls>"],
   "action": {
     "default_popup": "popup/popup.html",
+    "default_title": "SETU Lens",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
@@ -34,41 +32,29 @@
     {
       "matches": ["<all_urls>"],
       "js": [
+        "shared/setu-core.js",
         "content/bionic-reading.js",
         "content/focus-mode.js",
-        "content/eye-tracker.js",
-        "content/auto-scroll.js",
-        "content/text-to-speech.js",
+        "content/line-focus.js",
         "content/word-highlight.js",
+        "content/text-to-speech.js",
+        "content/auto-scroll.js",
+        "content/eye-tracker.js",
         "content/dyslexia-theme.js",
         "content/breathe-protocol.js",
         "content/task-chunker.js",
-        "content/commander.js",
         "content/visual-breakdown.js",
         "content/sanctuary-bridge.js",
         "content/agent-copilot.js",
-        "content/line-focus.js",
         "content/main.js"
       ],
-      "css": [
-        "styles/bionic-reading.css",
-        "styles/focus-mode.css",
-        "styles/dyslexia-theme.css",
-        "styles/eye-tracker.css",
-        "styles/word-highlight.css",
-        "styles/setu-overlay.css"
-      ],
-      "run_at": "document_end"
+      "run_at": "document_idle",
+      "all_frames": false
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": [
-        "lib/*",
-        "styles/*",
-        "assets/*",
-        "modules/*"
-      ],
+      "resources": ["icons/*", "shared/*"],
       "matches": ["<all_urls>"]
     }
   ],
@@ -83,14 +69,14 @@
     },
     "toggle-linefocus": {
       "suggested_key": { "default": "Alt+L" },
-      "description": "Toggle Line Focus Mode"
+      "description": "Toggle Line Focus"
     },
     "open-commander": {
       "suggested_key": { "default": "Alt+Shift+C" },
-      "description": "Open NeuroBridge Commander"
+      "description": "Open SETU Commander"
     },
     "toggle-tts": {
-      "description": "Toggle Text to Speech"
+      "description": "Toggle Read Aloud"
     }
   },
   "content_security_policy": {

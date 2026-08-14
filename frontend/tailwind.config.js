@@ -5,105 +5,66 @@ export default {
   theme: {
     extend: {
       colors: {
-        setu: {
-          50: '#f0fdf4',
-          100: '#dcfce7',
-          200: '#bbf7d0',
+        // Surfaces, darkest to lightest. Used via bg-ink-900 etc.
+        ink: {
+          950: '#070b16',
+          900: '#0b1020',
+          800: '#111830',
+          700: '#18203e',
+          600: '#222c52',
+          500: '#2e3a68'
+        },
+        // Primary accent — periwinkle. Calm, high contrast on ink.
+        iris: {
+          50: '#eef0ff',
+          200: '#c5cbff',
+          300: '#a6b0ff',
+          400: '#8b97ff',
+          500: '#7c8cff',
+          600: '#5f6ce6',
+          700: '#4a54bd'
+        },
+        // Secondary accent — signals success, active state, live data.
+        mint: {
           300: '#86efac',
           400: '#4ade80',
           500: '#22c55e',
-          600: '#16a34a',
-          700: '#15803d',
-          800: '#166534',
-          900: '#14532d',
-          950: '#052e16',
+          600: '#16a34a'
         },
-        sand: {
-          50: '#fdfcfa',
-          100: '#faf8f5',
-          200: '#f5f0e8',
-          300: '#e8dfd2',
-          400: '#d4c5a9',
-          500: '#b8a080',
-          600: '#9a7e5c',
-          700: '#7a6348',
-          800: '#5c4a36',
-          900: '#3d3125',
-        },
-        sage: {
-          50: '#f4f9f4',
-          100: '#e5f0e5',
-          200: '#c8dec8',
-          300: '#9ec49e',
-          400: '#6ea36e',
-          500: '#4a7c59',
-          600: '#3a6347',
-          700: '#2f4f3a',
-          800: '#273f30',
-          900: '#213428',
-        },
-        mode: {
-          start: '#f59e0b',
-          simplify: '#14b8a6',
-          learn: '#3b82f6',
-          meet: '#8b5cf6',
-          practice: '#ec4899',
-          write: '#22c55e',
-          guide: '#f97316',
-        },
+        sun: { 400: '#fbbf24', 500: '#f59e0b' },
+        rose: { 400: '#fb7185', 500: '#f43f5e' },
+        // Per-branch mind map palette, checked for contrast on ink-800.
+        branch: {
+          1: '#7c8cff',
+          2: '#4ade80',
+          3: '#fbbf24',
+          4: '#f472b6',
+          5: '#38bdf8',
+          6: '#c084fc'
+        }
       },
       fontFamily: {
-        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'],
-        display: ['Inter', 'sans-serif'],
-        mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
-        dyslexic: ['OpenDyslexic', 'Comic Sans MS', 'sans-serif'],
-        hyperlegible: ['Atkinson Hyperlegible', 'sans-serif'],
+        sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
+        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+        dyslexic: ['OpenDyslexic', 'Comic Sans MS', 'Verdana', 'sans-serif']
       },
-      borderRadius: {
-        '2xl': '1rem',
-        '3xl': '1.5rem',
-      },
+      borderRadius: { xl: '0.85rem', '2xl': '1.15rem', '3xl': '1.6rem' },
       boxShadow: {
-        'soft': '0 2px 8px -2px rgba(0, 0, 0, 0.05), 0 4px 16px -4px rgba(0, 0, 0, 0.05)',
-        'medium': '0 4px 12px -2px rgba(0, 0, 0, 0.08), 0 8px 24px -4px rgba(0, 0, 0, 0.06)',
-        'elevated': '0 8px 24px -4px rgba(0, 0, 0, 0.1), 0 16px 40px -8px rgba(0, 0, 0, 0.08)',
-        'glow-green': '0 0 20px -4px rgba(74, 124, 89, 0.3)',
-      },
-      animation: {
-        'fade-in': 'fadeIn 0.5s ease-out',
-        'slide-up': 'slideUp 0.4s ease-out',
-        'slide-in-right': 'slideInRight 0.3s ease-out',
-        'pulse-soft': 'pulseSoft 2s ease-in-out infinite',
-        'breathe': 'breathe 5s ease-in-out infinite',
-        'float': 'float 6s ease-in-out infinite',
+        card: '0 1px 2px rgba(0,0,0,.28), 0 8px 26px -8px rgba(0,0,0,.5)',
+        lift: '0 18px 48px -14px rgba(0,0,0,.66)',
+        glow: '0 0 0 1px rgba(124,140,255,.4), 0 0 26px -6px rgba(124,140,255,.5)'
       },
       keyframes: {
-        fadeIn: {
-          '0%': { opacity: '0' },
-          '100%': { opacity: '1' },
-        },
-        slideUp: {
-          '0%': { opacity: '0', transform: 'translateY(16px)' },
-          '100%': { opacity: '1', transform: 'translateY(0)' },
-        },
-        slideInRight: {
-          '0%': { opacity: '0', transform: 'translateX(16px)' },
-          '100%': { opacity: '1', transform: 'translateX(0)' },
-        },
-        pulseSoft: {
-          '0%, 100%': { opacity: '1' },
-          '50%': { opacity: '0.7' },
-        },
-        breathe: {
-          '0%, 100%': { transform: 'scale(1)' },
-          '50%': { transform: 'scale(1.05)' },
-        },
-        float: {
-          '0%, 100%': { transform: 'translateY(0px)' },
-          '50%': { transform: 'translateY(-8px)' },
-        },
+        'fade-up': { from: { opacity: 0, transform: 'translateY(8px)' }, to: { opacity: 1, transform: 'none' } },
+        breathe: { '0%,100%': { opacity: 0.45 }, '50%': { opacity: 1 } },
+        dash: { to: { strokeDashoffset: 0 } }
       },
-    },
+      animation: {
+        'fade-up': 'fade-up .35s cubic-bezier(.2,.7,.3,1) both',
+        breathe: 'breathe 2.4s ease-in-out infinite',
+        dash: 'dash .7s ease-out both'
+      }
+    }
   },
-  plugins: [],
+  plugins: []
 };

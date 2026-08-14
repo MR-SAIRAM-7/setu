@@ -1,270 +1,307 @@
-// Focus Mode - Strip away distractions and show only the article content
-// Creates a clean, readable environment for ADHD readers
+/**
+ * Focus Mode — a sensory-safe reader view.
+ *
+ * Rewritten in v3. The previous version copied `articleContent.innerHTML` into
+ * an overlay, which cloned every id in the document, re-ran embedded markup,
+ * and carried ads and tracking pixels straight into the "clean" view. It also
+ * hid every body child by inline style, which broke pages that re-render, and
+ * bound Escape to a non-focusable div so the shortcut never fired.
+ *
+ * The rewrite extracts *sanitised* content into an isolated shadow root: text,
+ * headings, lists, quotes, links and images survive; scripts, iframes, ads, and
+ * styling do not.
+ */
 
-class FocusMode {
-  constructor() {
-    this.isEnabled = false;
-    this.originalStyles = new Map();
-    this.focusOverlay = null;
-    this.articleContent = null;
-    this.scrollPosition = 0;
-  }
+(() => {
+  const { Feature, UI, Store, Text } = window.SETU;
 
-  enable() {
-    if (this.isEnabled) return;
-    this.isEnabled = true;
-    
-    console.log('[FocusMode] Enabled');
-    
-    // Save scroll position
-    this.scrollPosition = window.scrollY;
-    
-    // Find main content
-    this.articleContent = this.findMainContent();
-    
-    if (this.articleContent) {
-      this.createFocusOverlay();
-      this.hideDistractions();
-    } else {
-      console.log('No main content found, using fallback');
-      this.enableSimpleFocus();
+  /** Tags carried into the reader. Everything else is unwrapped or dropped. */
+  const KEEP = new Set([
+    'P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'UL', 'OL', 'LI', 'BLOCKQUOTE',
+    'PRE', 'CODE', 'FIGURE', 'FIGCAPTION', 'IMG', 'A', 'STRONG', 'EM', 'B', 'I',
+    'BR', 'HR', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD', 'SUP', 'SUB', 'DL', 'DT', 'DD'
+  ]);
+
+  const DROP = new Set([
+    'SCRIPT', 'STYLE', 'IFRAME', 'NOSCRIPT', 'FORM', 'INPUT', 'BUTTON', 'SELECT',
+    'TEXTAREA', 'VIDEO', 'AUDIO', 'EMBED', 'OBJECT', 'CANVAS', 'SVG', 'NAV', 'ASIDE', 'FOOTER'
+  ]);
+
+  const JUNK = /\b(ad|ads|advert|advertisement|banner|promo|sponsor|newsletter|subscribe|social|share|comment|related|recommend|popup|modal|cookie|consent|sidebar|widget|tracking|paywall)\b/i;
+
+  const THEMES = ['calm', 'sepia', 'dark', 'contrast'];
+
+  class FocusMode extends Feature {
+    static key = 'focus';
+
+    constructor() {
+      super();
+      this.fontScale = 1;
+      this.themeIndex = 0;
+      this.previousOverflow = '';
     }
-    
-    document.body.classList.add('setu-focus-active');
-  }
 
-  disable() {
-    if (!this.isEnabled) return;
-    this.isEnabled = false;
-    
-    console.log('[FocusMode] Disabled');
-    
-    // Remove focus overlay
-    if (this.focusOverlay) {
-      this.focusOverlay.remove();
-      this.focusOverlay = null;
-    }
-    
-    // Restore hidden elements
-    this.restoreDistractions();
-    
-    // Remove body class
-    document.body.classList.remove('setu-focus-active');
-    
-    // Restore scroll position
-    window.scrollTo(0, this.scrollPosition);
-  }
-
-  findMainContent() {
-    // Try to find the main article/content
-    const selectors = [
-      'article',
-      'main',
-      '[role="main"]',
-      '.article',
-      '.post-content',
-      '.entry-content',
-      '.content',
-      '#content',
-      '.post',
-      '[itemprop="articleBody"]',
-      '.story-body'
-    ];
-
-    for (const selector of selectors) {
-      const element = document.querySelector(selector);
-      if (element && element.textContent.length > 500) {
-        return element;
+    onEnable() {
+      const article = this.extract();
+      if (!article) {
+        UI.toast('No readable article found on this page.', { tone: 'warn' });
+        throw new Error('no-content');
       }
+
+      this.fontScale = Store.getSetting('fontScale') || 1;
+      this.build(article);
+
+      // Lock background scroll so the wheel drives the reader, not the page.
+      this.previousOverflow = document.documentElement.style.overflow;
+      document.documentElement.style.overflow = 'hidden';
+      this.cleanup(() => {
+        document.documentElement.style.overflow = this.previousOverflow;
+      });
+
+      UI.toast('Focus Mode on — press Esc to exit', { tone: 'success' });
     }
 
-    // Fallback: Find the element with the most text content
-    const paragraphs = document.querySelectorAll('p');
-    let bestElement = null;
-    let maxTextLength = 0;
+    onDisable() {
+      UI.destroyHost('focus');
+    }
 
-    paragraphs.forEach(p => {
-      const parent = p.parentElement;
-      if (parent) {
-        const textLength = parent.textContent.length;
-        if (textLength > maxTextLength && textLength > 1000) {
-          maxTextLength = textLength;
-          bestElement = parent;
+    /* ------------------------------------------------------------------ */
+    /* Extraction                                                         */
+    /* ------------------------------------------------------------------ */
+
+    /** Pick the element most likely to be the article body. */
+    findRoot() {
+      for (const selector of [
+        'article',
+        '[itemprop="articleBody"]',
+        'main article',
+        'main',
+        '[role="main"]',
+        '.post-content',
+        '.entry-content',
+        '.article-body',
+        '#content'
+      ]) {
+        const el = document.querySelector(selector);
+        if (el && el.innerText.trim().length > 400) return el;
+      }
+
+      // Density heuristic: the block holding the most paragraph text wins.
+      let best = null;
+      let bestScore = 0;
+      for (const el of document.querySelectorAll('div, section')) {
+        if (Text.isOurs(el)) continue;
+        const paragraphs = el.querySelectorAll(':scope > p');
+        if (paragraphs.length < 3) continue;
+        const score = [...paragraphs].reduce((sum, p) => sum + p.innerText.trim().length, 0);
+        if (score > bestScore) {
+          bestScore = score;
+          best = el;
         }
       }
-    });
+      return bestScore > 400 ? best : null;
+    }
 
-    return bestElement;
-  }
+    extract() {
+      const source = this.findRoot();
+      if (!source) return null;
 
-  createFocusOverlay() {
-    // Create the focus overlay container
-    this.focusOverlay = document.createElement('div');
-    this.focusOverlay.id = 'setu-focus-overlay';
-    this.focusOverlay.innerHTML = `
-      <div class="setu-focus-header">
-        <button class="setu-focus-close" title="Close Focus Mode (Esc)">
-          <span>&times;</span>
-        </button>
-        <div class="setu-focus-controls">
-          <button class="setu-focus-btn" data-action="decrease-font" title="Decrease Font Size">
-            <span>A-</span>
-          </button>
-          <button class="setu-focus-btn" data-action="increase-font" title="Increase Font Size">
-            <span>A+</span>
-          </button>
-          <button class="setu-focus-btn" data-action="toggle-theme" title="Toggle Theme">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 1 0 10 10"/></svg>
-          </button>
-          <button class="setu-focus-btn" data-action="tts" title="Read Aloud">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-          </button>
+      const title =
+        document.querySelector('h1')?.innerText.trim() ||
+        document.title ||
+        'Reader';
+
+      const container = document.createElement('div');
+      this.sanitizeInto(source, container);
+
+      return container.textContent.trim().length > 200 ? { title, body: container } : null;
+    }
+
+    /**
+     * Copy `source` into `target`, keeping only safe, semantic content.
+     * Builds fresh nodes rather than cloning, so no page state comes along.
+     */
+    sanitizeInto(source, target) {
+      for (const child of source.childNodes) {
+        if (child.nodeType === Node.TEXT_NODE) {
+          if (child.textContent.trim()) target.appendChild(document.createTextNode(child.textContent));
+          continue;
+        }
+        if (child.nodeType !== Node.ELEMENT_NODE) continue;
+
+        const tag = child.tagName;
+        if (DROP.has(tag) || Text.isOurs(child)) continue;
+
+        // Drop anything self-identifying as chrome rather than content.
+        const signature = `${child.className || ''} ${child.id || ''}`;
+        if (typeof signature === 'string' && JUNK.test(signature)) continue;
+        if (child.getAttribute('aria-hidden') === 'true') continue;
+        if (!child.getClientRects().length && tag !== 'BR') continue;
+
+        if (!KEEP.has(tag)) {
+          // Structural wrapper: keep its contents, discard the wrapper.
+          this.sanitizeInto(child, target);
+          continue;
+        }
+
+        const clean = document.createElement(tag);
+
+        if (tag === 'A') {
+          const href = child.getAttribute('href');
+          if (href && /^https?:|^\//i.test(href)) {
+            clean.href = new URL(href, location.href).toString();
+            clean.target = '_blank';
+            clean.rel = 'noopener noreferrer';
+          }
+        } else if (tag === 'IMG') {
+          const src = child.currentSrc || child.src;
+          if (!src || child.naturalWidth < 120) continue;
+          clean.src = src;
+          clean.alt = child.alt || '';
+          clean.loading = 'lazy';
+          target.appendChild(clean);
+          continue;
+        }
+
+        this.sanitizeInto(child, clean);
+        if (clean.textContent.trim() || clean.querySelector('img') || tag === 'HR' || tag === 'BR') {
+          target.appendChild(clean);
+        }
+      }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* View                                                               */
+    /* ------------------------------------------------------------------ */
+
+    build({ title, body }) {
+      const root = UI.host('focus', { layer: 'reader', interactive: true });
+      root.appendChild(this.styleSheet());
+
+      const scope = document.createElement('div');
+      scope.className = 'setu-scope';
+      scope.innerHTML = `
+        <div class="reader" data-theme="calm" role="dialog" aria-modal="true" aria-label="Focus Mode reader" tabindex="-1">
+          <div class="progress"><div class="progress-fill"></div></div>
+          <header class="bar">
+            <span class="brand">SETU · Focus</span>
+            <div class="tools">
+              <button class="setu-btn" data-act="font-down" aria-label="Smaller text">A−</button>
+              <button class="setu-btn" data-act="font-up" aria-label="Larger text">A+</button>
+              <button class="setu-btn" data-act="theme">Theme</button>
+              <button class="setu-btn" data-act="tts" aria-label="Read aloud">Read aloud</button>
+              <button class="setu-btn" data-variant="danger" data-act="close" aria-label="Close Focus Mode">Esc</button>
+            </div>
+          </header>
+          <main class="surface" tabindex="0">
+            <article class="doc"><h1 class="doc-title"></h1></article>
+          </main>
         </div>
-      </div>
-      <div class="setu-focus-content">
-        ${this.articleContent.innerHTML}
-      </div>
-      <div class="setu-focus-progress">
-        <div class="setu-progress-bar"></div>
-      </div>
-    `;
+      `;
+      root.appendChild(scope);
 
-    document.body.appendChild(this.focusOverlay);
+      this.scope = scope;
+      this.reader = scope.querySelector('.reader');
+      this.surface = scope.querySelector('.surface');
 
-    // Setup controls
-    this.setupFocusControls();
-    
-    // Setup progress tracking
-    this.setupProgressTracking();
-  }
+      scope.querySelector('.doc-title').textContent = title;
+      scope.querySelector('.doc').appendChild(body);
+      this.applyFontScale();
 
-  setupFocusControls() {
-    // Close button
-    this.focusOverlay.querySelector('.setu-focus-close').addEventListener('click', () => {
-      this.disable();
-    });
+      scope.querySelector('[data-act="close"]').onclick = () => window.setuLens?.toggle('focus', false);
+      scope.querySelector('[data-act="font-up"]').onclick = () => this.scaleFont(0.1);
+      scope.querySelector('[data-act="font-down"]').onclick = () => this.scaleFont(-0.1);
+      scope.querySelector('[data-act="theme"]').onclick = () => this.cycleTheme();
+      scope.querySelector('[data-act="tts"]').onclick = () => {
+        window.setuLens?.speak(this.scope.querySelector('.doc').innerText);
+      };
 
-    // Font size controls
-    let fontSize = 18;
-    const content = this.focusOverlay.querySelector('.setu-focus-content');
-    
-    this.focusOverlay.querySelector('[data-action="decrease-font"]').addEventListener('click', () => {
-      fontSize = Math.max(14, fontSize - 2);
-      content.style.fontSize = `${fontSize}px`;
-    });
-
-    this.focusOverlay.querySelector('[data-action="increase-font"]').addEventListener('click', () => {
-      fontSize = Math.min(32, fontSize + 2);
-      content.style.fontSize = `${fontSize}px`;
-    });
-
-    // Theme toggle
-    const themes = ['default', 'sepia', 'dark', 'high-contrast'];
-    let currentThemeIndex = 0;
-    
-    this.focusOverlay.querySelector('[data-action="toggle-theme"]').addEventListener('click', () => {
-      currentThemeIndex = (currentThemeIndex + 1) % themes.length;
-      this.focusOverlay.setAttribute('data-theme', themes[currentThemeIndex]);
-    });
-
-    // TTS
-    this.focusOverlay.querySelector('[data-action="tts"]').addEventListener('click', () => {
-      if (window.setu && window.setu.features.tts) {
-        window.setu.features.tts.speak(this.articleContent.textContent);
-      }
-    });
-
-    // Keyboard shortcuts
-    this.focusOverlay.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        this.disable();
-      }
-    });
-  }
-
-  setupProgressTracking() {
-    const progressBar = this.focusOverlay.querySelector('.setu-progress-bar');
-    const content = this.focusOverlay.querySelector('.setu-focus-content');
-
-    const updateProgress = () => {
-      const scrollTop = this.focusOverlay.scrollTop;
-      const scrollHeight = content.scrollHeight - this.focusOverlay.clientHeight;
-      const progress = (scrollTop / scrollHeight) * 100;
-      progressBar.style.width = `${Math.min(100, Math.max(0, progress))}%`;
-    };
-
-    this.focusOverlay.addEventListener('scroll', updateProgress);
-    updateProgress();
-  }
-
-  hideDistractions() {
-    // Elements to hide
-    const hideSelectors = [
-      'header:not(.setu-focus-header)',
-      'nav',
-      'aside',
-      '.sidebar',
-      '.advertisement',
-      '.ad',
-      '.popup',
-      '.modal',
-      '.newsletter',
-      '.social-share',
-      '.comments',
-      '.related-posts',
-      'footer',
-      '.cookie-banner',
-      '.notification',
-      '[role="banner"]',
-      '[role="complementary"]',
-      '[role="navigation"]'
-    ];
-
-    hideSelectors.forEach(selector => {
-      const elements = document.querySelectorAll(selector);
-      elements.forEach(el => {
-        if (!el.closest('#setu-focus-overlay') && !this.originalStyles.has(el)) {
-          this.originalStyles.set(el, el.style.display);
-          el.style.display = 'none';
+      // Escape is bound on the document — the old version bound it to a
+      // non-focusable div, where it could never fire.
+      this.listen(document, 'keydown', (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          window.setuLens?.toggle('focus', false);
         }
       });
-    });
 
-    // Hide body content except our overlay
-    Array.from(document.body.children).forEach(child => {
-      if (child !== this.focusOverlay && !child.id?.startsWith('setu')) {
-        if (!this.originalStyles.has(child)) {
-          this.originalStyles.set(child, child.style.display);
-          child.style.display = 'none';
+      this.listen(this.surface, 'scroll', () => {
+        const max = this.surface.scrollHeight - this.surface.clientHeight;
+        const pct = max > 0 ? (this.surface.scrollTop / max) * 100 : 0;
+        scope.querySelector('.progress-fill').style.width = `${Math.min(100, pct)}%`;
+      });
+
+      this.surface.focus();
+    }
+
+    scaleFont(delta) {
+      this.fontScale = Math.max(0.8, Math.min(2, this.fontScale + delta));
+      this.applyFontScale();
+      Store.set({ settings: { fontScale: this.fontScale } });
+    }
+
+    applyFontScale() {
+      this.scope?.querySelector('.doc')?.style.setProperty('--scale', this.fontScale);
+    }
+
+    cycleTheme() {
+      this.themeIndex = (this.themeIndex + 1) % THEMES.length;
+      this.reader.dataset.theme = THEMES[this.themeIndex];
+    }
+
+    styleSheet() {
+      const style = document.createElement('style');
+      style.textContent = `
+        .reader {
+          position: fixed; inset: 0;
+          display: flex; flex-direction: column;
+          background: var(--page); color: var(--ink);
         }
-      }
-    });
+        .reader[data-theme="calm"]     { --page:#0f1425; --ink:#e8ecf8; --muted:#9aa5c4; --rule:rgba(255,255,255,.12); }
+        .reader[data-theme="sepia"]    { --page:#f6ecd9; --ink:#3b3226; --muted:#7a6a53; --rule:rgba(0,0,0,.14); }
+        .reader[data-theme="dark"]     { --page:#000; --ink:#e6e6e6; --muted:#9a9a9a; --rule:rgba(255,255,255,.16); }
+        .reader[data-theme="contrast"] { --page:#000; --ink:#fff; --muted:#ffe600; --rule:#fff; }
+
+        .progress { position:absolute; top:0; left:0; right:0; height:3px; background:transparent; z-index:2; }
+        .progress-fill { height:100%; width:0; background:var(--accent); transition:width .1s linear; }
+
+        .bar {
+          display:flex; align-items:center; justify-content:space-between; gap:16px;
+          padding:12px 20px; border-bottom:1px solid var(--rule); flex-shrink:0;
+        }
+        .brand { font-size:12px; font-weight:800; letter-spacing:.09em; color:var(--accent); }
+        .tools { display:flex; gap:7px; flex-wrap:wrap; }
+        .tools .setu-btn { min-height:32px; padding:5px 11px; font-size:12px; background:transparent; border-color:var(--rule); color:var(--ink); }
+        .tools .setu-btn:hover { background:rgba(127,127,127,.16); }
+
+        .surface { flex:1; overflow-y:auto; padding:48px 24px 120px; }
+        .surface:focus-visible { outline:none; }
+
+        .doc {
+          --scale:1;
+          max-width:min(70ch, 92vw); margin:0 auto;
+          font-size:calc(19px * var(--scale));
+          line-height:1.75; letter-spacing:.006em;
+        }
+        .doc-title { font-size:calc(34px * var(--scale)); line-height:1.22; margin-bottom:28px; font-weight:800; }
+        .doc :where(p, ul, ol, blockquote, figure, table, dl) { margin-bottom:1.15em; }
+        .doc :where(h1,h2,h3,h4) { margin:1.6em 0 .5em; line-height:1.3; font-weight:700; }
+        .doc h2 { font-size:calc(25px * var(--scale)); }
+        .doc h3 { font-size:calc(21px * var(--scale)); }
+        .doc :where(ul,ol) { padding-left:1.4em; }
+        .doc li { margin-bottom:.45em; }
+        .doc a { color:var(--accent); text-underline-offset:3px; }
+        .doc img { max-width:100%; height:auto; border-radius:10px; margin:1.2em 0; }
+        .doc blockquote { border-left:3px solid var(--accent); padding-left:1em; color:var(--muted); font-style:italic; }
+        .doc pre { background:rgba(127,127,127,.14); padding:14px; border-radius:9px; overflow-x:auto; font-size:.88em; }
+        .doc code { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.9em; }
+        .doc table { width:100%; border-collapse:collapse; display:block; overflow-x:auto; }
+        .doc :where(th,td) { border:1px solid var(--rule); padding:8px 11px; text-align:left; }
+        .doc hr { border:none; border-top:1px solid var(--rule); margin:2em 0; }
+      `;
+      return style;
+    }
   }
 
-  restoreDistractions() {
-    this.originalStyles.forEach((display, element) => {
-      if (element && element.style) {
-        element.style.display = display || '';
-      }
-    });
-    this.originalStyles.clear();
-  }
-
-  enableSimpleFocus() {
-    // Fallback: Just dim everything except main content area
-    const style = document.createElement('style');
-    style.id = 'setu-simple-focus';
-    style.textContent = `
-      body > *:not(#setu-focus-overlay):not([id^="setu"]) {
-        opacity: 0.1 !important;
-        pointer-events: none !important;
-      }
-    `;
-    document.head.appendChild(style);
-    
-    this.focusOverlay = { remove: () => style.remove() };
-  }
-}
-
-// Make available globally
-window.FocusMode = FocusMode;
+  window.SETU.features.set('focus', FocusMode);
+})();

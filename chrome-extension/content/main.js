@@ -1,347 +1,284 @@
-// SETU Main Content Script
-// Orchestrates all reading and cognitive assistance features
+/**
+ * SETU Lens — content script orchestrator.
+ *
+ * Owns the feature registry, message routing, keyboard shortcuts, and state
+ * sync. Every feature is independent and isolated, so any combination can run
+ * at once: Bionic + Line Focus + Read Aloud + Auto Scroll compose without
+ * touching each other's DOM.
+ *
+ * Loaded last, after setu-core.js and every feature module.
+ */
 
-class Setu {
-  constructor() {
-    this.features = {
-      bionic: null,
-      focus: null,
-      eye: null,
-      scroll: null,
-      tts: null,
-      highlight: null,
-      dyslexia: null,
-      breathe: null,
-      chunking: null,
-      commander: null,
-      visual: null,
-      sanctuary: null,
-      lineFocus: null
-    };
-    this.state = {
-      bionic: false,
-      focus: false,
-      eye: false,
-      scroll: false,
-      tts: false,
-      highlight: false,
-      dyslexia: false,
-      breathe: false,
-      chunking: false,
-      lineFocus: false,
-      theme: 'default'
-    };
-    this.isInitialized = false;
-    this.init();
-  }
+(() => {
+  if (window.setuLens) return;
 
-  async init() {
-    if (this.isInitialized) return;
-    
-    console.log('[NeuroRead] Initializing...');
-    
-    // Initialize feature modules
-    this.features.bionic = new BionicReading();
-    this.features.focus = new FocusMode();
-    this.features.eye = new EyeTracker();
-    this.features.scroll = new AutoScroll();
-    this.features.tts = new TextToSpeech();
-    this.features.highlight = new WordHighlight();
-    this.features.dyslexia = new DyslexiaTheme();
-    this.features.breathe = new BreatheProtocol();
-    this.features.chunking = new TaskChunker();
-    this.features.commander = new SetuCommander();
-    this.features.visual = new VisualBreakdown();
-    this.features.sanctuary = new SanctuaryBridge();
-    this.features.lineFocus = new LineFocus();
+  const { Store, UI, Text, API, features: registry } = window.SETU;
 
-    // Load saved state
-    await this.loadState();
-    
-    // Setup message listener
-    this.setupMessageListener();
-    
-    // Setup keyboard shortcuts
-    this.setupKeyboardShortcuts();
-    
-    // Inject SETU container
-    this.injectContainer();
-    
-    this.isInitialized = true;
-    console.log('[NeuroRead] Initialized successfully');
-  }
+  /** Features driven by a persisted on/off flag. */
+  const TOGGLES = ['bionic', 'focus', 'lineFocus', 'highlight', 'scroll', 'tts', 'eye', 'dyslexia', 'breathe', 'chunking'];
 
-  async loadState() {
-    try {
-      const result = await chrome.storage.sync.get(['setuState', 'setuState']);
-      const stateData = result.setuState || result.setuState;
-      if (stateData) {
-        this.state = { ...this.state, ...stateData };
-        
-        // Apply saved states
-        Object.keys(this.state).forEach(key => {
-          if (this.state[key] && this.features[key]) {
-            this.features[key].enable();
-          }
-        });
-      }
-    } catch (error) {
-      console.log('Storage not available, using defaults');
+  /** Features opened on demand rather than toggled from stored state. */
+  const ON_DEMAND = ['commander', 'visual'];
+
+  class SetuLens {
+    constructor() {
+      this.features = new Map();
+      this.booted = false;
     }
-  }
 
-  setupMessageListener() {
-    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-      console.log('Message received:', request.action);
-      
-      switch (request.action) {
-        case 'toggleMode':
-          this.toggleMode(request.mode, request.enabled);
-          sendResponse({ success: true });
-          break;
-          
-        case 'toggleFeature':
-          this.toggleFeature(request.feature, request.enabled);
-          sendResponse({ success: true });
-          break;
+    async boot() {
+      if (this.booted) return;
+      this.booted = true;
 
-        case 'toggleSensoryMode':
-          if (request.enabled) {
-            document.documentElement.classList.add('nb-sensory-calm-page');
-          } else {
-            document.documentElement.classList.remove('nb-sensory-calm-page');
-          }
-          sendResponse({ success: true });
-          break;
-          
-        case 'setTheme':
-          this.setTheme(request.theme);
-          sendResponse({ success: true });
-          break;
-          
-        case 'speakText':
-          this.features.tts.speak(request.text);
-          sendResponse({ success: true });
-          break;
-          
-        case 'summarizePage':
-          this.summarizePage();
-          sendResponse({ success: true });
-          break;
-          
-        case 'requestCamera':
-          this.features.eye.requestCameraPermission();
-          sendResponse({ success: true });
-          break;
-
-        case 'openCommander':
-          this.features.commander.open();
-          sendResponse({ success: true });
-          break;
-
-        case 'explainVisual':
-          this.features.visual.open();
-          sendResponse({ success: true });
-          break;
-
-        case 'getPageContent': {
-          const text = this.features.sanctuary.getPageText(10000);
-          sendResponse({ text, localSummary: this.features.sanctuary.summarize(text) });
-          break;
-        }
-
-        case 'saveToSanctuary':
-          this.features.sanctuary.save().then((data) => sendResponse({ success: true, data })).catch((error) => sendResponse({ success: false, error: error.message }));
-          return true;
-
-        case 'activateSupportPath':
-          this.activateSupportPath();
-          sendResponse({ success: true });
-          break;
-
-        case 'resetAll':
-          this.resetAll();
-          sendResponse({ success: true });
-          break;
-
-        default:
-          sendResponse({ error: 'Unknown action' });
-      }
-      return true;
-    });
-  }
-
-  setupKeyboardShortcuts() {
-    document.addEventListener('keydown', (e) => {
-      if (e.altKey && !e.ctrlKey && !e.metaKey) {
-        switch (e.key.toLowerCase()) {
-          case 'b':
-            e.preventDefault();
-            this.toggleMode('bionic', !this.state.bionic);
-            break;
-          case 'f':
-            e.preventDefault();
-            this.toggleMode('focus', !this.state.focus);
-            break;
-          case 's':
-            e.preventDefault();
-            this.toggleMode('scroll', !this.state.scroll);
-            break;
-          case 't':
-            e.preventDefault();
-            this.toggleFeature('tts', !this.state.tts);
-            break;
-          case 'l':
-            e.preventDefault();
-            this.toggleMode('lineFocus', !this.state.lineFocus);
-            break;
+      for (const [key, FeatureClass] of registry) {
+        try {
+          this.features.set(key, new FeatureClass());
+        } catch (error) {
+          console.error(`[SETU] could not construct "${key}":`, error);
         }
       }
-    });
-  }
 
-  injectContainer() {
-    if (document.getElementById('setu-container')) return;
-    
-    const container = document.createElement('div');
-    container.id = 'setu-container';
-    container.style.cssText = 'position: fixed; z-index: 2147483647; pointer-events: none;';
-    document.body.appendChild(container);
-  }
+      await Store.load();
+      await API.init();
 
-  toggleMode(mode, enabled) {
-    if (this.features[mode]) {
-      const targetState = (typeof enabled === 'boolean') ? enabled : !this.state[mode];
-      this.state[mode] = targetState;
-      if (targetState) {
-        this.features[mode].enable();
-      } else {
-        this.features[mode].disable();
+      this.bindMessages();
+      this.bindShortcuts();
+      this.watchStorage();
+      this.applyState();
+
+      console.log(`[SETU Lens ${window.SETU.VERSION}] ready — ${this.features.size} features`);
+    }
+
+    /** Turn on whatever the stored state says should be on. */
+    applyState() {
+      const state = Store.get();
+
+      for (const key of TOGGLES) {
+        const feature = this.features.get(key);
+        if (!feature) continue;
+
+        const shouldRun = Boolean(state[key]);
+        if (shouldRun === feature.enabled) continue;
+
+        try {
+          if (shouldRun) feature.enable();
+          else feature.disable();
+        } catch (error) {
+          // A feature that cannot start (e.g. no readable article, camera
+          // denied) must not block the others or corrupt stored state.
+          console.warn(`[SETU] "${key}" could not start:`, error.message);
+          Store.set({ [key]: false });
+        }
       }
-      this.saveState();
-      this.showToast(`${mode.charAt(0).toUpperCase() + mode.slice(1)} Mode ${targetState ? 'enabled' : 'disabled'}`);
-    }
-  }
 
-  toggleFeature(feature, enabled) {
-    if (this.features[feature]) {
-      const targetState = (typeof enabled === 'boolean') ? enabled : !this.state[feature];
-      this.state[feature] = targetState;
-      if (targetState) {
-        this.features[feature].enable();
-      } else {
-        this.features[feature].disable();
+      if (state.theme && state.theme !== 'default') {
+        this.features.get('dyslexia')?.setTheme(state.theme);
       }
-      this.saveState();
-      this.showToast(`${feature.charAt(0).toUpperCase() + feature.slice(1)} ${targetState ? 'enabled' : 'disabled'}`);
     }
-  }
 
-  setTheme(theme) {
-    this.state.theme = theme;
-    if (this.features.dyslexia) {
-      this.features.dyslexia.setTheme(theme);
-    }
-    this.saveState();
-    this.showToast(`Theme changed to ${theme}`);
-  }
-
-  async saveState() {
-    try {
-      await chrome.storage.sync.set({ setuState: this.state, setuState: this.state });
-    } catch (error) {
-      console.log('Storage not available');
-    }
-  }
-
-  resetAll() {
-    Object.keys(this.features).forEach(key => {
-      if (this.features[key] && typeof this.features[key].disable === 'function') {
-        this.features[key].disable();
+    /** Toggle one feature and persist the result. */
+    toggle(key, next) {
+      const feature = this.features.get(key);
+      if (!feature) {
+        console.warn(`[SETU] unknown feature "${key}"`);
+        return false;
       }
-    });
 
-    this.state = {
-      bionic: false,
-      focus: false,
-      eye: false,
-      scroll: false,
-      tts: false,
-      highlight: false,
-      dyslexia: false,
-      breathe: false,
-      chunking: false,
-      theme: 'default'
-    };
+      const target = typeof next === 'boolean' ? next : !feature.enabled;
 
-    this.saveState();
-    this.showToast('All features reset');
+      try {
+        if (target) feature.enable();
+        else feature.disable();
+      } catch (error) {
+        UI.toast(`Could not start ${key}.`, { tone: 'error' });
+        Store.set({ [key]: false });
+        return false;
+      }
+
+      if (TOGGLES.includes(key)) {
+        Store.set({ [key]: feature.enabled });
+      }
+      return feature.enabled;
+    }
+
+    setTheme(theme) {
+      Store.set({ theme });
+      this.features.get('dyslexia')?.setTheme(theme);
+      UI.toast(theme === 'default' ? 'Theme cleared' : `Theme: ${theme}`);
+    }
+
+    speak(text) {
+      const tts = this.features.get('tts');
+      if (!tts) return;
+      if (!tts.enabled) this.toggle('tts', true);
+      tts.speak(text);
+    }
+
+    /** Snapshot used by the chunker and anything else needing page context. */
+    pageContext(options) {
+      return this.features.get('commander')?.snapshot(options) || {
+        url: location.href,
+        title: document.title,
+        headings: [],
+        controls: [],
+        text: Text.pageText(3000)
+      };
+    }
+
+    resetAll() {
+      for (const [key, feature] of this.features) {
+        try {
+          feature.disable();
+        } catch (_) {
+          /* keep going — one bad teardown must not strand the rest */
+        }
+        if (TOGGLES.includes(key)) Store.set({ [key]: false }, { persist: false });
+      }
+      Store.set({ theme: 'default' });
+      UI.toast('All SETU features turned off', { tone: 'success' });
+    }
+
+    /* ------------------------------------------------------------------ */
+
+    bindMessages() {
+      chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+        // Returning true keeps the channel open for async replies.
+        (async () => {
+          try {
+            switch (request.action) {
+              case 'ping':
+                return sendResponse({ ok: true, version: window.SETU.VERSION });
+
+              case 'toggleFeature':
+              case 'toggleMode':
+                return sendResponse({
+                  ok: true,
+                  enabled: this.toggle(request.feature || request.mode, request.enabled)
+                });
+
+              case 'setTheme':
+                this.setTheme(request.theme);
+                return sendResponse({ ok: true });
+
+              case 'setSetting':
+                await Store.set({ settings: request.settings });
+                for (const feature of this.features.values()) {
+                  if (feature.enabled) feature.onSettings();
+                }
+                return sendResponse({ ok: true });
+
+              case 'getState':
+                return sendResponse({
+                  ok: true,
+                  state: Store.get(),
+                  active: [...this.features].filter(([, f]) => f.enabled).map(([k]) => k)
+                });
+
+              case 'openCommander':
+                this.features.get('commander')?.open(request.task || '');
+                return sendResponse({ ok: true });
+
+              case 'explainVisual':
+                this.toggle('visual', true);
+                return sendResponse({ ok: true });
+
+              case 'getPageContent':
+                return sendResponse({
+                  ok: true,
+                  title: document.title,
+                  url: location.href,
+                  text: Text.pageText(request.limit || 12000)
+                });
+
+              case 'speakText':
+                this.speak(request.text);
+                return sendResponse({ ok: true });
+
+              case 'sendToSanctuary': {
+                const result = await this.features.get('sanctuary')?.send();
+                return sendResponse({ ok: Boolean(result?.ok) });
+              }
+
+              case 'resetAll':
+                this.resetAll();
+                return sendResponse({ ok: true });
+
+              default:
+                return sendResponse({ ok: false, error: `Unknown action "${request.action}"` });
+            }
+          } catch (error) {
+            console.error('[SETU] message handler failed:', error);
+            sendResponse({ ok: false, error: error.message });
+          }
+        })();
+
+        return true;
+      });
+    }
+
+    bindShortcuts() {
+      // Alt+key shortcuts, ignored while the user is typing.
+      document.addEventListener(
+        'keydown',
+        (event) => {
+          if (!event.altKey || event.ctrlKey || event.metaKey) return;
+
+          const active = document.activeElement;
+          if (active && (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName))) return;
+
+          const map = {
+            b: 'bionic',
+            f: 'focus',
+            l: 'lineFocus',
+            h: 'highlight',
+            s: 'scroll',
+            t: 'tts',
+            e: 'eye'
+          };
+
+          const key = event.key.toLowerCase();
+
+          if (map[key]) {
+            event.preventDefault();
+            this.toggle(map[key]);
+          } else if (key === 'c') {
+            event.preventDefault();
+            this.features.get('commander')?.open();
+          } else if (key === 'x') {
+            event.preventDefault();
+            this.resetAll();
+          }
+        },
+        true
+      );
+    }
+
+    /** Keep this tab in step with changes made in the popup or another tab. */
+    watchStorage() {
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'sync' || !changes.setuState) return;
+
+        const incoming = changes.setuState.newValue;
+        if (!incoming) return;
+
+        Store.set(incoming, { persist: false });
+        this.applyState();
+
+        for (const feature of this.features.values()) {
+          if (feature.enabled) feature.onSettings();
+        }
+      });
+    }
   }
 
-  showToast(message) {
-    const existing = document.getElementById('setu-toast');
-    if (existing) existing.remove();
+  const lens = new SetuLens();
+  window.setuLens = lens;
 
-    const toast = document.createElement('div');
-    toast.id = 'setu-toast';
-    toast.textContent = message;
-    toast.style.cssText = `
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      background: #0f172a;
-      color: white;
-      padding: 12px 20px;
-      border-radius: 8px;
-      font-family: system-ui, -apple-system, sans-serif;
-      font-size: 14px;
-      z-index: 2147483647;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-      animation: setu-toast-in 0.3s ease;
-    `;
+  const start = () => lens.boot().catch((error) => console.error('[SETU] boot failed:', error));
 
-    document.body.appendChild(toast);
-    
-    setTimeout(() => {
-      toast.style.animation = 'setu-toast-out 0.3s ease';
-      setTimeout(() => toast.remove(), 300);
-    }, 2000);
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
   }
-
-  async summarizePage() {
-    chrome.runtime.sendMessage({ action: 'openSettings' });
-  }
-
-  activateSupportPath() {
-    this.toggleMode('focus', true);
-    this.toggleFeature('highlight', true);
-    this.showToast('The page is simplified and your reading line is highlighted.');
-  }
-}
-
-// Add toast animations
-const style = document.createElement('style');
-style.textContent = `
-  @keyframes setu-toast-in {
-    from { opacity: 0; transform: translateX(20px); }
-    to { opacity: 1; transform: translateX(0); }
-  }
-  @keyframes setu-toast-out {
-    from { opacity: 1; transform: translateX(0); }
-    to { opacity: 0; transform: translateX(20px); }
-  }
-`;
-document.head.appendChild(style);
-
-// Initialize SETU when DOM is ready
-const initSetu = () => {
-  const instance = new Setu();
-  window.setu = instance;
-  window.setu = instance; // backward compatibility
-};
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initSetu);
-} else {
-  initSetu();
-}
+})();

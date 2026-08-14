@@ -2,169 +2,121 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ===================================================================
-   SETU Design System — Global Styles
-   =================================================================== */
-
 @layer base {
+  :root {
+    color-scheme: dark;
+  }
+
   * {
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+    @apply border-white/10;
   }
 
   html {
-    scroll-behavior: smooth;
+    @apply scroll-smooth;
   }
 
   body {
-    @apply bg-sand-50 text-gray-900 font-sans;
-    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    @apply bg-ink-900 text-slate-100 font-sans antialiased;
+    /* Subtle depth without a busy background image. */
+    background-image:
+      radial-gradient(ellipse 70% 50% at 15% -10%, rgba(124, 140, 255, 0.11), transparent),
+      radial-gradient(ellipse 60% 45% at 85% 5%, rgba(74, 222, 128, 0.06), transparent);
+    background-attachment: fixed;
   }
 
-  /* Sepia theme */
-  body.theme-sepia {
-    @apply bg-amber-50;
-    --tw-surface: theme('colors.amber.50');
-  }
-  body.theme-sepia .bg-sand-50 { @apply bg-amber-50; }
-  body.theme-sepia .bg-white { background-color: #fffbeb; }
-
-  /* Dark theme */
-  body.theme-dark {
-    @apply bg-gray-950 text-gray-100;
-  }
-  body.theme-dark .bg-sand-50 { @apply bg-gray-950; }
-  body.theme-dark .bg-white { @apply bg-gray-900; }
-  body.theme-dark .text-gray-900 { @apply text-gray-100; }
-  body.theme-dark .text-gray-600 { @apply text-gray-400; }
-  body.theme-dark .text-gray-500 { @apply text-gray-400; }
-  body.theme-dark .text-gray-700 { @apply text-gray-300; }
-  body.theme-dark .border-gray-200 { @apply border-gray-800; }
-  body.theme-dark .border-gray-100 { @apply border-gray-800; }
-  body.theme-dark .bg-gray-50 { @apply bg-gray-900; }
-  body.theme-dark .bg-gray-100 { @apply bg-gray-800; }
-  body.theme-dark .hover\:bg-gray-50:hover { @apply bg-gray-800; }
-  body.theme-dark .shadow-soft { box-shadow: 0 2px 8px -2px rgba(0,0,0,0.3); }
-
-  /* High contrast theme */
-  body.theme-high-contrast {
-    @apply bg-black text-white;
-  }
-  body.theme-high-contrast .bg-sand-50 { @apply bg-black; }
-  body.theme-high-contrast .bg-white { @apply bg-gray-950; }
-  body.theme-high-contrast .border-gray-200 { @apply border-yellow-400; }
-  body.theme-high-contrast .text-gray-600,
-  body.theme-high-contrast .text-gray-500,
-  body.theme-high-contrast .text-gray-700 { @apply text-gray-200; }
-
-  /* Dyslexia theme */
-  body.theme-dyslexia {
-    font-family: 'OpenDyslexic', 'Comic Sans MS', sans-serif;
-    @apply bg-amber-50;
-    letter-spacing: 0.05em;
-    line-height: 1.8;
-    word-spacing: 0.15em;
+  /* Accessibility preference: applied to <html> from Settings. */
+  html.font-dyslexic body,
+  html.font-dyslexic input,
+  html.font-dyslexic textarea,
+  html.font-dyslexic button {
+    font-family: theme('fontFamily.dyslexic');
+    letter-spacing: 0.02em;
+    word-spacing: 0.08em;
   }
 
-  /* Sensory Calm mode */
-  body.sensory-calm {
-    --transition-speed: 0s;
+  html.text-comfortable {
+    font-size: 18px;
   }
-  body.sensory-calm * {
-    animation-duration: 0s !important;
-    transition-duration: 0.1s !important;
+  html.text-large {
+    font-size: 20px;
+  }
+
+  /* Focus is always visible — never removed, only styled. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-iris-400 ring-offset-2 ring-offset-ink-900 rounded;
+  }
+
+  ::selection {
+    @apply bg-iris-500/35 text-white;
+  }
+
+  ::-webkit-scrollbar {
+    @apply w-2 h-2;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-ink-600 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-ink-500;
   }
 }
 
 @layer components {
-  /* Glassmorphism card */
-  .glass-card {
-    @apply bg-white/80 backdrop-blur-xl border border-white/40 rounded-2xl shadow-soft;
+  .card {
+    @apply bg-ink-800/70 border border-white/10 rounded-2xl shadow-card backdrop-blur-sm;
   }
 
-  body.theme-dark .glass-card {
-    @apply bg-gray-900/80 border-gray-800/60;
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 min-h-[42px] px-4 rounded-xl
+           text-sm font-semibold transition-all duration-150
+           disabled:opacity-45 disabled:cursor-not-allowed select-none;
+  }
+  .btn-primary {
+    @apply btn bg-iris-500 text-ink-950 hover:bg-iris-400 active:translate-y-px;
+  }
+  .btn-ghost {
+    @apply btn bg-ink-700/60 text-slate-200 border border-white/10
+           hover:bg-ink-600 hover:border-iris-500/60 active:translate-y-px;
+  }
+  .btn-quiet {
+    @apply btn bg-transparent text-slate-400 hover:text-slate-100 hover:bg-white/5;
   }
 
-  /* Mode badge colors */
-  .mode-badge-start { @apply bg-amber-100 text-amber-800 border-amber-200; }
-  .mode-badge-simplify { @apply bg-teal-100 text-teal-800 border-teal-200; }
-  .mode-badge-learn { @apply bg-blue-100 text-blue-800 border-blue-200; }
-  .mode-badge-meet { @apply bg-violet-100 text-violet-800 border-violet-200; }
-  .mode-badge-practice { @apply bg-pink-100 text-pink-800 border-pink-200; }
-  .mode-badge-write { @apply bg-green-100 text-green-800 border-green-200; }
-  .mode-badge-guide { @apply bg-orange-100 text-orange-800 border-orange-200; }
-
-  body.theme-dark .mode-badge-start { @apply bg-amber-900/40 text-amber-300 border-amber-800; }
-  body.theme-dark .mode-badge-simplify { @apply bg-teal-900/40 text-teal-300 border-teal-800; }
-  body.theme-dark .mode-badge-learn { @apply bg-blue-900/40 text-blue-300 border-blue-800; }
-  body.theme-dark .mode-badge-meet { @apply bg-violet-900/40 text-violet-300 border-violet-800; }
-  body.theme-dark .mode-badge-practice { @apply bg-pink-900/40 text-pink-300 border-pink-800; }
-  body.theme-dark .mode-badge-write { @apply bg-green-900/40 text-green-300 border-green-800; }
-  body.theme-dark .mode-badge-guide { @apply bg-orange-900/40 text-orange-300 border-orange-800; }
-
-  /* Input focus ring */
-  .setu-input {
-    @apply w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 
-           placeholder-gray-400 transition-all duration-200
-           focus:outline-none focus:ring-2 focus:ring-sage-400/50 focus:border-sage-400
-           focus:bg-white;
+  .input {
+    @apply w-full px-4 py-3 bg-ink-800/80 border border-white/10 rounded-xl
+           text-sm text-slate-100 placeholder:text-slate-500
+           focus:outline-none focus:border-iris-500 focus:ring-1 focus:ring-iris-500/50
+           transition-colors;
   }
 
-  body.theme-dark .setu-input {
-    @apply bg-gray-800 border-gray-700 text-gray-100 placeholder-gray-500
-           focus:ring-sage-500/50 focus:border-sage-500 focus:bg-gray-800;
+  .chip {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full
+           text-[11.5px] font-semibold border border-white/10 bg-ink-700/60 text-slate-300;
   }
 
-  .setu-textarea {
-    @apply setu-input resize-y min-h-[100px];
+  .label {
+    @apply text-[10.5px] font-extrabold uppercase tracking-[0.11em] text-slate-500;
   }
 
-  /* Primary button */
-  .setu-btn {
-    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 
-           font-semibold text-sm rounded-xl transition-all duration-200
-           focus:outline-none focus:ring-2 focus:ring-offset-2
-           disabled:opacity-50 disabled:cursor-not-allowed
-           active:scale-[0.98];
-    min-height: 44px;
+  /* Screen-reader-only, but focusable (skip links). */
+  .sr-only-focusable {
+    @apply absolute w-px h-px overflow-hidden;
   }
+  .sr-only-focusable:focus {
+    @apply static w-auto h-auto overflow-visible;
+  }
+}
 
-  .setu-btn-primary {
-    @apply setu-btn bg-sage-600 text-white hover:bg-sage-700 
-           focus:ring-sage-500 shadow-sm hover:shadow-md;
-  }
-
-  .setu-btn-secondary {
-    @apply setu-btn bg-white text-gray-700 border border-gray-200 
-           hover:bg-gray-50 focus:ring-gray-300;
-  }
-
-  body.theme-dark .setu-btn-secondary {
-    @apply bg-gray-800 text-gray-200 border-gray-700 hover:bg-gray-700;
-  }
-
-  .setu-btn-ghost {
-    @apply setu-btn bg-transparent text-gray-600 hover:bg-gray-100 
-           focus:ring-gray-300;
-  }
-
-  /* Loading spinner */
-  .setu-spinner {
-    @apply w-5 h-5 border-2 border-gray-200 border-t-sage-600 rounded-full animate-spin;
-  }
-
-  /* Scrollbar styling */
-  .setu-scrollbar::-webkit-scrollbar {
-    width: 6px;
-  }
-  .setu-scrollbar::-webkit-scrollbar-track {
-    @apply bg-transparent;
-  }
-  .setu-scrollbar::-webkit-scrollbar-thumb {
-    @apply bg-gray-300 rounded-full;
-  }
-  .setu-scrollbar::-webkit-scrollbar-thumb:hover {
-    @apply bg-gray-400;
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

@@ -1,237 +1,212 @@
-import React, { useState, useEffect } from 'react';
-import { dbService, isSupabaseConfigured } from '../services/supabaseClient';
-import { useTheme } from '../contexts/ThemeContext';
-import { motion } from 'framer-motion';
-import { Settings as SettingsIcon, Sliders, Palette, Type, Eye, Database, RotateCcw, Check } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { getPrefs, savePrefs, listMaps } from '../lib/storage';
+import { api } from '../lib/api';
 
-const Settings = () => {
-  const { theme, setTheme, sensoryCalmMode, setSensoryCalmMode, THEMES } = useTheme();
-  
-  const [wpm, setWpm] = useState(240);
-  const [font, setFont] = useState('inter');
-  const [bionicReading, setBionicReading] = useState(false);
-  const [reducedMotion, setReducedMotion] = useState(false);
-  const [highContrast, setHighContrast] = useState(false);
-  const [apiUrl, setApiUrl] = useState('http://localhost:8000');
-  
-  const [saveStatus, setSaveStatus] = useState('');
+export default function Settings() {
+  const [prefs, setPrefs] = useState(getPrefs);
+  const [health, setHealth] = useState(null);
+  const [checking, setChecking] = useState(false);
 
   useEffect(() => {
-    // Load from local storage or DB
-    const savedSettings = localStorage.getItem('setu_settings');
-    if (savedSettings) {
-      try {
-        const parsed = JSON.parse(savedSettings);
-        setWpm(parsed.wpm || 240);
-        setFont(parsed.font || 'inter');
-        setBionicReading(parsed.bionicReading || false);
-        setReducedMotion(parsed.reducedMotion || false);
-        setHighContrast(parsed.highContrast || false);
-        setApiUrl(parsed.apiUrl || 'http://localhost:8000');
-      } catch (e) {
-        console.error("Failed to parse settings", e);
-      }
-    }
+    api.health().then(setHealth);
   }, []);
 
-  const saveSettings = () => {
-    const settings = {
-      wpm, font, bionicReading, reducedMotion, highContrast, apiUrl
-    };
-    localStorage.setItem('setu_settings', JSON.stringify(settings));
-    
-    if (isSupabaseConfigured) {
-      dbService.updateProfile({ settings }).catch(console.error);
+  const update = (patch) => setPrefs(savePrefs(patch));
+
+  const deepCheck = async () => {
+    setChecking(true);
+    try {
+      const response = await fetch('/api/health/ai');
+      setHealth({ ...(health || {}), ai: await response.json() });
+    } catch (_) {
+      setHealth({ ...(health || {}), ai: { ok: false, reason: 'Engine unreachable' } });
+    } finally {
+      setChecking(false);
     }
-    
-    setSaveStatus('Settings saved successfully!');
-    setTimeout(() => setSaveStatus(''), 3000);
   };
-
-  const resetToDefaults = () => {
-    setWpm(240);
-    setFont('inter');
-    setTheme('theme-default');
-    setSensoryCalmMode(false);
-    setBionicReading(false);
-    setReducedMotion(false);
-    setHighContrast(false);
-    setApiUrl('http://localhost:8000');
-    setSaveStatus('Reset to defaults');
-    setTimeout(() => setSaveStatus(''), 3000);
-  };
-
-  const SectionTitle = ({ icon: Icon, title }) => (
-    <h3 className="text-xl font-semibold text-gray-800 flex items-center gap-2 mb-4 border-b pb-2">
-      <Icon className="text-sage-600" size={24} />
-      {title}
-    </h3>
-  );
 
   return (
-    <div className="max-w-4xl mx-auto p-6 pb-20 space-y-8">
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-      >
-        <h1 className="text-4xl font-bold text-gray-900 flex items-center gap-3">
-          <SettingsIcon className="text-sage-600" size={36} />
-          Accessibility Preferences
-        </h1>
-        <p className="text-xl text-gray-600 mt-2">
-          Tailor the SETU experience to your unique cognitive needs.
+    <div className="h-full overflow-y-auto p-6">
+      <header className="mb-6">
+        <h1 className="text-xl font-extrabold text-white">Settings</h1>
+        <p className="mt-1 text-[13px] text-slate-400">
+          Reading preferences apply across the whole workspace and are saved on this device.
         </p>
-      </motion.div>
+      </header>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1 }}
-        className="glass-card p-6 md:p-8 space-y-10"
-      >
-        {/* Profile & Reading */}
-        <section>
-          <SectionTitle icon={Sliders} title="Reading & Processing" />
-          <div className="space-y-6">
-            <div>
-              <div className="flex justify-between items-center mb-2">
-                <label className="text-gray-700 font-medium block">Reading Speed (WPM)</label>
-                <span className="bg-sage-100 text-sage-800 px-3 py-1 rounded-full text-sm font-semibold">{wpm} WPM</span>
-              </div>
-              <input 
-                type="range" 
-                min="60" 
-                max="600" 
-                step="10"
-                value={wpm} 
-                onChange={(e) => setWpm(parseInt(e.target.value))}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-sage-600"
-              />
-              <div className="flex justify-between text-xs text-gray-500 mt-2">
-                <span>60 (Slow)</span>
-                <span>240 (Average)</span>
-                <span>600 (Fast)</span>
-              </div>
-            </div>
-            
-            <label className="flex items-center gap-3 p-4 border rounded-xl hover:bg-gray-50 cursor-pointer transition-colors">
-              <input 
-                type="checkbox" 
-                checked={bionicReading} 
-                onChange={(e) => setBionicReading(e.target.checked)}
-                className="w-5 h-5 text-sage-600 rounded focus:ring-sage-500"
-              />
-              <div>
-                <p className="font-medium text-gray-900">Bionic Reading Default</p>
-                <p className="text-sm text-gray-500">Automatically apply bolding to word prefixes to guide eye movement.</p>
-              </div>
-            </label>
-          </div>
-        </section>
+      <div className="max-w-2xl space-y-4">
+        <Section title="Reading">
+          <Choice
+            label="Typeface"
+            hint="OpenDyslexic has weighted letter bottoms that reduce letter flipping."
+            value={prefs.font}
+            onChange={(font) => update({ font })}
+            options={[
+              { value: 'system', label: 'System' },
+              { value: 'dyslexic', label: 'OpenDyslexic' }
+            ]}
+          />
+          <Choice
+            label="Text size"
+            value={prefs.textSize}
+            onChange={(textSize) => update({ textSize })}
+            options={[
+              { value: 'normal', label: 'Normal' },
+              { value: 'comfortable', label: 'Comfortable' },
+              { value: 'large', label: 'Large' }
+            ]}
+          />
+          <Toggle
+            label="Reduce motion"
+            hint="Removes transitions and animated backgrounds."
+            checked={prefs.reduceMotion}
+            onChange={(reduceMotion) => update({ reduceMotion })}
+          />
+        </Section>
 
-        {/* Theme & Visuals */}
-        <section>
-          <SectionTitle icon={Palette} title="Theme & Visuals" />
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            {Object.keys(THEMES || {}).map(tKey => {
-              const isActive = theme === tKey;
-              return (
-                <button
-                  key={tKey}
-                  onClick={() => setTheme(tKey)}
-                  className={`p-4 rounded-xl border-2 text-center min-h-[44px] transition-all
-                    ${isActive ? 'border-sage-600 bg-sage-50 shadow-md scale-105' : 'border-gray-200 hover:border-sage-300'}`}
-                >
-                  <div className="h-8 w-full rounded-md mb-2 bg-gradient-to-r from-gray-100 to-gray-200"></div>
-                  <span className="font-medium text-sm text-gray-700 capitalize">{tKey.replace('theme-', '')}</span>
-                  {isActive && <Check size={16} className="mx-auto mt-1 text-sage-600" />}
-                </button>
-              );
-            })}
-          </div>
-
-          <label className="flex items-center gap-3 p-4 border rounded-xl hover:bg-gray-50 cursor-pointer transition-colors mb-4">
-            <input 
-              type="checkbox" 
-              checked={sensoryCalmMode} 
-              onChange={(e) => setSensoryCalmMode(e.target.checked)}
-              className="w-5 h-5 text-sage-600 rounded focus:ring-sage-500"
-            />
-            <div>
-              <p className="font-medium text-gray-900">Sensory Calm Mode</p>
-              <p className="text-sm text-gray-500">Reduces bright colors, hides unnecessary UI elements, and mutes sensory input.</p>
-            </div>
-          </label>
-        </section>
-
-        {/* Typography */}
-        <section>
-          <SectionTitle icon={Type} title="Typography" />
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {['inter', 'atkinson', 'opendyslexic'].map(f => (
-              <button
-                key={f}
-                onClick={() => setFont(f)}
-                className={`p-4 rounded-xl border-2 text-left min-h-[44px] transition-all
-                  ${font === f ? 'border-sage-600 bg-sage-50 shadow-md' : 'border-gray-200 hover:border-sage-300'}`}
-              >
-                <span className="font-bold text-lg text-gray-800 capitalize block mb-1">
-                  {f === 'inter' ? 'Inter' : f === 'atkinson' ? 'Atkinson' : 'OpenDyslexic'}
-                </span>
-                <span className="text-sm text-gray-500">The quick brown fox jumps over the lazy dog.</span>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        {/* Advanced & System */}
-        <section>
-          <SectionTitle icon={Database} title="System Settings" />
-          <div className="space-y-4">
-            <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-xl">
-              <div className={`w-3 h-3 rounded-full ${isSupabaseConfigured ? 'bg-green-500' : 'bg-red-500'}`}></div>
-              <div>
-                <p className="font-medium text-gray-900">Supabase Connection</p>
-                <p className="text-sm text-gray-500">{isSupabaseConfigured ? 'Connected to cloud sync' : 'Local mode only (No Supabase URL/Key provided)'}</p>
-              </div>
-            </div>
-            
-            <div>
-              <label className="text-gray-700 font-medium block mb-2">API Server URL</label>
-              <input 
-                type="text" 
-                value={apiUrl}
-                onChange={(e) => setApiUrl(e.target.value)}
-                className="setu-input w-full"
-                placeholder="http://localhost:8000"
-              />
-            </div>
-          </div>
-        </section>
-
-        {/* Actions */}
-        <div className="flex flex-col sm:flex-row items-center justify-between pt-6 border-t gap-4">
-          <button 
-            onClick={resetToDefaults}
-            className="setu-btn-ghost flex items-center gap-2 w-full sm:w-auto text-gray-500 hover:text-gray-800"
-          >
-            <RotateCcw size={18} />
-            Reset Defaults
+        <Section title="Engine">
+          <dl className="space-y-2 text-[13px]">
+            <Field label="Status">
+              {health ? (
+                <span className="text-mint-300">Connected · v{health.version}</span>
+              ) : (
+                <span className="text-rose-400">Offline — run <code className="rounded bg-ink-700 px-1">npm start</code> in /backend</span>
+              )}
+            </Field>
+            <Field label="AI key">
+              {health?.aiConfigured ? (
+                <span className="text-mint-300">Configured</span>
+              ) : (
+                <span className="text-sun-400">Not set — add GEMINI_API_KEY to your .env</span>
+              )}
+            </Field>
+            {health?.ai && (
+              <Field label="Live test">
+                {health.ai.ok ? (
+                  <span className="text-mint-300">
+                    Responding · {health.ai.provider} / {health.ai.model}
+                  </span>
+                ) : (
+                  <span className="text-rose-400">{health.ai.reason}</span>
+                )}
+              </Field>
+            )}
+          </dl>
+          <button onClick={deepCheck} disabled={checking} className="btn-ghost mt-3 !min-h-[34px] text-[12.5px]">
+            {checking ? 'Testing…' : 'Test the AI connection'}
           </button>
-          
-          <div className="flex items-center gap-4 w-full sm:w-auto">
-            {saveStatus && <span className="text-sage-600 font-medium text-sm animate-pulse">{saveStatus}</span>}
-            <button 
-              onClick={saveSettings}
-              className="setu-btn-primary w-full sm:w-auto shadow-md"
-            >
-              Save Preferences
-            </button>
-          </div>
-        </div>
-      </motion.div>
+        </Section>
+
+        <Section title="Your data">
+          <p className="text-[13px] leading-relaxed text-slate-400">
+            {listMaps().length} map{listMaps().length === 1 ? '' : 's'} stored in this browser.
+            Nothing is uploaded anywhere — clearing your browser data removes them.
+          </p>
+          <button
+            onClick={() => {
+              if (confirm('Delete every saved map? This cannot be undone.')) {
+                localStorage.removeItem('setu.maps.v1');
+                window.location.reload();
+              }
+            }}
+            className="btn-ghost mt-3 !min-h-[34px] text-[12.5px] hover:!border-rose-400 hover:!text-rose-400"
+          >
+            Delete all saved maps
+          </button>
+        </Section>
+
+        <Section title="Keyboard shortcuts (browser extension)">
+          <dl className="grid gap-1.5 text-[12.5px] sm:grid-cols-2">
+            {[
+              ['Alt + B', 'Bionic Reading'],
+              ['Alt + F', 'Focus Mode'],
+              ['Alt + L', 'Line Focus'],
+              ['Alt + H', 'Reading Ruler'],
+              ['Alt + T', 'Read Aloud'],
+              ['Alt + S', 'Auto Scroll'],
+              ['Alt + Shift + C', 'SETU Commander'],
+              ['Alt + X', 'Turn everything off']
+            ].map(([keys, action]) => (
+              <div key={keys} className="flex items-center justify-between gap-2 rounded-lg bg-ink-700/40 px-3 py-1.5">
+                <dt className="text-slate-400">{action}</dt>
+                <dd>
+                  <kbd className="rounded border border-white/15 bg-ink-800 px-1.5 py-0.5 text-[11px] font-semibold text-slate-300">
+                    {keys}
+                  </kbd>
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </Section>
+      </div>
     </div>
   );
-};
+}
 
-export default Settings;
+/* --------------------------- presentational --------------------------- */
+
+const Section = ({ title, children }) => (
+  <section className="card p-5">
+    <h2 className="label mb-3">{title}</h2>
+    <div className="space-y-4">{children}</div>
+  </section>
+);
+
+const Field = ({ label, children }) => (
+  <div className="flex justify-between gap-3">
+    <dt className="text-slate-500">{label}</dt>
+    <dd className="text-right">{children}</dd>
+  </div>
+);
+
+function Choice({ label, hint, value, onChange, options }) {
+  return (
+    <div>
+      <p className="text-[13px] font-semibold text-slate-200">{label}</p>
+      {hint && <p className="mb-2 mt-0.5 text-[11.5px] text-slate-500">{hint}</p>}
+      <div className="mt-2 flex flex-wrap gap-2" role="radiogroup" aria-label={label}>
+        {options.map((option) => (
+          <button
+            key={option.value}
+            role="radio"
+            aria-checked={value === option.value}
+            onClick={() => onChange(option.value)}
+            className={`rounded-lg border px-3.5 py-2 text-[12.5px] font-semibold transition-colors ${
+              value === option.value
+                ? 'border-iris-500 bg-iris-500/15 text-white'
+                : 'border-white/10 bg-ink-700/40 text-slate-400 hover:border-white/30 hover:text-slate-200'
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Toggle({ label, hint, checked, onChange }) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div>
+        <p className="text-[13px] font-semibold text-slate-200">{label}</p>
+        {hint && <p className="mt-0.5 text-[11.5px] text-slate-500">{hint}</p>}
+      </div>
+      <button
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        onClick={() => onChange(!checked)}
+        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+          checked ? 'bg-iris-500' : 'bg-ink-600'
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+            checked ? 'translate-x-[22px]' : 'translate-x-0.5'
+          }`}
+        />
+      </button>
+    </div>
+  );
+}

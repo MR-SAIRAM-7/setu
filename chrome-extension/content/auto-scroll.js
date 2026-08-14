@@ -1,307 +1,183 @@
-// Auto Scroll - Hands-free reading with adaptive speed
-// Detects reading speed and adjusts scroll accordingly
+/**
+ * Auto Scroll — hands-free reading at a chosen words-per-minute pace.
+ *
+ * Scrolls fractional pixels per frame rather than jumping on a timer, so the
+ * text glides instead of stuttering — important for readers who lose their
+ * place when content jumps.
+ */
 
-class AutoScroll {
-  constructor() {
-    this.isEnabled = false;
-    this.scrollSpeed = 50; // pixels per second
-    this.baseSpeed = 50;
-    this.isPaused = false;
-    this.lastScrollTime = 0;
-    this.animationId = null;
-    
-    // Reading speed detection
-    this.wordsRead = 0;
-    this.readingStartTime = null;
-    this.estimatedWPM = 200;
-    this.targetWPM = 200;
-    
-    // Viewport tracking
-    this.viewportWords = [];
-    this.visibleWordIndex = 0;
-    
-    // Controls overlay
-    this.controlsOverlay = null;
-    this.progressBar = null;
-  }
+(() => {
+  const { Feature, UI, Store } = window.SETU;
 
-  enable() {
-    if (this.isEnabled) return;
-    this.isEnabled = true;
-    
-    console.log('[AutoScroll] Enabled');
-    
-    this.readingStartTime = Date.now();
-    this.analyzeContent();
-    this.createControls();
-    this.startScrolling();
-    this.setupEventListeners();
-    
-    document.body.classList.add('setu-scroll-active');
-  }
+  class AutoScroll extends Feature {
+    static key = 'scroll';
 
-  disable() {
-    if (!this.isEnabled) return;
-    this.isEnabled = false;
-    
-    console.log('[AutoScroll] Disabled');
-    
-    this.stopScrolling();
-    this.removeControls();
-    this.removeEventListeners();
-    this.saveReadingStats();
-    
-    document.body.classList.remove('setu-scroll-active');
-  }
+    constructor() {
+      super();
+      this.wpm = 220;
+      this.running = true;
+      this.remainder = 0; // sub-pixel carry, so slow speeds still move
+      this.lastFrame = 0;
+    }
 
-  analyzeContent() {
-    // Find all text content and split into words
-    const textElements = document.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, td');
-    this.viewportWords = [];
-    
-    textElements.forEach(el => {
-      const text = el.textContent.trim();
-      if (text) {
-        const words = text.split(/\s+/);
-        words.forEach((word, index) => {
-          this.viewportWords.push({
-            word: word,
-            element: el,
-            wordIndex: index
-          });
-        });
+    onEnable() {
+      this.wpm = Store.getSetting('scrollWpm') || 220;
+      this.build();
+      this.bind();
+      this.lastFrame = performance.now();
+      this.loop(() => this.tick());
+      UI.toast('Auto Scroll on — Space pauses', { tone: 'success' });
+    }
+
+    onDisable() {
+      UI.destroyHost('scroll');
+    }
+
+    onSettings() {
+      const next = Store.getSetting('scrollWpm');
+      if (next && next !== this.wpm) {
+        this.wpm = next;
+        this.render();
       }
-    });
-    
-    console.log(`Analyzed ${this.viewportWords.length} words`);
-  }
+    }
 
-  createControls() {
-    this.controlsOverlay = document.createElement('div');
-    this.controlsOverlay.id = 'setu-scroll-controls';
-    this.controlsOverlay.innerHTML = `
-      <div class="scroll-controls-panel">
-        <button class="scroll-btn scroll-pause" title="Pause/Play (Space)">
-          <span class="pause-icon">&#10074;&#10074;</span>
-          <span class="play-icon" style="display: none;">&#9654;</span>
-        </button>
-        <div class="scroll-speed-control">
-          <button class="scroll-btn scroll-slower" title="Slower">&minus;</button>
-          <div class="speed-display">
-            <span class="speed-value">200</span>
-            <span class="speed-unit">WPM</span>
-          </div>
-          <button class="scroll-btn scroll-faster" title="Faster">+</button>
+    /**
+     * Convert reading pace to scroll velocity.
+     * Assumes ~11 words per rendered line, so px/sec = (wpm/60) / 11 * lineHeight.
+     */
+    pixelsPerSecond() {
+      const lineHeight = parseFloat(getComputedStyle(document.body).lineHeight) || 24;
+      const safeLineHeight = Number.isFinite(lineHeight) ? lineHeight : 24;
+      return (this.wpm / 60 / 11) * safeLineHeight;
+    }
+
+    tick() {
+      const now = performance.now();
+      const deltaSeconds = Math.min(0.1, (now - this.lastFrame) / 1000);
+      this.lastFrame = now;
+
+      if (!this.running) return;
+
+      const distance = this.pixelsPerSecond() * deltaSeconds + this.remainder;
+      const whole = Math.floor(distance);
+      this.remainder = distance - whole;
+
+      if (whole > 0) {
+        const before = window.scrollY;
+        window.scrollBy(0, whole);
+        // Reached the bottom — stop rather than spin against the end.
+        if (window.scrollY === before) {
+          this.running = false;
+          this.render();
+          UI.toast('Reached the end of the page.', { tone: 'info' });
+        }
+      }
+    }
+
+    bind() {
+      this.listen(window, 'keydown', (event) => {
+        const active = document.activeElement;
+        if (active && (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName))) return;
+
+        if (event.code === 'Space') {
+          event.preventDefault();
+          this.toggleRun();
+        } else if (event.key === 'ArrowUp' && event.shiftKey) {
+          event.preventDefault();
+          this.changeSpeed(20);
+        } else if (event.key === 'ArrowDown' && event.shiftKey) {
+          event.preventDefault();
+          this.changeSpeed(-20);
+        }
+      });
+
+      // Any manual scroll input pauses, so the user is never fighting the page.
+      this.listen(window, 'wheel', () => this.pauseBriefly(), { passive: true });
+      this.listen(window, 'touchstart', () => this.pauseBriefly(), { passive: true });
+    }
+
+    pauseBriefly() {
+      if (!this.running) return;
+      this.running = false;
+      this.render();
+      clearTimeout(this.resumeTimer);
+      this.resumeTimer = setTimeout(() => {
+        if (this.enabled) {
+          this.running = true;
+          this.lastFrame = performance.now();
+          this.render();
+        }
+      }, 1800);
+      this.cleanup(() => clearTimeout(this.resumeTimer));
+    }
+
+    toggleRun() {
+      this.running = !this.running;
+      this.lastFrame = performance.now();
+      this.render();
+    }
+
+    changeSpeed(delta) {
+      this.wpm = Math.max(60, Math.min(900, this.wpm + delta));
+      Store.set({ settings: { scrollWpm: this.wpm } });
+      this.render();
+    }
+
+    build() {
+      const root = UI.host('scroll', { layer: 'control', interactive: true });
+
+      const style = document.createElement('style');
+      style.textContent = `
+        .bar {
+          position: fixed; bottom: 24px; right: 24px;
+          display: flex; align-items: center; gap: 9px;
+          padding: 9px 14px; background: var(--bg-soft);
+          border: 1px solid var(--border); border-radius: 999px;
+          box-shadow: var(--shadow); pointer-events: auto;
+        }
+        button {
+          background: transparent; border: 1px solid var(--border);
+          color: var(--text); width: 32px; height: 32px; border-radius: 50%;
+          cursor: pointer; font-size: 13px;
+        }
+        button:hover { background: rgba(255,255,255,.1); border-color: var(--accent); }
+        button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        button[data-primary] { background: var(--accent); border-color: var(--accent); color: #0b1020; }
+        .wpm { font-size: 12px; font-weight: 700; min-width: 62px; text-align: center; color: var(--text-dim); }
+        .wpm b { color: var(--text); font-size: 13px; }
+      `;
+      root.appendChild(style);
+
+      const scope = document.createElement('div');
+      scope.className = 'setu-scope';
+      scope.innerHTML = `
+        <div class="bar" role="group" aria-label="Auto scroll controls">
+          <button data-act="slower" aria-label="Slower" title="Slower (Shift+↓)">−</button>
+          <span class="wpm"><b>220</b> wpm</span>
+          <button data-act="faster" aria-label="Faster" title="Faster (Shift+↑)">+</button>
+          <button data-primary data-act="run" aria-label="Pause" title="Pause / resume (Space)">❚❚</button>
+          <button data-act="close" aria-label="Close auto scroll" title="Close">×</button>
         </div>
-        <button class="scroll-btn scroll-stop" title="Stop Auto Scroll">&times;</button>
-      </div>
-      <div class="scroll-progress-bar">
-        <div class="scroll-progress-fill"></div>
-      </div>
-    `;
-    
-    document.body.appendChild(this.controlsOverlay);
-    
-    // Setup control buttons
-    this.setupControlButtons();
-    
-    // Get progress bar
-    this.progressBar = this.controlsOverlay.querySelector('.scroll-progress-fill');
-  }
+      `;
+      root.appendChild(scope);
+      this.scope = scope;
 
-  setupControlButtons() {
-    // Pause/Play
-    const pauseBtn = this.controlsOverlay.querySelector('.scroll-pause');
-    pauseBtn.addEventListener('click', () => this.togglePause());
-    
-    // Slower
-    const slowerBtn = this.controlsOverlay.querySelector('.scroll-slower');
-    slowerBtn.addEventListener('click', () => this.adjustSpeed(-20));
-    
-    // Faster
-    const fasterBtn = this.controlsOverlay.querySelector('.scroll-faster');
-    fasterBtn.addEventListener('click', () => this.adjustSpeed(20));
-    
-    // Stop
-    const stopBtn = this.controlsOverlay.querySelector('.scroll-stop');
-    stopBtn.addEventListener('click', () => this.disable());
-  }
+      scope.querySelector('[data-act="slower"]').onclick = () => this.changeSpeed(-20);
+      scope.querySelector('[data-act="faster"]').onclick = () => this.changeSpeed(20);
+      scope.querySelector('[data-act="run"]').onclick = () => this.toggleRun();
+      scope.querySelector('[data-act="close"]').onclick = () => window.setuLens?.toggle('scroll', false);
 
-  removeControls() {
-    if (this.controlsOverlay) {
-      this.controlsOverlay.remove();
-      this.controlsOverlay = null;
+      this.render();
+    }
+
+    render() {
+      if (!this.scope) return;
+      this.scope.querySelector('.wpm').innerHTML = `<b>${this.wpm}</b> wpm`;
+      const btn = this.scope.querySelector('[data-act="run"]');
+      btn.textContent = this.running ? '❚❚' : '▶';
+      btn.setAttribute('aria-label', this.running ? 'Pause' : 'Resume');
     }
   }
 
-  setupEventListeners() {
-    // Keyboard controls
-    this.keyHandler = (e) => {
-      if (e.code === 'Space' && !this.isInputFocused()) {
-        e.preventDefault();
-        this.togglePause();
-      }
-      if (e.code === 'ArrowUp') {
-        this.adjustSpeed(10);
-      }
-      if (e.code === 'ArrowDown') {
-        this.adjustSpeed(-10);
-      }
-    };
-    
-    // Click to pause
-    this.clickHandler = (e) => {
-      if (!e.target.closest('#setu-scroll-controls')) {
-        this.togglePause();
-      }
-    };
-    
-    // Scroll detection for speed adjustment
-    this.scrollHandler = () => {
-      this.detectManualScroll();
-    };
-    
-    document.addEventListener('keydown', this.keyHandler);
-    document.addEventListener('click', this.clickHandler);
-    window.addEventListener('scroll', this.scrollHandler);
-  }
-
-  removeEventListeners() {
-    document.removeEventListener('keydown', this.keyHandler);
-    document.removeEventListener('click', this.clickHandler);
-    window.removeEventListener('scroll', this.scrollHandler);
-  }
-
-  isInputFocused() {
-    const activeElement = document.activeElement;
-    return activeElement && (
-      activeElement.tagName === 'INPUT' ||
-      activeElement.tagName === 'TEXTAREA' ||
-      activeElement.contentEditable === 'true'
-    );
-  }
-
-  startScrolling() {
-    this.lastScrollTime = performance.now();
-    this.scrollFrame();
-  }
-
-  stopScrolling() {
-    if (this.animationId) {
-      cancelAnimationFrame(this.animationId);
-      this.animationId = null;
-    }
-  }
-
-  scrollFrame() {
-    if (!this.isEnabled || this.isPaused) {
-      this.animationId = requestAnimationFrame(() => this.scrollFrame());
-      return;
-    }
-    
-    const now = performance.now();
-    const deltaTime = (now - this.lastScrollTime) / 1000; // seconds
-    this.lastScrollTime = now;
-    
-    // Calculate scroll amount based on WPM
-    // Average word length ~5 chars, average line ~60 chars = ~12 words per line
-    // At 200 WPM, need to scroll ~17 lines per minute
-    const pixelsPerWord = 20; // Approximate
-    const scrollAmount = (this.targetWPM * pixelsPerWord / 60) * deltaTime;
-    
-    window.scrollBy(0, scrollAmount);
-    
-    // Update progress
-    this.updateProgress();
-    
-    // Check if reached end
-    if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 100) {
-      this.pause();
-    }
-    
-    this.animationId = requestAnimationFrame(() => this.scrollFrame());
-  }
-
-  togglePause() {
-    this.isPaused = !this.isPaused;
-    
-    const pauseIcon = this.controlsOverlay.querySelector('.pause-icon');
-    const playIcon = this.controlsOverlay.querySelector('.play-icon');
-    
-    if (this.isPaused) {
-      pauseIcon.style.display = 'none';
-      playIcon.style.display = 'inline';
-      this.controlsOverlay.classList.add('paused');
-    } else {
-      pauseIcon.style.display = 'inline';
-      playIcon.style.display = 'none';
-      this.controlsOverlay.classList.remove('paused');
-      this.lastScrollTime = performance.now();
-    }
-  }
-
-  pause() {
-    this.isPaused = true;
-    const pauseIcon = this.controlsOverlay.querySelector('.pause-icon');
-    const playIcon = this.controlsOverlay.querySelector('.play-icon');
-    pauseIcon.style.display = 'none';
-    playIcon.style.display = 'inline';
-    this.controlsOverlay.classList.add('paused');
-  }
-
-  adjustSpeed(delta) {
-    this.targetWPM = Math.max(50, Math.min(800, this.targetWPM + delta));
-    
-    const speedValue = this.controlsOverlay.querySelector('.speed-value');
-    speedValue.textContent = this.targetWPM;
-    
-    // Visual feedback
-    speedValue.style.transform = 'scale(1.2)';
-    setTimeout(() => {
-      speedValue.style.transform = 'scale(1)';
-    }, 150);
-  }
-
-  detectManualScroll() {
-    // If user manually scrolls, adjust speed to match
-    // This is a simplified version
-  }
-
-  updateProgress() {
-    if (!this.progressBar) return;
-    
-    const scrollPercent = (window.scrollY / (document.body.scrollHeight - window.innerHeight)) * 100;
-    this.progressBar.style.width = `${Math.min(100, Math.max(0, scrollPercent))}%`;
-  }
-
-  saveReadingStats() {
-    if (!this.readingStartTime) return;
-    
-    const readingTime = (Date.now() - this.readingStartTime) / 60000; // minutes
-    const wordsRead = Math.floor(readingTime * this.targetWPM);
-    
-    const stats = {
-      wpm: this.targetWPM,
-      time: Math.round(readingTime),
-      words: wordsRead
-    };
-    
-    // Send to background script
-    chrome.runtime.sendMessage({
-      action: 'updateStats',
-      stats: stats
-    });
-  }
-
-  // Word highlighting during scroll
-  highlightCurrentWord() {
-    // Find word at current scroll position
-    const viewportCenter = window.scrollY + window.innerHeight / 2;
-    
-    // Simple word highlighting based on position
-    // In full implementation, track exact word position
-  }
-}
-
-// Make available globally
-window.AutoScroll = AutoScroll;
+  window.SETU.features.set('scroll', AutoScroll);
+})();

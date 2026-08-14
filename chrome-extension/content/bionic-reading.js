@@ -1,214 +1,210 @@
-// Bionic Reading - Bold first half of words to guide the eye
-// Scientifically proven to help ADHD and Dyslexic readers
+/**
+ * Bionic Reading — bolds the leading fixation of each word to anchor the eye.
+ *
+ * Rewritten in v3. The previous version had four defects that made it unsafe
+ * to leave on:
+ *   1. `parent.closest('.setu-*')` is not a valid CSS selector — closest()
+ *      threw a SyntaxError inside the TreeWalker filter, aborting the walk.
+ *   2. The MutationObserver observed the very DOM edits it was making, so each
+ *      pass re-triggered itself — an unbounded loop that froze busy pages.
+ *   3. Restore only looked for `.setu-bionic-text`, but the interactive-element
+ *      branch emitted a bare <span>, so that text could never be restored.
+ *   4. Words were injected via innerHTML without escaping, so page text
+ *      containing markup characters was reinterpreted as HTML.
+ *
+ * The rewrite wraps each text node once, keeps a direct reference for exact
+ * restoration, escapes all content, and pauses the observer while mutating.
+ */
 
-class BionicReading {
-  constructor() {
-    this.isEnabled = false;
-    this.processedElements = new WeakSet();
-    this.observer = null;
-    this.intensity = 0.5; // How much of the word to bold (0.5 = first half)
-  }
+(() => {
+  const { Feature, UI, Store, Text } = window.SETU;
 
-  enable() {
-    if (this.isEnabled) return;
-    this.isEnabled = true;
-    
-    console.log('[BionicReading] Enabled');
-    
-    // Process existing content
-    this.processDocument();
-    
-    // Watch for new content
-    this.setupMutationObserver();
-    
-    // Add bionic class to body
-    document.body.classList.add('setu-bionic-active');
-  }
+  class BionicReading extends Feature {
+    static key = 'bionic';
 
-  disable() {
-    if (!this.isEnabled) return;
-    this.isEnabled = false;
-    
-    console.log('[BionicReading] Disabled');
-    
-    // Disconnect observer
-    if (this.observer) {
-      this.observer.disconnect();
+    constructor() {
+      super();
+      this.intensity = 0.45;
       this.observer = null;
+      this.muted = false;      // true while we are the ones editing the DOM
+      this.wrapped = new Set(); // <span data-setu-bionic> we created
+      this.pending = null;
     }
-    
-    // Remove bionic class
-    document.body.classList.remove('setu-bionic-active');
-    
-    // Restore original text
-    this.restoreOriginalText();
-  }
 
-  processDocument() {
-    const textElements = this.getTextElements();
-    textElements.forEach(el => this.processElement(el));
-  }
-
-  getTextElements() {
-    // Get all text-containing elements, excluding scripts, styles, and our own elements
-    const walker = document.createTreeWalker(
-      document.body,
-      NodeFilter.SHOW_TEXT,
-      {
-        acceptNode: (node) => {
-          // Skip if parent is script, style, or our own elements
-          const parent = node.parentElement;
-          if (!parent) return NodeFilter.FILTER_REJECT;
-          
-          const tagName = parent.tagName.toLowerCase();
-          if (['script', 'style', 'noscript', 'iframe', 'canvas', 'svg'].includes(tagName)) {
-            return NodeFilter.FILTER_REJECT;
-          }
-          
-          if (parent.closest('.setu-*') || parent.closest('#setu-*')) {
-            return NodeFilter.FILTER_REJECT;
-          }
-          
-          // Skip if already processed
-          if (this.processedElements.has(parent)) {
-            return NodeFilter.FILTER_REJECT;
-          }
-          
-          // Skip empty text nodes
-          if (!node.textContent.trim()) {
-            return NodeFilter.FILTER_REJECT;
-          }
-          
-          return NodeFilter.FILTER_ACCEPT;
-        }
-      }
-    );
-
-    const elements = [];
-    let node;
-    while (node = walker.nextNode()) {
-      elements.push(node);
+    onEnable() {
+      this.intensity = Store.getSetting('bionicIntensity') || 0.45;
+      this.injectStyle();
+      this.processAll();
+      this.watch();
+      UI.toast('Bionic Reading on', { tone: 'success' });
     }
-    
-    return elements;
-  }
 
-  processElement(textNode) {
-    const parent = textNode.parentElement;
-    if (!parent || this.processedElements.has(parent)) return;
-    
-    const text = textNode.textContent;
-    if (!text.trim() || text.length < 3) return;
-    
-    // Check if this is inside a link or button (preserve functionality)
-    const isInteractive = parent.closest('a, button, input, textarea, [role="button"]');
-    
-    // Create bionic version
-    const bionicText = this.convertToBionic(text);
-    
-    if (bionicText !== text) {
-      if (isInteractive) {
-        // For interactive elements, wrap in span to preserve functionality
-        const wrapper = document.createElement('span');
-        wrapper.className = 'setu-bionic-text';
-        wrapper.innerHTML = bionicText;
-        
-        // Replace text node with wrapper
-        if (textNode.parentNode) {
-          const span = document.createElement('span');
-          span.innerHTML = bionicText;
-          textNode.parentNode.replaceChild(span, textNode);
-          this.processedElements.add(span);
-        }
-      } else {
-        // For regular text, use a span
-        const span = document.createElement('span');
-        span.className = 'setu-bionic-text';
-        span.innerHTML = bionicText;
-        
-        if (textNode.parentNode) {
-          textNode.parentNode.replaceChild(span, textNode);
-          this.processedElements.add(span);
-        }
-      }
+    onDisable() {
+      this.observer?.disconnect();
+      this.observer = null;
+      clearTimeout(this.pending);
+      this.restoreAll();
+      document.getElementById('setu-bionic-style')?.remove();
     }
-  }
 
-  convertToBionic(text) {
-    // Split into words and process each
-    return text.replace(/\b[a-zA-Z]+\b/g, (word) => {
-      if (word.length < 2) return word;
-      
-      // Calculate bold portion based on intensity
-      const boldLength = Math.max(1, Math.ceil(word.length * this.intensity));
-      const boldPart = word.substring(0, boldLength);
-      const restPart = word.substring(boldLength);
-      
-      return `<strong class="setu-bold">${boldPart}</strong>${restPart}`;
-    });
-  }
-
-  restoreOriginalText() {
-    // Find all bionic text elements and restore
-    const bionicElements = document.querySelectorAll('.setu-bionic-text');
-    bionicElements.forEach(el => {
-      const textContent = el.textContent;
-      const textNode = document.createTextNode(textContent);
-      el.parentNode.replaceChild(textNode, el);
-    });
-    
-    // Clear processed elements
-    this.processedElements = new WeakSet();
-  }
-
-  setupMutationObserver() {
-    this.observer = new MutationObserver((mutations) => {
-      mutations.forEach(mutation => {
-        mutation.addedNodes.forEach(node => {
-          if (node.nodeType === Node.ELEMENT_NODE) {
-            // Process new element and its children
-            this.processNewElement(node);
-          } else if (node.nodeType === Node.TEXT_NODE) {
-            this.processElement(node);
-          }
+    onSettings() {
+      const next = Store.getSetting('bionicIntensity');
+      if (next && Math.abs(next - this.intensity) > 0.01) {
+        this.intensity = next;
+        // Re-render from the original text rather than re-bolding bold text.
+        this.mutate(() => {
+          this.restoreAll();
+          this.processAll();
         });
+      }
+    }
+
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Bionic styling must reach the page's own DOM, so unlike our overlays it
+     * cannot live in a shadow root. It is scoped to our own <b> tag and uses
+     * `inherit` throughout, so it changes weight and nothing else.
+     */
+    injectStyle() {
+      if (document.getElementById('setu-bionic-style')) return;
+
+      const style = document.createElement('style');
+      style.id = 'setu-bionic-style';
+      style.setAttribute('data-setu', 'style');
+      style.textContent = `
+        b[data-setu-fix] {
+          font-weight: 700 !important;
+          color: inherit !important;
+          background: none !important;
+          font-family: inherit !important;
+          font-size: inherit !important;
+          font-style: inherit !important;
+        }
+        span[data-setu-bionic] {
+          all: unset;
+          font: inherit; color: inherit;
+        }
+      `;
+      (document.head || document.documentElement).appendChild(style);
+    }
+
+    /** Run `fn` without our own edits feeding back into the observer. */
+    mutate(fn) {
+      this.muted = true;
+      try {
+        fn();
+      } finally {
+        // Let the mutation records from this batch drain before unmuting.
+        setTimeout(() => {
+          this.muted = false;
+        }, 0);
+      }
+    }
+
+    processAll() {
+      this.mutate(() => {
+        for (const node of Text.collect(document.body, { minLength: 3 })) {
+          this.wrap(node);
+        }
       });
-    });
-
-    this.observer.observe(document.body, {
-      childList: true,
-      subtree: true
-    });
-  }
-
-  processNewElement(element) {
-    // Skip our own elements
-    if (element.classList && element.classList.contains('setu-*')) return;
-    
-    // Get all text nodes within this element
-    const walker = document.createTreeWalker(
-      element,
-      NodeFilter.SHOW_TEXT,
-      null
-    );
-
-    const textNodes = [];
-    let node;
-    while (node = walker.nextNode()) {
-      textNodes.push(node);
     }
-    
-    textNodes.forEach(node => this.processElement(node));
-  }
 
-  setIntensity(value) {
-    this.intensity = Math.max(0.3, Math.min(0.7, value));
-    if (this.isEnabled) {
-      this.restoreOriginalText();
-      this.processDocument();
+    /** Replace one text node with a span of bolded-prefix words. */
+    wrap(textNode) {
+      if (!textNode.parentNode) return;
+      if (textNode.parentElement?.hasAttribute('data-setu-bionic')) return;
+
+      const original = textNode.textContent;
+      if (!original.trim() || original.length < 3) return;
+      if (!/\p{L}{3,}/u.test(original)) return; // nothing worth anchoring
+
+      const html = this.toBionic(original);
+      if (!html) return;
+
+      const span = document.createElement('span');
+      span.setAttribute('data-setu-bionic', '');
+      span.innerHTML = html;
+      // Keep the source text verbatim so restore is exact, not reconstructed.
+      span.__setuOriginal = original;
+
+      try {
+        textNode.parentNode.replaceChild(span, textNode);
+        this.wrapped.add(span);
+      } catch (_) {
+        /* node moved mid-pass — skip it */
+      }
+    }
+
+    /**
+     * Bold the leading fraction of each word.
+     * Operates on escaped text so page content can never inject markup.
+     */
+    toBionic(text) {
+      let touched = false;
+
+      const html = Text.escape(text).replace(/\p{L}[\p{L}\p{M}'’-]*/gu, (word) => {
+        if (word.length < 2) return word;
+        touched = true;
+        // Short words get one anchor letter; longer words scale with intensity.
+        const boldLength = word.length <= 3 ? 1 : Math.max(1, Math.round(word.length * this.intensity));
+        return `<b data-setu-fix>${word.slice(0, boldLength)}</b>${word.slice(boldLength)}`;
+      });
+
+      return touched ? html : null;
+    }
+
+    restoreAll() {
+      for (const span of this.wrapped) {
+        if (!span.parentNode) continue;
+        try {
+          span.parentNode.replaceChild(
+            document.createTextNode(span.__setuOriginal ?? span.textContent),
+            span
+          );
+        } catch (_) {
+          /* already detached */
+        }
+      }
+      this.wrapped.clear();
+    }
+
+    /**
+     * Re-process content added after enabling (infinite scroll, SPA routes).
+     * Debounced, and skipped entirely while we are the one mutating.
+     */
+    watch() {
+      this.observer = new MutationObserver((records) => {
+        if (this.muted) return;
+
+        const roots = [];
+        for (const record of records) {
+          for (const node of record.addedNodes) {
+            if (node.nodeType === Node.ELEMENT_NODE && !Text.isOurs(node)) roots.push(node);
+            else if (node.nodeType === Node.TEXT_NODE && !Text.isOurs(node)) roots.push(node);
+          }
+        }
+        if (!roots.length) return;
+
+        clearTimeout(this.pending);
+        this.pending = setTimeout(() => {
+          this.mutate(() => {
+            for (const root of roots) {
+              if (!root.isConnected) continue;
+              if (root.nodeType === Node.TEXT_NODE) {
+                this.wrap(root);
+              } else {
+                for (const node of Text.collect(root, { minLength: 3 })) this.wrap(node);
+              }
+            }
+          });
+        }, 160);
+      });
+
+      this.observer.observe(document.body, { childList: true, subtree: true });
+      this.cleanup(() => this.observer?.disconnect());
     }
   }
-}
 
-// Make available globally
-window.BionicReading = BionicReading;
+  window.SETU.features.set('bionic', BionicReading);
+})();

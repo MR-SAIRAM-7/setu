@@ -1,360 +1,171 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SETU Lens — Cognitive Accessibility</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&family=Lexend:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="popup.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SETU Lens</title>
+  <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
-  <div class="nb-app" id="nb-app">
-    <!-- Top Branding Header -->
-    <header class="nb-header">
-      <div class="nb-brand">
-        <div class="nb-logo-badge">
-          <!-- Leaf / Bridge SVG -->
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/>
-            <path d="M12 6c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm0 10c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4z"/>
-            <path d="M12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/>
+  <header class="top">
+    <div class="brand">
+      <span class="mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M3 17c3-6 6-9 9-9s6 3 9 9" />
+          <circle cx="12" cy="8" r="1.6" fill="currentColor" stroke="none" />
+        </svg>
+      </span>
+      <div>
+        <h1>SETU Lens</h1>
+        <p class="tag">Bridge to a calmer web</p>
+      </div>
+    </div>
+    <button class="engine" id="engine" type="button" title="Engine status — click to re-check">
+      <span class="dot" id="engine-dot"></span>
+      <span id="engine-label">checking</span>
+    </button>
+  </header>
+
+  <div class="scroll">
+    <!-- ============ AI ACTIONS ============ -->
+    <section class="block">
+      <h2 class="label">Ask SETU</h2>
+      <button class="hero" id="act-commander" type="button">
+        <span class="hero-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <rect x="3" y="11" width="18" height="10" rx="2.5" />
+            <circle cx="12" cy="5" r="2" /><path d="M12 7v4" />
+            <path d="M8.5 16h.01M15.5 16h.01" />
           </svg>
-        </div>
-        <div class="nb-brand-title">
-          <h1>SETU Lens</h1>
-          <span class="nb-kernel-tag">Cognitive Accessibility Engine</span>
-        </div>
-      </div>
-      <div class="nb-header-controls">
-        <label class="nb-sensory-switch" title="Toggle Sensory Calm Mode (Lower contrast, larger spacing, reduced motion)">
-          <input type="checkbox" id="sensory-toggle">
-          <span class="nb-sensory-slider"></span>
-          <span class="nb-sensory-label">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.4 19 2c1 2 2 4.1 2 9 0 5-4 9-10 9Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg>
-            Calm
-          </span>
-        </label>
-      </div>
-    </header>
-
-    <!-- Navigation Tabs for Cognitive Accessibility Modes -->
-    <nav class="nb-nav-tabs" aria-label="Cognitive Modes">
-      <button class="nb-tab active" data-tab="start">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-3.05 11a22.35 22.35 0 0 1-3.95 2z"/></svg>
-        <span>Start</span>
+        </span>
+        <span class="hero-text">
+          <strong>Open Commander</strong>
+          <small>Say what you want to do — I'll do it on this page</small>
+        </span>
+        <kbd>⌥⇧C</kbd>
       </button>
-      <button class="nb-tab" data-tab="simplify">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3z"/></svg>
-        <span>Simplify</span>
-      </button>
-      <button class="nb-tab" data-tab="learn">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 5.562 5.56 3 3 0 0 0 5.857.042A4 4 0 0 0 20.5 10.89a4 4 0 0 0-2.503-5.765A3 3 0 0 0 12 5z"/><path d="M12 5v14"/></svg>
-        <span>Learn</span>
-      </button>
-      <button class="nb-tab" data-tab="meet">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
-        <span>Meet</span>
-      </button>
-      <button class="nb-tab" data-tab="practice">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-        <span>Practice</span>
-      </button>
-      <button class="nb-tab" data-tab="write">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-        <span>Write</span>
-      </button>
-      <button class="nb-tab" data-tab="guide">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
-        <span>Guide</span>
-      </button>
-    </nav>
 
-    <!-- MAIN CONTAINER -->
-    <main class="nb-main">
-      <!-- AI AGENT LAUNCH BANNER -->
-      <div class="nb-agent-launch-banner">
-        <div class="nb-agent-banner-info">
-          <span>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>
-            <strong>In-Page Navigation Agent</strong>
-          </span>
-          <small>Inspects website DOM code &amp; guides you step-by-step</small>
-        </div>
-        <button class="nb-btn nb-btn-accent" id="btn-launch-agent">Launch Agent</button>
-      </div>
-
-      <!-- MODE 1: START MODE -->
-      <section class="nb-tab-content active" id="tab-start">
-        <div class="nb-card nb-hero-card">
-          <div class="nb-card-header">
-            <h2>Break Executive Dysfunction</h2>
-            <button class="nb-autopilot-btn" id="btn-autopilot" title="Autopilot: Propose immediate safe next action">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-              I am stuck!
-            </button>
-          </div>
-          <p class="nb-card-desc">Staring at a task and frozen? Tell SETU what you are avoiding.</p>
-          
-          <div class="nb-form-group">
-            <input type="text" id="start-task-input" placeholder="e.g. Write chapter 1 of my thesis project" class="nb-input" />
-            <button class="nb-btn nb-btn-primary" id="btn-run-start">Get First Action</button>
-          </div>
-
-          <div class="nb-output-box" id="start-output" style="display:none;">
-            <div class="nb-confidence-meter" id="start-confidence">
-              <span class="nb-badge effort" id="badge-effort">Effort: Low</span>
-              <span class="nb-badge anxiety" id="badge-anxiety">Anxiety: Low</span>
-              <span class="nb-badge time" id="badge-time">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                10 mins
-              </span>
-            </div>
-
-            <div class="nb-supportive-prompt" id="start-supportive"></div>
-
-            <div class="nb-question-box">
-              <strong>Clarifying Question:</strong>
-              <p id="start-question"></p>
-            </div>
-
-            <div class="nb-action-highlight">
-              <strong>Immediate 10-Minute Path:</strong>
-              <p id="start-action"></p>
-              <button class="nb-btn nb-btn-accent" id="btn-start-timer">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                Start 10-Min Timer
-              </button>
-            </div>
-
-            <div class="nb-micro-steps">
-              <strong>Next Micro-Steps:</strong>
-              <ol id="start-steps-list"></ol>
-            </div>
-
-            <div class="nb-artifact-actions">
-              <button class="nb-btn nb-btn-ghost" id="btn-export-start">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                Export Markdown
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- MODE 2: SIMPLIFY MODE -->
-      <section class="nb-tab-content" id="tab-simplify">
-        <div class="nb-card">
-          <h2>Simplify &amp; Clutter Reduction</h2>
-          <p class="nb-card-desc">Transform dense text or web page into 6th-grade plain language.</p>
-          <button class="nb-btn nb-btn-primary" id="btn-run-simplify">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3z"/></svg>
-            Simplify Active Page
-          </button>
-          
-          <div class="nb-output-box" id="simplify-output" style="display:none;">
-            <div class="nb-grade-tag" id="simplify-grade">Grade 6.0 Plain Language</div>
-            <div class="nb-content-block" id="simplify-text"></div>
-            <h3>Key Takeaways</h3>
-            <ul id="simplify-takeaways"></ul>
-            <div class="nb-artifact-actions">
-              <button class="nb-btn nb-btn-ghost" id="btn-export-simplify">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                Export Markdown
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- MODE 3: LEARN MODE -->
-      <section class="nb-tab-content" id="tab-learn">
-        <div class="nb-card">
-          <h2>Mind Map &amp; Quiz Generator</h2>
-          <p class="nb-card-desc">Convert articles or material into a clean visual mind map and self-quiz.</p>
-          <button class="nb-btn nb-btn-primary" id="btn-run-learn">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 5.562 5.56 3 3 0 0 0 5.857.042A4 4 0 0 0 20.5 10.89a4 4 0 0 0-2.503-5.765A3 3 0 0 0 12 5z"/><path d="M12 5v14"/></svg>
-            Generate Mind Map &amp; Quiz
-          </button>
-
-          <div class="nb-output-box" id="learn-output" style="display:none;">
-            <h3>Mind Map Overview</h3>
-            <div class="nb-mindmap-view" id="learn-mindmap"></div>
-
-            <h3>Comprehension Quick Quiz</h3>
-            <div id="learn-quiz-box"></div>
-
-            <div class="nb-artifact-actions">
-              <button class="nb-btn nb-btn-ghost" id="btn-export-learn">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                Export Mind Map
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- MODE 4: MEET MODE -->
-      <section class="nb-tab-content" id="tab-meet">
-        <div class="nb-card">
-          <h2>Meeting Transcript Rescue</h2>
-          <p class="nb-card-desc">Extract action items, owners, deadlines, and decode corporate jargon.</p>
-          <textarea id="meet-transcript-input" class="nb-textarea" placeholder="Paste meeting transcript here..."></textarea>
-          <button class="nb-btn nb-btn-primary" id="btn-run-meet">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
-            Process Transcript
-          </button>
-
-          <div class="nb-output-box" id="meet-output" style="display:none;">
-            <h3>Action Items &amp; Owners</h3>
-            <div id="meet-actions-list"></div>
-
-            <h3>Corporate Jargon Decoded</h3>
-            <div id="meet-jargon-list"></div>
-
-            <div class="nb-artifact-actions">
-              <button class="nb-btn nb-btn-ghost" id="btn-export-meet">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                Export Summary
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- MODE 5: PRACTICE MODE -->
-      <section class="nb-tab-content" id="tab-practice">
-        <div class="nb-card">
-          <h2>Social Scripting Rehearsal</h2>
-          <p class="nb-card-desc">Practice difficult conversations, phone calls, or interview questions.</p>
-          <input type="text" id="practice-topic-input" class="nb-input" placeholder="e.g. Asking boss for a deadline extension" />
-          <button class="nb-btn nb-btn-primary" id="btn-run-practice">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            Start Rehearsal
-          </button>
-
-          <div class="nb-output-box" id="practice-output" style="display:none;">
-            <div class="nb-roleplay-partner" id="practice-partner-line"></div>
-            <h3>Choose your response:</h3>
-            <div class="nb-response-options" id="practice-options"></div>
-            <div class="nb-coaching-tip" id="practice-tip"></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- MODE 6: WRITE MODE -->
-      <section class="nb-tab-content" id="tab-write">
-        <div class="nb-card">
-          <h2>Accessible Authoring Assistant</h2>
-          <p class="nb-card-desc">Check your draft for passive voice, sentence complexity, and readability.</p>
-          <textarea id="write-draft-input" class="nb-textarea" placeholder="Type or paste your draft here..."></textarea>
-          <button class="nb-btn nb-btn-primary" id="btn-run-write">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-            Analyze &amp; Improve
-          </button>
-
-          <div class="nb-output-box" id="write-output" style="display:none;">
-            <div class="nb-grade-tag" id="write-grade">Readability Score</div>
-            <h3>Suggested Plain Language Fixes</h3>
-            <div id="write-fixes"></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- MODE 7: GUIDE MODE -->
-      <section class="nb-tab-content" id="tab-guide">
-        <div class="nb-card">
-          <h2>Step-by-Step Software Guide</h2>
-          <p class="nb-card-desc">Get step-by-step instructions for any webpage form or software workflow.</p>
-          <input type="text" id="guide-goal-input" class="nb-input" placeholder="e.g. Submit a leave request on this portal" />
-          <button class="nb-btn nb-btn-primary" id="btn-run-guide">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
-            Build Step Guide
-          </button>
-
-          <div class="nb-output-box" id="guide-output" style="display:none;">
-            <div id="guide-steps-container"></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- 8 SETU CORE READING TOOLS & CONTROLS -->
-      <section class="nb-tools-section">
-        <h3>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-          8 On-Page SETU Supports
-        </h3>
-        <div class="nb-tools-grid">
-          <button class="nb-tool-btn" id="tool-bionic" data-mode="bionic" title="Bold first half of words (Alt+B)">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
-            <span>Bionic</span>
-          </button>
-          <button class="nb-tool-btn" id="tool-focus" data-mode="focus" title="Strip distraction into clean view (Alt+F)">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
-            <span>Focus</span>
-          </button>
-          <button class="nb-tool-btn" id="tool-eye" data-mode="eye" title="Webcam Gaze Auto-Scroll (Alt+E)">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            <span>Eye Track</span>
-          </button>
-          <button class="nb-tool-btn" id="tool-scroll" data-mode="scroll" title="Adaptive Speed Auto Scroll (Alt+S)">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 17l-5 5-5-5M17 7l-5-5-5 5"/></svg>
-            <span>Auto Scroll</span>
-          </button>
-          <button class="nb-tool-btn" id="tool-tts" data-feature="tts" title="Read Aloud with Highlight (Alt+T)">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-            <span>Audio TTS</span>
-          </button>
-          <button class="nb-tool-btn" id="tool-highlight" data-feature="highlight" title="Moving Reading Line Ruler (Alt+H)">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
-            <span>Line Ruler</span>
-          </button>
-          <button class="nb-tool-btn" id="tool-linefocus" data-mode="lineFocus" title="Focus 1 Line &amp; Blur Rest (Alt+L)">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h20M2 6h20M2 18h20"/></svg>
-            <span>Line Focus</span>
-          </button>
-          <button class="nb-tool-btn" id="tool-dyslexia" data-feature="dyslexia" title="OpenDyslexic Font &amp; Spacing">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
-            <span>Dyslexia Font</span>
-          </button>
-        </div>
-
-        <button class="nb-tool-btn nb-tool-btn-wide" id="btn-summarize-page" title="AI Condense Key Points (Alt+A)">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-          AI Summary
+      <div class="grid-3">
+        <button class="tile" id="act-chunk" type="button">
+          <span class="tile-glyph">1·2·3</span>
+          <span>3-step path</span>
         </button>
-
-        <!-- Dynamic API Server Host Config -->
-        <div class="nb-server-config">
-          <label for="api-server-input">Backend Server API:</label>
-          <div class="nb-server-input-group">
-            <input type="text" id="api-server-input" class="nb-input-sm" value="http://localhost:3000" placeholder="http://localhost:3000" />
-            <button class="nb-btn-sm" id="btn-save-server">Save</button>
-          </div>
-        </div>
-      </section>
-    </main>
-
-    <!-- FOOTER & THEME CONTROLS -->
-    <footer class="nb-footer">
-      <div class="nb-theme-selectors">
-        <button class="nb-theme-dot default active" data-theme="default" title="Default Theme"></button>
-        <button class="nb-theme-dot sepia" data-theme="sepia" title="Sepia Warmth"></button>
-        <button class="nb-theme-dot dark" data-theme="dark" title="Dark Obsidian"></button>
-        <button class="nb-theme-dot high-contrast" data-theme="high-contrast" title="High Contrast AAA"></button>
-        <button class="nb-theme-dot dyslexia" data-theme="dyslexia" title="Dyslexia Theme"></button>
-      </div>
-      <div class="nb-footer-actions">
-        <button class="nb-btn nb-btn-primary" id="btn-open-sanctuary">
-          Open SETU Sanctuary
+        <button class="tile" id="act-visual" type="button">
+          <span class="tile-glyph">◱</span>
+          <span>Explain a chart</span>
         </button>
-        <a href="#" id="btn-open-settings" class="nb-link-btn" title="Settings">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-        </a>
+        <button class="tile" id="act-sanctuary" type="button">
+          <span class="tile-glyph">✦</span>
+          <span>To Sanctuary</span>
+        </button>
       </div>
-    </footer>
+    </section>
+
+    <!-- ============ READING TOOLS ============ -->
+    <section class="block">
+      <div class="label-row">
+        <h2 class="label">Reading tools</h2>
+        <span class="hint" id="active-count"></span>
+      </div>
+      <p class="note">Turn on as many as you like — they work together.</p>
+
+      <div class="grid-2" id="tools">
+        <button class="tool" data-feature="bionic" type="button" aria-pressed="false">
+          <span class="tool-glyph"><b>Bi</b>onic</span>
+          <span class="tool-name">Bionic Reading</span>
+          <span class="tool-key">⌥B</span>
+        </button>
+        <button class="tool" data-feature="lineFocus" type="button" aria-pressed="false">
+          <span class="tool-glyph">▤</span>
+          <span class="tool-name">Line Focus</span>
+          <span class="tool-key">⌥L</span>
+        </button>
+        <button class="tool" data-feature="highlight" type="button" aria-pressed="false">
+          <span class="tool-glyph">▬</span>
+          <span class="tool-name">Reading Ruler</span>
+          <span class="tool-key">⌥H</span>
+        </button>
+        <button class="tool" data-feature="focus" type="button" aria-pressed="false">
+          <span class="tool-glyph">◎</span>
+          <span class="tool-name">Focus Mode</span>
+          <span class="tool-key">⌥F</span>
+        </button>
+        <button class="tool" data-feature="tts" type="button" aria-pressed="false">
+          <span class="tool-glyph">◍</span>
+          <span class="tool-name">Read Aloud</span>
+          <span class="tool-key">⌥T</span>
+        </button>
+        <button class="tool" data-feature="scroll" type="button" aria-pressed="false">
+          <span class="tool-glyph">⇕</span>
+          <span class="tool-name">Auto Scroll</span>
+          <span class="tool-key">⌥S</span>
+        </button>
+        <button class="tool" data-feature="eye" type="button" aria-pressed="false">
+          <span class="tool-glyph">◉</span>
+          <span class="tool-name">Gaze Scroll</span>
+          <span class="tool-key">⌥E</span>
+        </button>
+        <button class="tool" data-feature="breathe" type="button" aria-pressed="false">
+          <span class="tool-glyph">◌</span>
+          <span class="tool-name">Breathe Protocol</span>
+          <span class="tool-key">auto</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ============ THEMES ============ -->
+    <section class="block">
+      <h2 class="label">Reading theme</h2>
+      <div class="themes" id="themes" role="radiogroup" aria-label="Reading theme">
+        <button data-theme="default"  role="radio" aria-checked="true"  style="--sw:#ffffff;--sf:#111" type="button"><span></span>Off</button>
+        <button data-theme="sepia"    role="radio" aria-checked="false" style="--sw:#f6ecd9;--sf:#3b3226" type="button"><span></span>Sepia</button>
+        <button data-theme="dark"     role="radio" aria-checked="false" style="--sw:#12151c;--sf:#dfe3ea" type="button"><span></span>Dark</button>
+        <button data-theme="calm"     role="radio" aria-checked="false" style="--sw:#eef4f2;--sf:#26332f" type="button"><span></span>Calm</button>
+        <button data-theme="contrast" role="radio" aria-checked="false" style="--sw:#000000;--sf:#ffe600" type="button"><span></span>AAA</button>
+        <button data-theme="dyslexia" role="radio" aria-checked="false" style="--sw:#fffbf0;--sf:#2b2b2b" type="button"><span></span>Dyslexia</button>
+      </div>
+    </section>
+
+    <!-- ============ TUNING ============ -->
+    <details class="block details">
+      <summary><h2 class="label">Fine-tuning</h2></summary>
+
+      <label class="slider">
+        <span>Bionic strength <b id="v-bionic">45%</b></span>
+        <input type="range" id="s-bionic" min="25" max="70" step="5" value="45" />
+      </label>
+
+      <label class="slider">
+        <span>Scroll speed <b id="v-wpm">220 wpm</b></span>
+        <input type="range" id="s-wpm" min="60" max="800" step="20" value="220" />
+      </label>
+
+      <label class="slider">
+        <span>Speech rate <b id="v-rate">1.0×</b></span>
+        <input type="range" id="s-rate" min="5" max="25" step="1" value="10" />
+      </label>
+
+      <label class="field">
+        <span>Explain in language</span>
+        <input type="text" id="s-language" placeholder="English" />
+      </label>
+
+      <label class="field">
+        <span>SETU engine URL</span>
+        <div class="row">
+          <input type="text" id="s-api" placeholder="http://localhost:3000" />
+          <button class="mini" id="save-api" type="button">Save</button>
+        </div>
+      </label>
+    </details>
   </div>
+
+  <footer class="bottom">
+    <button class="ghost" id="act-reset" type="button">Turn everything off</button>
+    <button class="ghost" id="act-open-web" type="button">Open Sanctuary →</button>
+  </footer>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script src="popup.js"></script>
 </body>

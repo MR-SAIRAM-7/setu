@@ -1,347 +1,257 @@
 /**
- * NeuroRead Line Focus Mode
- * 
- * Completely transforms the page into an accessible, distraction-free reading view.
- * Focuses strictly on ONE line of text while blurring & dimming the rest of the webpage.
- * Smoothly follows cursor movement, scroll, and arrow key navigation.
+ * Line Focus — dims the page and keeps one band of text lit.
+ *
+ * Rewritten in v3. The previous version tracked the raw cursor Y with a fixed
+ * 44px band, so the highlight drifted off the text it was meant to isolate and
+ * the two 0.75-alpha masks plus a brightness(0.35) backdrop-filter stacked into
+ * near-black, hiding the very line the user was reading.
+ *
+ * Now the band snaps to the real rendered line box under the cursor, so it
+ * tracks prose of any size, and the dimming is a single tunable layer.
  */
 
-class LineFocus {
-  constructor() {
-    this.isEnabled = false;
-    this.overlay = null;
-    this.topMask = null;
-    this.bottomMask = null;
-    this.spotlightBand = null;
-    this.controlPill = null;
-    
-    // Config state
-    this.bandHeight = 44; // Default ~1 line height (px)
-    this.blurAmount = 8;  // Backdrop blur (px)
-    this.opacity = 0.75;  // Backdrop darkness opacity
-    this.currentY = window.innerHeight / 3;
-    this.targetY = window.innerHeight / 3;
-    this.rafId = null;
-    
-    // Event handlers
-    this.mouseHandler = null;
-    this.scrollHandler = null;
-    this.keyHandler = null;
-  }
+(() => {
+  const { Feature, UI, Store, Text } = window.SETU;
 
-  enable() {
-    if (this.isEnabled) return;
-    this.isEnabled = true;
-    
-    console.log('[LineFocus] Enabling webpage line focus transformation');
-    
-    this.createOverlay();
-    this.attachEventListeners();
-    this.startAnimationLoop();
-    
-    document.documentElement.classList.add('nb-line-focus-active');
-  }
+  class LineFocus extends Feature {
+    static key = 'lineFocus';
 
-  disable() {
-    if (!this.isEnabled) return;
-    this.isEnabled = false;
-    
-    console.log('[LineFocus] Disabling line focus');
-    
-    this.stopAnimationLoop();
-    this.detachEventListeners();
-    this.removeOverlay();
-    
-    document.documentElement.classList.remove('nb-line-focus-active');
-  }
+    constructor() {
+      super();
+      this.lines = 1;          // how many text lines the band covers
+      this.dim = 0.72;         // mask opacity
+      this.targetTop = null;   // where the band wants to be (viewport px)
+      this.targetHeight = 44;
+      this.currentTop = null;  // where it actually is, eased toward target
+      this.currentHeight = 44;
+      this.pointerY = window.innerHeight / 3;
+      this.usingKeyboard = false;
+    }
 
-  createOverlay() {
-    this.removeOverlay();
+    onEnable() {
+      this.lines = Store.getSetting('lineFocusHeight') || 1;
+      this.build();
+      this.bind();
+      this.snapToPointer();
+      this.loop(() => this.tick());
+      UI.toast('Line Focus on — move your cursor, or use ↑ ↓', { tone: 'success' });
+    }
 
-    this.overlay = document.createElement('div');
-    this.overlay.id = 'nb-line-focus-root';
-    
-    // Top blurred mask
-    this.topMask = document.createElement('div');
-    this.topMask.id = 'nb-line-focus-top';
+    onDisable() {
+      UI.destroyHost('line-focus');
+      this.currentTop = null;
+      this.targetTop = null;
+    }
 
-    // Bottom blurred mask
-    this.bottomMask = document.createElement('div');
-    this.bottomMask.id = 'nb-line-focus-bottom';
-
-    // Clear focused line spotlight band
-    this.spotlightBand = document.createElement('div');
-    this.spotlightBand.id = 'nb-line-focus-band';
-
-    // Control bar pill
-    this.controlPill = document.createElement('div');
-    this.controlPill.id = 'nb-line-focus-pill';
-    this.controlPill.innerHTML = `
-      <div class="nb-pill-brand">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h20M2 6h20M2 18h20"/></svg>
-        <span>Line Focus</span>
-      </div>
-      <div class="nb-pill-divider"></div>
-      <div class="nb-pill-buttons">
-        <button class="nb-pill-btn active" data-lines="1" title="1 Line Focus">1 Line</button>
-        <button class="nb-pill-btn" data-lines="2" title="2 Lines Focus">2 Lines</button>
-        <button class="nb-pill-btn" data-lines="3" title="3 Lines Focus">Paragraph</button>
-      </div>
-      <div class="nb-pill-divider"></div>
-      <button class="nb-pill-close-btn" title="Close Line Focus (Alt+L)">&times;</button>
-    `;
-
-    this.applyStyles();
-
-    this.overlay.appendChild(this.topMask);
-    this.overlay.appendChild(this.bottomMask);
-    this.overlay.appendChild(this.spotlightBand);
-    this.overlay.appendChild(this.controlPill);
-
-    document.body.appendChild(this.overlay);
-
-    // Event listeners on pill buttons
-    this.controlPill.querySelectorAll('.nb-pill-btn').forEach(btn => {
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        const lines = parseInt(btn.dataset.lines, 10);
-        this.setLines(lines, btn);
-      };
-    });
-
-    this.controlPill.querySelector('.nb-pill-close-btn').onclick = (e) => {
-      e.stopPropagation();
-      this.disable();
-      if (window.setu) {
-        window.setu.state.lineFocus = false;
-        window.setu.saveState();
+    onSettings() {
+      const next = Store.getSetting('lineFocusHeight');
+      if (next && next !== this.lines) {
+        this.lines = next;
+        this.syncPillButtons();
+        this.snapToPointer();
       }
-    };
+    }
 
-    this.updatePositions();
-  }
+    /* ------------------------------------------------------------------ */
 
-  applyStyles() {
-    const styleId = 'nb-line-focus-styles';
-    let styleEl = document.getElementById(styleId);
-    if (!styleEl) {
-      styleEl = document.createElement('style');
-      styleEl.id = styleId;
-      styleEl.textContent = `
-        #nb-line-focus-root {
-          position: fixed;
-          top: 0;
-          left: 0;
-          width: 100vw;
-          height: 100vh;
-          z-index: 2147483630;
+    build() {
+      const root = UI.host('line-focus', { layer: 'dim', interactive: false });
+
+      const style = document.createElement('style');
+      style.textContent = `
+        .mask {
+          position: fixed; left: 0; right: 0;
+          background: rgba(6, 10, 24, var(--dim, .72));
           pointer-events: none;
+          transition: background .2s ease;
         }
-        #nb-line-focus-top, #nb-line-focus-bottom {
-          position: fixed;
-          left: 0;
-          right: 0;
-          z-index: 2147483631;
+        .band {
+          position: fixed; left: 0; right: 0;
           pointer-events: none;
-          backdrop-filter: blur(${this.blurAmount}px) brightness(0.35);
-          -webkit-backdrop-filter: blur(${this.blurAmount}px) brightness(0.35);
-          background-color: rgba(15, 23, 42, ${this.opacity});
-          transition: background-color 0.2s ease, backdrop-filter 0.2s ease;
+          border-top: 2px solid color-mix(in srgb, var(--accent) 85%, transparent);
+          border-bottom: 2px solid color-mix(in srgb, var(--accent) 85%, transparent);
+          box-shadow: 0 0 22px -4px var(--accent);
         }
-        #nb-line-focus-top {
-          top: 0;
+        .pill {
+          position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+          display: flex; align-items: center; gap: 10px;
+          padding: 7px 10px 7px 14px;
+          background: var(--bg-soft); border: 1px solid var(--border);
+          border-radius: 999px; box-shadow: var(--shadow);
+          pointer-events: auto; white-space: nowrap;
         }
-        #nb-line-focus-bottom {
-          bottom: 0;
+        .pill-label { font-size: 12px; font-weight: 700; color: var(--accent); letter-spacing: .02em; }
+        .sep { width: 1px; height: 16px; background: var(--border); }
+        .seg { display: flex; gap: 3px; }
+        .seg button {
+          background: transparent; color: var(--text-dim); border: none;
+          padding: 5px 11px; border-radius: 999px;
+          font-size: 12px; font-weight: 600; cursor: pointer;
         }
-        #nb-line-focus-band {
-          position: fixed;
-          left: 0;
-          right: 0;
-          z-index: 2147483632;
-          pointer-events: none;
-          border-top: 2px solid rgba(99, 102, 241, 0.9);
-          border-bottom: 2px solid rgba(99, 102, 241, 0.9);
-          box-shadow: 0 0 15px rgba(99, 102, 241, 0.35), inset 0 0 15px rgba(99, 102, 241, 0.15);
-          background: transparent;
-          backdrop-filter: none;
-          -webkit-backdrop-filter: none;
-          transition: height 0.15s ease-out;
+        .seg button:hover { background: rgba(255,255,255,.09); color: var(--text); }
+        .seg button[aria-pressed="true"] { background: var(--accent); color: #0b1020; }
+        .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        .close {
+          background: transparent; border: none; color: var(--text-dim);
+          font-size: 20px; line-height: 1; cursor: pointer; padding: 0 6px;
         }
-        #nb-line-focus-pill {
-          position: fixed;
-          bottom: 24px;
-          left: 50%;
-          transform: translateX(-50%);
-          z-index: 2147483640;
-          pointer-events: auto;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          background: #0f172a;
-          color: #f8fafc;
-          border: 1px solid rgba(255, 255, 255, 0.15);
-          border-radius: 9999px;
-          padding: 8px 16px;
-          box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 15px rgba(99, 102, 241, 0.3);
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-          font-size: 13px;
-          font-weight: 500;
-          user-select: none;
-        }
-        .nb-pill-brand {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          color: #818cf8;
-          font-weight: 600;
-        }
-        .nb-pill-divider {
-          width: 1px;
-          height: 16px;
-          background: rgba(255, 255, 255, 0.2);
-        }
-        .nb-pill-buttons {
-          display: flex;
-          gap: 4px;
-        }
-        .nb-pill-btn {
-          background: transparent;
-          color: #94a3b8;
-          border: none;
-          padding: 4px 10px;
-          border-radius: 9999px;
-          font-size: 12px;
-          cursor: pointer;
-          transition: all 0.15s ease;
-        }
-        .nb-pill-btn:hover {
-          color: #ffffff;
-          background: rgba(255, 255, 255, 0.1);
-        }
-        .nb-pill-btn.active {
-          background: #6366f1;
-          color: #ffffff;
-          font-weight: 600;
-        }
-        .nb-pill-close-btn {
-          background: transparent;
-          color: #94a3b8;
-          border: none;
-          font-size: 18px;
-          line-height: 1;
-          cursor: pointer;
-          padding: 0 4px;
-          border-radius: 50%;
-          transition: color 0.15s ease;
-        }
-        .nb-pill-close-btn:hover {
-          color: #f43f5e;
-        }
+        .close:hover { color: var(--danger); }
       `;
-      document.head.appendChild(styleEl);
+      root.appendChild(style);
+
+      const scope = document.createElement('div');
+      scope.className = 'setu-scope';
+      scope.style.setProperty('--dim', this.dim);
+      scope.innerHTML = `
+        <div class="mask" data-mask="top"></div>
+        <div class="mask" data-mask="bottom"></div>
+        <div class="band"></div>
+        <div class="pill" role="group" aria-label="Line Focus controls">
+          <span class="pill-label">LINE FOCUS</span>
+          <div class="sep"></div>
+          <div class="seg">
+            <button data-lines="1" aria-pressed="true">1 line</button>
+            <button data-lines="2" aria-pressed="false">2 lines</button>
+            <button data-lines="4" aria-pressed="false">Block</button>
+          </div>
+          <div class="sep"></div>
+          <button class="close" title="Close Line Focus (Alt+L)" aria-label="Close Line Focus">&times;</button>
+        </div>
+      `;
+      root.appendChild(scope);
+
+      this.scope = scope;
+      this.topMask = scope.querySelector('[data-mask="top"]');
+      this.bottomMask = scope.querySelector('[data-mask="bottom"]');
+      this.band = scope.querySelector('.band');
+
+      scope.querySelectorAll('.seg button').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          this.lines = Number(btn.dataset.lines);
+          this.syncPillButtons();
+          Store.set({ settings: { lineFocusHeight: this.lines } });
+          this.snapToPointer();
+        });
+      });
+
+      scope.querySelector('.close').addEventListener('click', () => {
+        window.setuLens?.toggle('lineFocus', false);
+      });
+
+      this.syncPillButtons();
     }
-  }
 
-  removeOverlay() {
-    if (this.overlay) {
-      this.overlay.remove();
-      this.overlay = null;
+    syncPillButtons() {
+      this.scope?.querySelectorAll('.seg button').forEach((btn) => {
+        btn.setAttribute('aria-pressed', String(Number(btn.dataset.lines) === this.lines));
+      });
     }
-  }
 
-  setLines(lineCount, buttonEl) {
-    this.controlPill.querySelectorAll('.nb-pill-btn').forEach(btn => btn.classList.remove('active'));
-    if (buttonEl) buttonEl.classList.add('active');
+    bind() {
+      this.listen(
+        window,
+        'mousemove',
+        (event) => {
+          this.usingKeyboard = false;
+          this.pointerY = event.clientY;
+          this.resolveTarget(event.clientX, event.clientY);
+        },
+        { passive: true }
+      );
 
-    switch (lineCount) {
-      case 1:
-        this.bandHeight = 44;
-        break;
-      case 2:
-        this.bandHeight = 76;
-        break;
-      case 3:
-        this.bandHeight = 120;
-        break;
-      default:
-        this.bandHeight = 44;
+      // Keep the band on its line as the page moves under it.
+      this.listen(window, 'scroll', () => this.snapToPointer(), { passive: true });
+      this.listen(window, 'resize', () => this.snapToPointer(), { passive: true });
+
+      this.listen(window, 'keydown', (event) => {
+        if (event.altKey || event.ctrlKey || event.metaKey) return;
+        // Never steal arrows from a field the user is typing in.
+        const active = document.activeElement;
+        if (active && (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName))) return;
+
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault(); // otherwise the page scrolls out from under the band
+          this.usingKeyboard = true;
+          this.step(event.key === 'ArrowDown' ? 1 : -1);
+        }
+      });
     }
-    this.updatePositions();
-  }
 
-  attachEventListeners() {
-    this.mouseHandler = (e) => {
-      this.targetY = e.clientY;
-    };
+    /* ------------------------------------------------------------------ */
 
-    this.scrollHandler = () => {
-      this.updatePositions();
-    };
+    /** Snap the band to the line box at (x, y), falling back to a plain band. */
+    resolveTarget(x, y) {
+      const box = Text.lineBoxAt(x, y) || Text.findLineBoxNear(y);
 
-    this.keyHandler = (e) => {
-      if (e.key === 'ArrowDown' || e.key === 'j') {
-        this.targetY = Math.min(window.innerHeight - 50, this.targetY + 28);
-      } else if (e.key === 'ArrowUp' || e.key === 'k') {
-        this.targetY = Math.max(50, this.targetY - 28);
+      if (box) {
+        // Grow downward from the found line to cover `lines` line-heights.
+        const padding = 4;
+        this.targetTop = box.top - padding;
+        this.targetHeight = box.height * this.lines + padding * 2;
+      } else {
+        // No text under the cursor (image, gutter, video) — keep a sane band.
+        const fallback = 44 * this.lines;
+        this.targetTop = y - fallback / 2;
+        this.targetHeight = fallback;
       }
-    };
 
-    window.addEventListener('mousemove', this.mouseHandler, { passive: true });
-    window.addEventListener('scroll', this.scrollHandler, { passive: true });
-    window.addEventListener('keydown', this.keyHandler);
-  }
+      this.clampTarget();
+    }
 
-  detachEventListeners() {
-    if (this.mouseHandler) window.removeEventListener('mousemove', this.mouseHandler);
-    if (this.scrollHandler) window.removeEventListener('scroll', this.scrollHandler);
-    if (this.keyHandler) window.removeEventListener('keydown', this.keyHandler);
-  }
+    clampTarget() {
+      this.targetHeight = Math.max(24, Math.min(window.innerHeight * 0.8, this.targetHeight));
+      this.targetTop = Math.max(0, Math.min(window.innerHeight - this.targetHeight, this.targetTop));
+    }
 
-  startAnimationLoop() {
-    const loop = () => {
-      if (!this.isEnabled) return;
+    snapToPointer() {
+      if (!this.enabled) return;
+      this.resolveTarget(window.innerWidth / 2, this.pointerY);
+    }
 
-      // Smooth interpolation for 60fps tracking
-      const dy = this.targetY - this.currentY;
-      if (Math.abs(dy) > 0.5) {
-        this.currentY += dy * 0.25;
-        this.updatePositions();
+    /** Move one line up or down using real line geometry where possible. */
+    step(direction) {
+      const currentHeight = this.currentHeight || 44;
+      const probeY = this.pointerY + direction * (currentHeight * 0.85 + 6);
+      const clampedY = Math.max(8, Math.min(window.innerHeight - 8, probeY));
+
+      // Near an edge, scroll the page instead of pinning the band to the border.
+      const margin = window.innerHeight * 0.2;
+      if (clampedY > window.innerHeight - margin || clampedY < margin) {
+        window.scrollBy({ top: direction * currentHeight * 2, behavior: 'instant' in window ? 'instant' : 'auto' });
       }
 
-      this.rafId = requestAnimationFrame(loop);
-    };
-    this.rafId = requestAnimationFrame(loop);
-  }
+      this.pointerY = clampedY;
+      this.resolveTarget(window.innerWidth / 2, clampedY);
+    }
 
-  stopAnimationLoop() {
-    if (this.rafId) {
-      cancelAnimationFrame(this.rafId);
-      this.rafId = null;
+    /** Ease the band toward its target so tracking feels smooth, not jumpy. */
+    tick() {
+      if (this.targetTop === null) return;
+
+      if (this.currentTop === null) {
+        this.currentTop = this.targetTop;
+        this.currentHeight = this.targetHeight;
+      } else {
+        // Keyboard steps land immediately; pointer tracking eases.
+        const ease = this.usingKeyboard ? 0.45 : 0.28;
+        this.currentTop += (this.targetTop - this.currentTop) * ease;
+        this.currentHeight += (this.targetHeight - this.currentHeight) * ease;
+      }
+
+      const top = Math.round(this.currentTop);
+      const height = Math.round(this.currentHeight);
+      const bottom = top + height;
+
+      this.topMask.style.top = '0px';
+      this.topMask.style.height = `${Math.max(0, top)}px`;
+
+      this.bottomMask.style.top = `${bottom}px`;
+      this.bottomMask.style.height = `${Math.max(0, window.innerHeight - bottom)}px`;
+
+      this.band.style.top = `${top}px`;
+      this.band.style.height = `${height}px`;
     }
   }
 
-  updatePositions() {
-    if (!this.topMask || !this.bottomMask || !this.spotlightBand) return;
-
-    const bandTop = Math.max(0, Math.min(window.innerHeight - this.bandHeight, this.currentY - (this.bandHeight / 2)));
-    const bandBottom = bandTop + this.bandHeight;
-
-    // Top mask covers from 0 to bandTop
-    this.topMask.style.height = `${bandTop}px`;
-
-    // Bottom mask covers from bandBottom to bottom of window
-    const bottomHeight = Math.max(0, window.innerHeight - bandBottom);
-    this.bottomMask.style.top = `${bandBottom}px`;
-    this.bottomMask.style.height = `${bottomHeight}px`;
-
-    // Spotlight band positioned exactly between top and bottom mask
-    this.spotlightBand.style.top = `${bandTop}px`;
-    this.spotlightBand.style.height = `${this.bandHeight}px`;
-  }
-}
-
-// Global registry
-if (typeof window !== 'undefined') {
-  window.LineFocus = LineFocus;
-}
+  window.SETU.features.set('lineFocus', LineFocus);
+})();

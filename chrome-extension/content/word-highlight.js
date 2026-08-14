@@ -1,282 +1,243 @@
-// Word Highlight - Guide reading with a moving highlight
-// Helps ADHD readers maintain focus on current word/line
+/**
+ * Reading Ruler — a highlight that follows the line you are reading.
+ *
+ * Rewritten in v3. Two bugs made the old version invisible in practice:
+ *   1. It positioned an absolutely-placed child of a `position: fixed` host
+ *      using `rect.top + window.scrollY`, so the ruler jumped a full scroll
+ *      offset off-screen the moment the page moved.
+ *   2. It measured with `caretRangeFromPoint().getBoundingClientRect()`. That
+ *      range is collapsed, so the rect was zero-width — a highlight with no
+ *      width is nothing at all.
+ *
+ * Both are fixed by measuring real line boxes (SETU.Text.lineBoxAt) and
+ * positioning in pure viewport coordinates.
+ */
 
-class WordHighlight {
-  constructor() {
-    this.isEnabled = false;
-    this.highlightElement = null;
-    this.currentLine = null;
-    this.isFollowingMouse = false;
-    this.isAutoAdvance = false;
-    
-    // Settings
-    this.highlightMode = 'line'; // 'line', 'word', 'paragraph'
-    this.highlightColor = 'rgba(99, 102, 241, 0.2)';
-    this.highlightHeight = 1.5; // em
-    
-    // Animation
-    this.animationId = null;
-    this.lastMouseY = 0;
-  }
+(() => {
+  const { Feature, UI, Store, Text } = window.SETU;
 
-  enable() {
-    if (this.isEnabled) return;
-    this.isEnabled = true;
-    
-    console.log('[WordHighlight] Enabled');
-    
-    this.createHighlight();
-    this.setupEventListeners();
-    this.startFollowing();
-    
-    document.body.classList.add('setu-highlight-active');
-  }
+  const MODES = {
+    line: { label: 'Line', pad: 3 },
+    word: { label: 'Word', pad: 1 },
+    block: { label: 'Block', pad: 3 }
+  };
 
-  disable() {
-    if (!this.isEnabled) return;
-    this.isEnabled = false;
-    
-    console.log('[WordHighlight] Disabled');
-    
-    this.stopFollowing();
-    this.removeEventListeners();
-    this.removeHighlight();
-    
-    document.body.classList.remove('setu-highlight-active');
-  }
+  class ReadingRuler extends Feature {
+    static key = 'highlight';
 
-  createHighlight() {
-    // Create the highlight element
-    this.highlightElement = document.createElement('div');
-    this.highlightElement.id = 'setu-word-highlight';
-    this.highlightElement.innerHTML = `
-      <div class="highlight-line"></div>
-      <div class="highlight-controls">
-        <button class="highlight-btn" data-mode="line" title="Line Mode">≡</button>
-        <button class="highlight-btn" data-mode="word" title="Word Mode">▪</button>
-        <button class="highlight-btn" data-mode="paragraph" title="Paragraph Mode">¶</button>
-      </div>
-    `;
-    
-    document.body.appendChild(this.highlightElement);
-    
-    // Setup mode buttons
-    this.highlightElement.querySelectorAll('.highlight-btn').forEach(btn => {
-      btn.addEventListener('click', () => this.setMode(btn.dataset.mode));
-    });
-    
-    // Set initial mode
-    this.setMode(this.highlightMode);
-  }
-
-  removeHighlight() {
-    if (this.highlightElement) {
-      this.highlightElement.remove();
-      this.highlightElement = null;
+    constructor() {
+      super();
+      this.mode = 'line';
+      this.pointer = { x: window.innerWidth / 2, y: window.innerHeight / 3 };
+      this.target = null;
+      this.hasPointer = false;
     }
-  }
 
-  setMode(mode) {
-    this.highlightMode = mode;
-    
-    // Update button states
-    this.highlightElement.querySelectorAll('.highlight-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.mode === mode);
-    });
-    
-    // Update highlight style
-    const line = this.highlightElement.querySelector('.highlight-line');
-    
-    switch (mode) {
-      case 'line':
-        line.style.height = '1.6em';
-        line.style.borderRadius = '4px';
-        break;
-      case 'word':
-        line.style.height = '1.4em';
-        line.style.borderRadius = '2px';
-        break;
-      case 'paragraph':
-        line.style.height = 'auto';
-        line.style.minHeight = '3em';
-        line.style.borderRadius = '8px';
-        break;
+    onEnable() {
+      this.build();
+      this.bind();
+      this.loop(() => this.tick());
+      UI.toast('Reading Ruler on', { tone: 'success' });
     }
-  }
 
-  setupEventListeners() {
-    // Mouse tracking
-    this.mouseHandler = (e) => {
-      this.lastMouseY = e.clientY;
-      this.updateHighlightPosition(e.clientY);
-    };
-    
-    // Scroll tracking
-    this.scrollHandler = () => {
-      // Keep highlight in view during scroll
-      if (this.lastMouseY > 0) {
-        this.updateHighlightPosition(this.lastMouseY);
-      }
-    };
-    
-    // Keyboard navigation
-    this.keyHandler = (e) => {
-      if (e.key === 'ArrowDown') {
-        this.moveHighlight(30);
-      } else if (e.key === 'ArrowUp') {
-        this.moveHighlight(-30);
-      }
-    };
-    
-    document.addEventListener('mousemove', this.mouseHandler);
-    window.addEventListener('scroll', this.scrollHandler);
-    document.addEventListener('keydown', this.keyHandler);
-  }
-
-  removeEventListeners() {
-    document.removeEventListener('mousemove', this.mouseHandler);
-    window.removeEventListener('scroll', this.scrollHandler);
-    document.removeEventListener('keydown', this.keyHandler);
-  }
-
-  startFollowing() {
-    this.isFollowingMouse = true;
-  }
-
-  stopFollowing() {
-    this.isFollowingMouse = false;
-    if (this.animationId) {
-      cancelAnimationFrame(this.animationId);
-      this.animationId = null;
+    onDisable() {
+      UI.destroyHost('ruler');
     }
-  }
 
-  updateHighlightPosition(y) {
-    if (!this.highlightElement) return;
-    
-    const line = this.highlightElement.querySelector('.highlight-line');
-    
-    // Get the element at this Y position
-    const element = document.elementFromPoint(window.innerWidth / 2, y);
-    
-    if (element) {
-      // Find the text line at this position
-      const rect = this.getLineRect(element, y);
-      
-      if (rect) {
-        line.style.top = `${rect.top + window.scrollY}px`;
-        line.style.left = `${rect.left}px`;
-        line.style.width = `${rect.width}px`;
-        line.style.height = `${rect.height}px`;
-      }
+    onSettings() {
+      this.scope?.style.setProperty('--ruler', Store.getSetting('highlightColor') || '#7c8cff');
     }
-  }
 
-  getLineRect(element, y) {
-    // Get the bounding rectangle of the text line
-    const range = document.caretRangeFromPoint(window.innerWidth / 2, y);
-    
-    if (range) {
-      const rect = range.getBoundingClientRect();
-      return {
-        top: rect.top,
-        left: rect.left,
-        width: rect.width,
-        height: rect.height
-      };
-    }
-    
-    // Fallback to element rect
-    const elemRect = element.getBoundingClientRect();
-    return {
-      top: elemRect.top,
-      left: elemRect.left,
-      width: elemRect.width,
-      height: parseFloat(getComputedStyle(element).lineHeight) || 24
-    };
-  }
+    build() {
+      const root = UI.host('ruler', { layer: 'reading', interactive: false });
 
-  moveHighlight(deltaY) {
-    this.lastMouseY += deltaY;
-    this.lastMouseY = Math.max(0, Math.min(window.innerHeight, this.lastMouseY));
-    this.updateHighlightPosition(this.lastMouseY);
-  }
-
-  // Auto-advance mode for hands-free reading
-  startAutoAdvance(wpm = 200) {
-    this.isAutoAdvance = true;
-    const msPerWord = 60000 / wpm;
-    
-    const advance = () => {
-      if (!this.isAutoAdvance) return;
-      
-      this.moveHighlight(20);
-      
-      setTimeout(() => {
-        requestAnimationFrame(advance);
-      }, msPerWord);
-    };
-    
-    advance();
-  }
-
-  stopAutoAdvance() {
-    this.isAutoAdvance = false;
-  }
-
-  // Highlight specific word
-  highlightWord(word) {
-    // Find and highlight a specific word in the document
-    const walker = document.createTreeWalker(
-      document.body,
-      NodeFilter.SHOW_TEXT,
-      null
-    );
-    
-    let node;
-    while (node = walker.nextNode()) {
-      const text = node.textContent;
-      const regex = new RegExp(`\\b${word}\\b`, 'i');
-      
-      if (regex.test(text)) {
-        // Create highlight
-        const span = document.createElement('span');
-        span.className = 'setu-word-highlight-static';
-        
-        const parts = text.split(regex);
-        const match = text.match(regex);
-        
-        if (parts.length > 1 && match) {
-          const before = document.createTextNode(parts[0]);
-          span.textContent = match[0];
-          const after = document.createTextNode(parts.slice(1).join(match[0]));
-          
-          const wrapper = document.createElement('span');
-          wrapper.appendChild(before);
-          wrapper.appendChild(span);
-          wrapper.appendChild(after);
-          
-          node.parentNode.replaceChild(wrapper, node);
-          
-          // Scroll to word
-          span.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          
-          // Remove highlight after delay
-          setTimeout(() => {
-            if (wrapper.parentNode) {
-              const textNode = document.createTextNode(wrapper.textContent);
-              wrapper.parentNode.replaceChild(textNode, wrapper);
-            }
-          }, 2000);
-          
-          return true;
+      const style = document.createElement('style');
+      style.textContent = `
+        .ruler {
+          position: fixed;
+          background: color-mix(in srgb, var(--ruler) 22%, transparent);
+          border-left: 3px solid var(--ruler);
+          border-radius: 5px;
+          pointer-events: none;
+          opacity: 0;
+          transition: opacity .15s ease, top .07s linear, left .07s linear,
+                      width .07s linear, height .07s linear;
         }
+        .ruler[data-visible="true"] { opacity: 1; }
+        .ruler[data-mode="word"]  { border-radius: 3px; }
+        .ruler[data-mode="block"] { border-radius: 9px; background: color-mix(in srgb, var(--ruler) 15%, transparent); }
+
+        .dock {
+          position: fixed; right: 18px; bottom: 96px;
+          display: flex; flex-direction: column; gap: 5px;
+          padding: 7px; background: var(--bg-soft);
+          border: 1px solid var(--border); border-radius: 13px;
+          box-shadow: var(--shadow); pointer-events: auto;
+        }
+        .dock button {
+          width: 40px; height: 32px; border-radius: 8px;
+          background: transparent; border: 1px solid transparent;
+          color: var(--text-dim); font-size: 11px; font-weight: 700; cursor: pointer;
+        }
+        .dock button:hover { background: rgba(255,255,255,.09); color: var(--text); }
+        .dock button[aria-pressed="true"] { background: var(--ruler); color: #0b1020; }
+        .dock button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      `;
+      root.appendChild(style);
+
+      const scope = document.createElement('div');
+      scope.className = 'setu-scope';
+      scope.style.setProperty('--ruler', Store.getSetting('highlightColor') || '#7c8cff');
+      scope.innerHTML = `
+        <div class="ruler" data-mode="line" data-visible="false"></div>
+        <div class="dock" role="group" aria-label="Reading ruler mode">
+          ${Object.entries(MODES)
+            .map(
+              ([key, cfg]) =>
+                `<button data-mode="${key}" aria-pressed="${key === 'line'}" title="${cfg.label} mode">${cfg.label}</button>`
+            )
+            .join('')}
+        </div>
+      `;
+      root.appendChild(scope);
+
+      this.scope = scope;
+      this.ruler = scope.querySelector('.ruler');
+
+      scope.querySelectorAll('.dock button').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          this.mode = btn.dataset.mode;
+          this.ruler.dataset.mode = this.mode;
+          scope
+            .querySelectorAll('.dock button')
+            .forEach((b) => b.setAttribute('aria-pressed', String(b === btn)));
+          this.measure();
+        });
+      });
+    }
+
+    bind() {
+      this.listen(
+        window,
+        'mousemove',
+        (event) => {
+          this.pointer = { x: event.clientX, y: event.clientY };
+          this.hasPointer = true;
+          this.measure();
+        },
+        { passive: true }
+      );
+
+      this.listen(window, 'scroll', () => this.measure(), { passive: true });
+      this.listen(window, 'resize', () => this.measure(), { passive: true });
+
+      this.listen(window, 'keydown', (event) => {
+        if (event.altKey || event.ctrlKey || event.metaKey) return;
+        const active = document.activeElement;
+        if (active && (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName))) return;
+
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          const delta = (this.target?.height || 24) * (event.key === 'ArrowDown' ? 1 : -1);
+          this.pointer.y = Math.max(8, Math.min(window.innerHeight - 8, this.pointer.y + delta));
+          this.hasPointer = true;
+          this.measure();
+        }
+      });
+    }
+
+    /** Resolve the rect the ruler should occupy, in viewport coordinates. */
+    measure() {
+      if (!this.enabled || !this.hasPointer) return;
+
+      const { x, y } = this.pointer;
+
+      if (this.mode === 'word') {
+        this.target = this.wordRectAt(x, y) || Text.lineBoxAt(x, y);
+      } else if (this.mode === 'block') {
+        this.target = this.blockRectAt(x, y);
+      } else {
+        this.target = Text.lineBoxAt(x, y) || Text.findLineBoxNear(y);
       }
     }
-    
-    return false;
-  }
-}
 
-// Make available globally
-window.WordHighlight = WordHighlight;
+    /** Rect of the single word under the cursor. */
+    wordRectAt(x, y) {
+      const node = Text.caretNodeAt(x, y);
+      if (!node) return null;
+
+      const offset = this.caretOffsetAt(x, y);
+      if (offset === null) return null;
+
+      const content = node.textContent;
+      let start = offset;
+      let end = offset;
+      while (start > 0 && /\S/.test(content[start - 1])) start -= 1;
+      while (end < content.length && /\S/.test(content[end])) end += 1;
+      if (start === end) return null;
+
+      const range = document.createRange();
+      try {
+        range.setStart(node, start);
+        range.setEnd(node, end);
+      } catch (_) {
+        return null;
+      }
+
+      const rect = range.getBoundingClientRect();
+      return rect.width > 0 ? rect : null;
+    }
+
+    caretOffsetAt(x, y) {
+      if (document.caretPositionFromPoint) {
+        const position = document.caretPositionFromPoint(x, y);
+        return position ? position.offset : null;
+      }
+      if (document.caretRangeFromPoint) {
+        const range = document.caretRangeFromPoint(x, y);
+        return range ? range.startOffset : null;
+      }
+      return null;
+    }
+
+    /** Rect of the whole paragraph/block under the cursor. */
+    blockRectAt(x, y) {
+      const node = Text.caretNodeAt(x, y);
+      const block = node?.parentElement?.closest('p, li, blockquote, h1, h2, h3, h4, td, dd, div');
+      if (!block || Text.isOurs(block)) return Text.lineBoxAt(x, y);
+
+      const rect = block.getBoundingClientRect();
+      return rect.height > 0 && rect.height < window.innerHeight * 0.9 ? rect : Text.lineBoxAt(x, y);
+    }
+
+    /**
+     * Paint. Everything here is viewport-relative because the host is
+     * `position: fixed` — adding scrollY (the old bug) would double-count it.
+     */
+    tick() {
+      if (!this.ruler) return;
+
+      if (!this.target) {
+        this.ruler.dataset.visible = 'false';
+        return;
+      }
+
+      const pad = MODES[this.mode].pad;
+      const top = this.target.top - pad;
+      const height = this.target.height + pad * 2;
+
+      // Off-screen after a scroll: hide rather than pin to the edge.
+      if (top + height < 0 || top > window.innerHeight) {
+        this.ruler.dataset.visible = 'false';
+        return;
+      }
+
+      this.ruler.style.top = `${top}px`;
+      this.ruler.style.left = `${this.target.left - pad}px`;
+      this.ruler.style.width = `${this.target.width + pad * 2}px`;
+      this.ruler.style.height = `${height}px`;
+      this.ruler.dataset.visible = 'true';
+    }
+  }
+
+  window.SETU.features.set('highlight', ReadingRuler);
+})();

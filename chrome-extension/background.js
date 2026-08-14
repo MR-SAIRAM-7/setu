@@ -1,273 +1,253 @@
-// SETU Lens Background Service Worker
-// Handles extension lifecycle, context menu, and cross-tab communication
+/**
+ * SETU Lens — service worker.
+ *
+ * Owns everything a content script cannot safely do itself:
+ *  - Network calls to the SETU engine. Content scripts inherit the page's
+ *    origin and CSP, so a direct fetch to localhost is blocked outright on many
+ *    sites. Routing through here is what makes the AI features work everywhere.
+ *  - Tab capture for the visual breakdown.
+ *  - Injecting the content scripts into tabs that were already open when the
+ *    extension was installed or reloaded.
+ */
 
-// Extension installation
-chrome.runtime.onInstalled.addListener((details) => {
+const DEFAULT_API = 'http://localhost:3000';
+const SANCTUARY_URL = 'http://localhost:5173';
+
+/* -------------------------------------------------------------------------- */
+/* Lifecycle                                                                  */
+/* -------------------------------------------------------------------------- */
+
+chrome.runtime.onInstalled.addListener(async (details) => {
   if (details.reason === 'install') {
-    console.log('setu installed - Welcome!');
-    
-    // Initialize default settings
-    chrome.storage.sync.set({
+    await chrome.storage.sync.set({
       setuState: {
-        bionic: false,
-        focus: false,
-        eye: false,
-        scroll: false,
-        tts: false,
-        highlight: false,
-        dyslexia: false,
-        breathe: false,
-        chunking: false,
-        theme: 'default'
+        bionic: false, focus: false, lineFocus: false, highlight: false,
+        scroll: false, tts: false, eye: false, dyslexia: false,
+        breathe: true, chunking: false, theme: 'default',
+        settings: {
+          bionicIntensity: 0.45, lineFocusHeight: 1, highlightColor: '#7c8cff',
+          scrollWpm: 220, ttsRate: 1, ttsPitch: 1, ttsVoice: '',
+          fontScale: 1, language: 'English'
+        }
       },
-      settings: {
-        bionicIntensity: 0.5,
-        scrollSpeed: 100,
-        fontSize: 16,
-        lineHeight: 1.6,
-        letterSpacing: 0.5,
-        highlightColor: '#6366f1',
-        ttsRate: 1.0,
-        ttsVoice: 'default'
-      }
+      apiHost: DEFAULT_API,
+      sanctuaryUrl: SANCTUARY_URL
     });
-
   }
+
+  buildMenus();
+  // Content scripts are not retroactive — inject into already-open tabs.
+  reinjectOpenTabs();
 });
 
-// Context menu for quick actions
-chrome.runtime.onStartup.addListener(() => {
-  createContextMenu();
-});
+chrome.runtime.onStartup.addListener(buildMenus);
 
-chrome.runtime.onInstalled.addListener(() => {
-  createContextMenu();
-});
+/**
+ * On install/update, existing tabs have no content script until reloaded.
+ * Injecting manually means the extension works immediately.
+ */
+async function reinjectOpenTabs() {
+  const manifest = chrome.runtime.getManifest();
+  const { js } = manifest.content_scripts[0];
 
-function createContextMenu() {
+  const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] });
+  for (const tab of tabs) {
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: false }, files: js });
+    } catch (_) {
+      // Restricted pages (Web Store, other extensions) reject injection.
+    }
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Context menus                                                              */
+/* -------------------------------------------------------------------------- */
+
+function buildMenus() {
   chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({
-      id: 'setu-parent',
-      title: 'NeuroRead',
-      contexts: ['all']
-    });
+    const add = (id, title, contexts = ['all'], parentId = 'setu') =>
+      chrome.contextMenus.create({ id, title, contexts, parentId });
 
-    chrome.contextMenus.create({
-      id: 'toggle-bionic',
-      parentId: 'setu-parent',
-      title: 'Toggle Bionic Reading',
-      contexts: ['all']
-    });
+    chrome.contextMenus.create({ id: 'setu', title: 'SETU Lens', contexts: ['all'] });
 
-    chrome.contextMenus.create({
-      id: 'toggle-focus',
-      parentId: 'setu-parent',
-      title: 'Toggle Focus Mode',
-      contexts: ['all']
-    });
-
-    chrome.contextMenus.create({
-      id: 'toggle-linefocus',
-      parentId: 'setu-parent',
-      title: 'Toggle Line Focus',
-      contexts: ['all']
-    });
-
-    chrome.contextMenus.create({
-      id: 'toggle-tts',
-      parentId: 'setu-parent',
-      title: 'Read Selected Text',
-      contexts: ['selection']
-    });
-
-    chrome.contextMenus.create({
-      id: 'summarize-page',
-      parentId: 'setu-parent',
-      title: 'Save to NeuroRead Sanctuary',
-      contexts: ['all']
-    });
-
-    chrome.contextMenus.create({
-      id: 'open-commander',
-      parentId: 'setu-parent',
-      title: 'Open NeuroRead Commander',
-      contexts: ['all']
-    });
-
-    chrome.contextMenus.create({
-      id: 'task-path',
-      parentId: 'setu-parent',
-      title: 'Create a task path',
-      contexts: ['all']
-    });
+    add('cmd-commander', 'Ask SETU to do something…');
+    add('cmd-explain-selection', 'Explain this in plain language', ['selection']);
+    add('cmd-speak', 'Read this aloud', ['selection']);
+    add('cmd-visual', 'Explain this chart or image');
+    add('cmd-chunk', 'Break this page into 3 steps');
+    add('cmd-sanctuary', 'Send page to my Sanctuary');
+    chrome.contextMenus.create({ id: 'sep', type: 'separator', parentId: 'setu', contexts: ['all'] });
+    add('cmd-bionic', 'Toggle Bionic Reading');
+    add('cmd-focus', 'Toggle Focus Mode');
+    add('cmd-linefocus', 'Toggle Line Focus');
+    add('cmd-reset', 'Turn everything off');
   });
 }
 
-// Handle context menu clicks
-chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (!tab || !tab.id) return;
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (!tab?.id) return;
 
-  const sendMessageSafely = (msg, callback) => {
-    chrome.tabs.sendMessage(tab.id, msg, (response) => {
-      const err = chrome.runtime.lastError;
-      if (err) {
-        console.debug('[NeuroRead Background] Context menu message suppressed:', err.message);
-        return;
-      }
-      if (callback) callback(response);
-    });
+  const routes = {
+    'cmd-commander': { action: 'openCommander' },
+    'cmd-speak': { action: 'speakText', text: info.selectionText },
+    'cmd-visual': { action: 'explainVisual' },
+    'cmd-chunk': { action: 'toggleFeature', feature: 'chunking', enabled: true },
+    'cmd-sanctuary': { action: 'sendToSanctuary' },
+    'cmd-bionic': { action: 'toggleFeature', feature: 'bionic' },
+    'cmd-focus': { action: 'toggleFeature', feature: 'focus' },
+    'cmd-linefocus': { action: 'toggleFeature', feature: 'lineFocus' },
+    'cmd-reset': { action: 'resetAll' }
   };
 
-  switch (info.menuItemId) {
-    case 'toggle-bionic':
-      sendMessageSafely({ action: 'toggleMode', mode: 'bionic' });
-      break;
-    case 'toggle-focus':
-      sendMessageSafely({ action: 'toggleMode', mode: 'focus' });
-      break;
-    case 'toggle-linefocus':
-      sendMessageSafely({ action: 'toggleMode', mode: 'lineFocus' });
-      break;
-    case 'toggle-tts':
-      sendMessageSafely({ 
-        action: 'speakText', 
-        text: info.selectionText 
-      });
-      break;
-    case 'summarize-page':
-      sendMessageSafely({ action: 'saveToSanctuary' }, (response) => {
-        if (response?.success) chrome.tabs.create({ url: chrome.runtime.getURL('sanctuary.html') });
-      });
-      break;
-    case 'open-commander':
-      sendMessageSafely({ action: 'openCommander' });
-      break;
-    case 'task-path':
-      sendMessageSafely({ action: 'toggleMode', mode: 'chunking', enabled: true });
-      break;
+  if (info.menuItemId === 'cmd-explain-selection') {
+    await send(tab.id, { action: 'openCommander', task: `Explain this in plain language: "${info.selectionText}"` });
+    return;
   }
+
+  const message = routes[info.menuItemId];
+  if (message) await send(tab.id, message);
 });
 
-// Message handling
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  switch (request.action) {
-    case 'getState':
-      chrome.storage.sync.get('setuState').then(result => {
-        sendResponse(result.setuState);
-      });
-      return true;
+/* -------------------------------------------------------------------------- */
+/* Keyboard commands                                                          */
+/* -------------------------------------------------------------------------- */
 
-    case 'updateStats':
-      updateReadingStats(request.stats);
-      break;
+chrome.commands.onCommand.addListener(async (command, tab) => {
+  const tabId = tab?.id || (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
+  if (!tabId) return;
 
-    case 'captureTab':
-      if (sender.tab?.windowId !== undefined) {
-        chrome.tabs.captureVisibleTab(sender.tab.windowId, { format: 'png' })
-          .then(dataUrl => sendResponse({ success: true, dataUrl }))
-          .catch(error => sendResponse({ success: false, error: error.message }));
-        return true;
-      }
-      sendResponse({ success: false, error: 'No tab window available' });
-      break;
+  const routes = {
+    'toggle-bionic': { action: 'toggleFeature', feature: 'bionic' },
+    'toggle-focus': { action: 'toggleFeature', feature: 'focus' },
+    'toggle-linefocus': { action: 'toggleFeature', feature: 'lineFocus' },
+    'toggle-tts': { action: 'toggleFeature', feature: 'tts' },
+    'open-commander': { action: 'openCommander' }
+  };
 
-    case 'openSettings':
-      chrome.tabs.create({ url: chrome.runtime.getURL('settings.html') });
-      break;
-
-    case 'openSanctuary':
-      chrome.tabs.create({ url: chrome.runtime.getURL('sanctuary.html') });
-      break;
-  }
+  if (routes[command]) await send(tabId, routes[command]);
 });
 
-// Update reading statistics
-async function updateReadingStats(newStats) {
-  const result = await chrome.storage.local.get(['readingStats']);
-  const currentStats = result.readingStats || {
-    wpm: 0,
-    time: 0,
-    words: 0,
-    sessions: 0
-  };
-
-  const updatedStats = {
-    wpm: Math.round((currentStats.wpm * currentStats.sessions + newStats.wpm) / (currentStats.sessions + 1)),
-    time: currentStats.time + newStats.time,
-    words: currentStats.words + newStats.words,
-    sessions: currentStats.sessions + 1,
-    lastSession: new Date().toISOString()
-  };
-
-  await chrome.storage.local.set({ readingStats: updatedStats });
+/** Send a message to a tab, injecting the content script if it isn't there. */
+async function send(tabId, message) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, message);
+  } catch (_) {
+    try {
+      const { js } = chrome.runtime.getManifest().content_scripts[0];
+      await chrome.scripting.executeScript({ target: { tabId }, files: js });
+      // Give the boot sequence a moment before retrying.
+      await new Promise((resolve) => setTimeout(resolve, 260));
+      return await chrome.tabs.sendMessage(tabId, message);
+    } catch (error) {
+      console.debug('[SETU] tab unreachable:', error.message);
+      return null;
+    }
+  }
 }
 
-// Track active reading sessions
-const readingSessions = new Map();
+/* -------------------------------------------------------------------------- */
+/* Message hub                                                                */
+/* -------------------------------------------------------------------------- */
 
-chrome.tabs.onActivated.addListener(async ({ tabId }) => {
-  try {
-    const tab = await chrome.tabs.get(tabId);
-    if (tab?.url && !tab.url.startsWith('chrome://')) {
-      readingSessions.set(tabId, {
-        startTime: Date.now(),
-        url: tab.url
-      });
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  (async () => {
+    try {
+      switch (request.action) {
+        case 'apiFetch':
+          return sendResponse(await apiFetch(request));
+
+        case 'captureTab': {
+          const windowId = sender.tab?.windowId ?? chrome.windows.WINDOW_ID_CURRENT;
+          const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
+          return sendResponse({ success: true, dataUrl });
+        }
+
+        case 'sendToSanctuary':
+          return sendResponse(await stashForSanctuary(request.payload));
+
+        case 'openSanctuary': {
+          const { sanctuaryUrl } = await chrome.storage.sync.get('sanctuaryUrl');
+          await chrome.tabs.create({ url: request.path
+            ? `${sanctuaryUrl || SANCTUARY_URL}${request.path}`
+            : (sanctuaryUrl || SANCTUARY_URL) });
+          return sendResponse({ ok: true });
+        }
+
+        default:
+          return sendResponse({ ok: false, error: `Unknown action "${request.action}"` });
+      }
+    } catch (error) {
+      console.error('[SETU worker]', error);
+      sendResponse({ ok: false, success: false, error: error.message });
     }
-  } catch (_) {}
+  })();
+
+  return true;
 });
 
-chrome.tabs.onRemoved.addListener((tabId) => {
-  if (readingSessions.has(tabId)) {
-    const session = readingSessions.get(tabId);
-    const duration = Math.round((Date.now() - session.startTime) / 60000);
-    
-    updateReadingStats({
-      wpm: 200,
-      time: duration,
-      words: duration * 200
+/**
+ * Proxy a JSON POST to the SETU engine.
+ * Runs here rather than in the page so the request carries the extension's
+ * origin and is not subject to the host page's Content-Security-Policy.
+ */
+async function apiFetch({ path, body, timeoutMs = 60000 }) {
+  const { apiHost } = await chrome.storage.sync.get('apiHost');
+  const base = (apiHost || DEFAULT_API).replace(/\/+$/, '');
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`${base}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal
     });
-    
-    readingSessions.delete(tabId);
+
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      let message = `Engine returned ${response.status}`;
+      try {
+        message = JSON.parse(detail).error || message;
+      } catch (_) {
+        /* keep the status line */
+      }
+      return { ok: false, error: message };
+    }
+
+    return { ok: true, data: await response.json() };
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      return { ok: false, error: 'The SETU engine took too long to respond.' };
+    }
+    return {
+      ok: false,
+      error: `Cannot reach the SETU engine at ${base}. Is it running? (npm start in /backend)`
+    };
+  } finally {
+    clearTimeout(timer);
   }
-});
+}
 
-// Keyboard shortcuts
-chrome.commands.onCommand.addListener(async (command, tab) => {
-  let targetTabId = tab?.id;
-  if (!targetTabId) {
-    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    targetTabId = activeTab?.id;
-  }
-  if (!targetTabId) return;
+/** Park captured page content where the Sanctuary can pick it up, then open it. */
+async function stashForSanctuary(payload) {
+  const { sanctuaryUrl } = await chrome.storage.sync.get('sanctuaryUrl');
+  const base = sanctuaryUrl || SANCTUARY_URL;
 
-  const sendMessageSafely = (msg) => {
-    chrome.tabs.sendMessage(targetTabId, msg).catch((err) => {
-      console.debug('[NeuroRead Background] Could not send command message to tab:', err.message);
-    });
-  };
+  const { sanctuaryInbox = [] } = await chrome.storage.local.get('sanctuaryInbox');
+  const inbox = [{ id: `cap_${Date.now()}`, ...payload }, ...sanctuaryInbox].slice(0, 25);
+  await chrome.storage.local.set({ sanctuaryInbox: inbox });
 
-  switch (command) {
-    case 'toggle-bionic':
-      sendMessageSafely({ action: 'toggleMode', mode: 'bionic' });
-      break;
-    case 'toggle-focus':
-      sendMessageSafely({ action: 'toggleMode', mode: 'focus' });
-      break;
-    case 'toggle-linefocus':
-      sendMessageSafely({ action: 'toggleMode', mode: 'lineFocus' });
-      break;
-    case 'toggle-tts':
-      sendMessageSafely({ action: 'toggleFeature', feature: 'tts' });
-      break;
-    case 'toggle-scroll':
-      sendMessageSafely({ action: 'toggleMode', mode: 'scroll' });
-      break;
-    case 'open-commander':
-      sendMessageSafely({ action: 'openCommander' });
-      break;
-  }
-});
+  // The web app reads the handoff from the URL fragment, which never reaches
+  // a server or appears in history the way a query string does.
+  const handoff = encodeURIComponent(
+    JSON.stringify({ title: payload.title, url: payload.url, text: payload.text.slice(0, 100000) })
+  );
 
-console.log('SETU Lens background service worker initialized');
+  await chrome.tabs.create({ url: `${base}/#/mindmap?import=${handoff}` });
+  return { ok: true };
+}
 
+console.log('[SETU Lens] service worker ready');
