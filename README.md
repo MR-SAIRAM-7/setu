@@ -214,9 +214,3 @@ rigour it does not have. A paid key enables grounded research with citations.
 - `prefers-reduced-motion` respected across both surfaces
 - Every control has an accessible name; live regions announce state changes
 - OpenDyslexic typeface and three text sizes in Settings
-
----
-
-## Licence
-
-MIT
