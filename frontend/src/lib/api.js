@@ -20,7 +20,6 @@ class ApiError extends Error {
 async function post(path, body, { signal, timeoutMs = 90000 } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  // Let a caller-supplied signal also cancel this request.
   signal?.addEventListener('abort', () => controller.abort(), { once: true });
 
   try {
@@ -50,15 +49,33 @@ async function post(path, body, { signal, timeoutMs = 90000 } = {}) {
   }
 }
 
+async function get(path, { signal, timeoutMs = 15000 } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  signal?.addEventListener('abort', () => controller.abort(), { once: true });
+
+  try {
+    const response = await fetch(url(path), {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new ApiError(data.error || `Request failed (${response.status})`, response.status);
+    }
+    return data;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
- * Stream a chat turn.
- *
- * Uses fetch + a manual SSE reader rather than EventSource, because
- * EventSource cannot issue a POST and this endpoint needs a message history.
- *
- * @param {object}   payload   { messages, map }
- * @param {object}   handlers  { onStatus, onReply, onMap, onError }
- * @param {AbortSignal} signal
+ * Stream a chat turn using SSE.
  */
 export async function streamChat(payload, handlers = {}, signal) {
   const response = await fetch(url('/api/chat'), {
@@ -83,7 +100,6 @@ export async function streamChat(payload, handlers = {}, signal) {
 
     buffer += decoder.decode(value, { stream: true });
 
-    // SSE frames are separated by a blank line; keep any partial tail.
     const frames = buffer.split('\n\n');
     buffer = frames.pop() || '';
 
@@ -119,15 +135,38 @@ export const api = {
     }
   },
 
+  healthAi: async () => {
+    try {
+      const response = await fetch(url('/api/health/ai'));
+      return response.ok ? response.json() : null;
+    } catch (_) {
+      return null;
+    }
+  },
+
+  dbStatus: () => get('/api/db/status'),
+
   mindMap: (topic, context = '') => post('/api/research/mindmap', { topic, context }),
 
   expandNode: (topic, nodeLabel, nodeDetail, path = []) =>
     post('/api/research/expand', { topic, nodeLabel, nodeDetail, path }),
 
+  // MongoDB persistence endpoints
+  listMindMaps: (search = '') => get(`/api/mindmaps?search=${encodeURIComponent(search)}`),
+  saveMindMapToDb: (map) => post('/api/mindmaps', map),
+  deleteMindMapFromDb: (id) =>
+    fetch(url(`/api/mindmaps/${id}`), { method: 'DELETE' }).then((r) => r.json()),
+
+  listSummaries: () => get('/api/summaries'),
+  saveSummaryToDb: (summary) => post('/api/summaries', summary),
+
+  getSettingsFromDb: () => get('/api/settings'),
+  saveSettingsToDb: (settings) => post('/api/settings', settings),
+
   summarize: (text) => post('/api/summarize', { text }),
   explain: (text, language = 'English') => post('/api/agent/explain', { text, language }),
 
-  // The seven cognitive modes.
+  // The seven cognitive modes
   start: (task, isStuck = false) => post('/api/start', { task, isStuck }),
   simplify: (text) => post('/api/simplify', { text }),
   learn: (text) => post('/api/learn', { text }),

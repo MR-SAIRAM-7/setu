@@ -1,9 +1,9 @@
 /**
- * Tidy horizontal tree layout for the mind map.
+ * Tidy horizontal tree layout for the Broadsheet mind map.
  *
- * Nodes render as real HTML elements (focusable, wrapping, screen-reader
+ * Nodes render as real HTML button elements (focusable, wrapping, screen-reader
  * friendly) positioned absolutely; only the connecting edges are SVG. That
- * keeps the map keyboard-navigable, which an all-SVG map would not be.
+ * keeps the map keyboard-navigable.
  *
  * The algorithm is a simplified Reingold–Tilford pass: measure each subtree's
  * height bottom-up, then centre each parent against its children. Sibling
@@ -11,32 +11,36 @@
  * children's slots.
  */
 
-/** Column width per depth, in px. Root is widest; leaves are narrowest. */
-const WIDTH = [268, 236, 214];
-/** Horizontal gap between columns. */
-const H_GAP = 78;
-/** Minimum vertical gap between sibling nodes. */
-const V_GAP = 18;
+export const PLATE_COLORS = ['#0088b0', '#d6006c', '#edbb00', '#201e1d']; // cyan, magenta, yellow, ink
 
-const widthFor = (depth) => WIDTH[Math.min(depth, WIDTH.length - 1)];
+/** Column width per depth, in px. Root is 186; depth 1 is 200; leaves are 168. */
+const WIDTH = [186, 200, 168];
+/** Horizontal gap between columns. */
+const H_GAP = 66;
+/** Minimum vertical gap between sibling nodes. */
+const V_GAP = 14;
+
+export const widthFor = (depth) => WIDTH[Math.min(depth, WIDTH.length - 1)];
 
 /**
  * Estimate rendered height from text length.
- * Deterministic, so layout is stable across renders and does not require a
- * measure-then-reflow pass that would make the map jump on load.
+ * Deterministic, so layout is stable across renders without layout shifts.
  */
-function heightFor(node, depth) {
+export function heightFor(node, depth) {
   const width = widthFor(depth);
-  const charsPerLine = Math.floor(width / 7.1);
+  const charsPerLine = Math.max(12, Math.floor(width / 7.2));
 
-  const labelLines = Math.max(1, Math.ceil((node.label || '').length / (charsPerLine * 0.86)));
+  const labelLines = Math.max(1, Math.ceil((node.label || '').length / (charsPerLine * 0.85)));
   const detailLines = node.detail ? Math.ceil(node.detail.length / charsPerLine) : 0;
 
-  const padding = 26;
-  const labelHeight = labelLines * 21;
-  const detailHeight = detailLines * 17;
+  const padding = depth === 0 ? 22 : 18;
+  const labelHeight = labelLines * (depth === 0 ? 20 : 17);
+  const detailHeight = detailLines * 15;
 
-  return Math.max(56, padding + labelHeight + (detailHeight ? detailHeight + 6 : 0));
+  const minHeights = [64, 56, 46];
+  const minH = minHeights[Math.min(depth, minHeights.length - 1)];
+
+  return Math.max(minH, padding + labelHeight + (detailHeight ? detailHeight + 4 : 0));
 }
 
 /**
@@ -44,10 +48,10 @@ function heightFor(node, depth) {
  *
  * @param {object} root      tree with { id, label, detail, children }
  * @param {Set}    collapsed ids whose children are hidden
- * @returns {{nodes: Array, edges: Array, width: number, height: number}}
+ * @returns {{nodes: Array, edges: Array, width: number, height: number, byId: Map}}
  */
 export function layoutTree(root, collapsed = new Set()) {
-  if (!root) return { nodes: [], edges: [], width: 0, height: 0 };
+  if (!root) return { nodes: [], edges: [], width: 0, height: 0, byId: new Map() };
 
   const nodes = [];
   const edges = [];
@@ -106,17 +110,20 @@ export function layoutTree(root, collapsed = new Set()) {
     const childX = x + width + H_GAP;
     let cursor = spanTop + (node._span - children.reduce((s, c, i) => s + c._span + (i ? V_GAP : 0), 0)) / 2;
 
-    for (const child of children) {
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      const branchIndex = depth === 0 ? i % PLATE_COLORS.length : (placed.branch ?? 0);
       const childPlaced = place(child, depth + 1, childX, cursor);
+      childPlaced.branch = branchIndex;
+
       edges.push({
         id: `${placed.id}-${childPlaced.id}`,
         from: { x: x + width, y: y + height / 2 },
         to: { x: childX, y: childPlaced.y + childPlaced.height / 2 },
         depth: depth + 1,
-        // Colour edges by their top-level branch so the eye can follow a thread.
-        branch: depth === 0 ? children.indexOf(child) % 6 : placed.branch
+        branch: branchIndex
       });
-      childPlaced.branch = depth === 0 ? children.indexOf(child) % 6 : placed.branch;
+
       cursor += child._span + V_GAP;
     }
 
@@ -124,29 +131,24 @@ export function layoutTree(root, collapsed = new Set()) {
   }
 
   const totalHeight = measure(root, 0);
-  place(root, 0, 0, 0);
+  const rootNode = place(root, 0, 16, 16);
+  rootNode.branch = 3; // Ink plate for root
 
-  // Propagate branch colour down each thread (parents are placed before children).
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  for (const edge of edges) {
-    const target = nodes.find((n) => Math.abs(n.y + n.height / 2 - edge.to.y) < 0.5 && n.x === edge.to.x);
-    if (target && target.branch === undefined) target.branch = edge.branch;
-  }
-
-  const maxX = Math.max(...nodes.map((n) => n.x + n.width), 0);
+  const maxX = Math.max(...nodes.map((n) => n.x + n.width), 0) + 32;
 
   return {
     nodes,
     edges,
-    width: maxX,
-    height: totalHeight,
+    width: Math.max(620, maxX),
+    height: Math.max(400, totalHeight + 32),
     byId
   };
 }
 
 /** Cubic bezier connecting two points horizontally. */
 export function edgePath({ from, to }) {
-  const dx = Math.max(28, (to.x - from.x) * 0.55);
+  const dx = Math.max(36, (to.x - from.x) * 0.45);
   return `M ${from.x},${from.y} C ${from.x + dx},${from.y} ${to.x - dx},${to.y} ${to.x},${to.y}`;
 }
 

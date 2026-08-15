@@ -4,8 +4,8 @@
 
 **A bridge between dense digital worlds and the neurodivergent mind.**
 
-A browser extension that reshapes any website in real time, a web workspace that turns
-any topic into an interactive mind map, and one shared AI engine behind both.
+A browser extension that reshapes any website in real time, a redesigned Broadsheet web workspace that turns
+any topic into an interactive mind map, and one shared AI engine with MongoDB database persistence behind both.
 
 Built for Capgemini Hack4Positive 2026 · Disability Inclusion & Accessibility
 
@@ -18,14 +18,14 @@ Built for Capgemini Hack4Positive 2026 · Disability Inclusion & Accessibility
 | Surface | What it is | Where |
 |---|---|---|
 | **SETU Lens** | Chrome extension. Rewrites the page you are on — bionic text, line focus, reader view, read-aloud, and an AI agent that navigates the page for you. | `chrome-extension/` |
-| **SETU Sanctuary** | React workspace. Ask about any topic; it researches it and draws an interactive mind map you can expand branch by branch. | `frontend/` |
-| **SETU Engine** | The shared AI orchestration layer both surfaces call. | `backend/` |
+| **SETU Sanctuary** | Redesigned Broadsheet React workspace. Research any topic into an interactive mind map, 7 cognitive disability tools, 3-step onboarding, command palette, and focus sessions. | `frontend/` |
+| **SETU Engine** | The shared AI orchestration layer and MongoDB persistence service both surfaces call. | `backend/` |
 
 ---
 
 ## Quick start
 
-You need **Node 18+** and a free [Google AI Studio](https://aistudio.google.com/) API key.
+You need **Node 18+** and a free [Google AI Studio](https://aistudio.google.com/) API key. MongoDB is supported for cloud/local persistence with seamless local browser fallback.
 
 ### 1. Configure
 
@@ -33,10 +33,11 @@ You need **Node 18+** and a free [Google AI Studio](https://aistudio.google.com/
 cp .env.example .env
 ```
 
-Put your key in `.env`:
+Put your key and optional MongoDB URI in `.env`:
 
-```
+```env
 GEMINI_API_KEY=your_key_here
+MONGODB_URI=mongodb://127.0.0.1:27017/setu
 ```
 
 ### 2. Start the engine
@@ -45,8 +46,7 @@ GEMINI_API_KEY=your_key_here
 cd backend && npm install && npm start
 ```
 
-Runs on `http://localhost:3000`. Verify with `npm run smoke` in a second terminal — it
-exercises every endpoint end to end.
+Runs on `http://localhost:3000`.
 
 ### 3. Start the workspace
 
@@ -62,155 +62,62 @@ Opens on `http://localhost:5173`.
 2. Turn on **Developer mode**
 3. **Load unpacked** → select the `chrome-extension/` folder
 
-The extension works on every site immediately — no reload needed for tabs you already
-have open.
+The extension works on every site immediately — no reload needed for tabs you already have open.
 
 ---
 
-## What the extension does
+## Broadsheet Design System (Sanctuary)
 
-**Reading tools** — all composable, run as many at once as you like:
+SETU Sanctuary follows the **Broadsheet** newsprint design system tailored for cognitive accessibility:
+- **Light by default**: Near-black Source Serif 4 (`#201e1d`) on paper ground (`#f3f2f2`).
+- **Four process plate inks**: Cyan (`#0088b0`), Magenta (`#d6006c`), Yellow (`#edbb00`), and Ink (`#201e1d`).
+- **Accessible Typography**: Source Serif 4, Atkinson Hyperlegible (for dyslexic readers), and System sans, with Normal (1×), Comfortable (1.1×), and Large (1.22×) scaling.
+- **Micro-features**: 3-step onboarding walkthrough, `⌘K` / `Ctrl+K` command palette, 25-minute focus session timer with calm break dialog, staged 3-line research loader, and Lens ↔ Sanctuary handoff banner.
 
-| Tool | Shortcut | What it does |
+---
+
+## Database Architecture (MongoDB)
+
+SETU integrates with **MongoDB** (via Mongoose ODM) with complete offline/local storage fallback:
+
+| Collection | Model | Purpose |
 |---|---|---|
-| Bionic Reading | `Alt+B` | Bolds the leading fixation of each word to anchor the eye |
-| Line Focus | `Alt+L` | Dims the page and lights only the line you're on, snapped to real text |
-| Reading Ruler | `Alt+H` | A highlight that follows your line, word, or paragraph |
-| Focus Mode | `Alt+F` | Sanitised reader view — no ads, scripts, or clutter |
-| Read Aloud | `Alt+T` | Speech with the spoken word highlighted live |
-| Auto Scroll | `Alt+S` | Hands-free scrolling at your words-per-minute |
-| Gaze Scroll | `Alt+E` | Webcam head-position tracking scrolls as you read |
-| Reading themes | — | Sepia, dark, calm, AAA contrast, and a dyslexia-friendly profile |
-
-**AI features:**
-
-- **SETU Commander** (`Alt+Shift+C`) — say what you want to do on the page; the agent
-  reads the live DOM, plans the steps, and executes them one at a time.
-- **3-step path** — collapses an overwhelming portal into exactly three calm steps.
-- **Explain a chart** — point at any diagram, table, or image for a plain-language read-out.
-- **Breathe Protocol** — detects rage-clicking and erratic scrolling, then offers a
-  box-breathing pause and to simplify the page.
-- **Send to Sanctuary** — hands the page to the web workspace as a mind map.
-
-`Alt+X` turns everything off at once.
+| `mindmaps` | `MindMap` | Hierarchical mind map trees, topics, key facts, sources |
+| `savedsummaries` | `SavedSummary` | Saved outputs from cognitive modes (Simplify, Meet, Write, etc.) |
+| `usersettings` | `UserSettings` | Accessibility preferences (profile, font, size, motion) |
+| `sessionlogs` | `SessionLog` | Audit logs and interaction records |
 
 ---
 
-## What the workspace does
+## API Endpoints
 
-**Mind Map Chat** is the centre of it. Ask about anything in plain language:
-
-> *"How do vaccines actually work?"*
-
-The agent researches the topic, then draws a map you can navigate:
-
-- Click any node to select it; **double-click or press `+`** to research one level deeper
-- Collapse branches you have finished with
-- Arrow keys move through the whole map — it is fully keyboard navigable
-- Follow-up questions are answered against the map already on screen
-- Export any map to Markdown
-
-Maps are saved to your **Library**, in your browser only. Nothing is uploaded.
-
-**Modes** holds the seven cognitive tools — Start, Simplify, Learn, Meet, Practice,
-Write, and Guide.
-
----
-
-## Architecture
-
-```
-                    ┌──────────────────────────┐
-                    │      SETU Engine         │
-                    │  Express · Node 18+      │
-                    │                          │
-                    │  Gemini  →  OpenAI       │
-                    │  (model fallback chain)  │
-                    └────────────┬─────────────┘
-                                 │  JSON schema-enforced responses
-                  ┌──────────────┴──────────────┐
-                  │                             │
-        ┌─────────▼─────────┐         ┌─────────▼─────────┐
-        │    SETU Lens      │         │  SETU Sanctuary   │
-        │  Manifest V3      │  ─────► │  React 18 · Vite  │
-        │  Shadow-DOM UI    │ send to │  Mind map canvas  │
-        └───────────────────┘  page   └───────────────────┘
-```
-
-**Three design decisions worth knowing:**
-
-1. **Every overlay lives in its own Shadow DOM root.** Hostile page CSS cannot restyle
-   SETU, and SETU's CSS cannot leak into the page. This is what makes the extension work
-   identically across the whole web rather than on a list of tested sites.
-
-2. **Model names are a chain, not a constant.** A retired model no longer takes the
-   product down; the engine walks the chain and caches the first that answers.
-
-3. **Irreversible actions are gated.** The agent runs on banking and government portals.
-   Any step that submits, pays, sends, or deletes is flagged server-side and will not
-   fire without an explicit click — not even during Auto-Run. The offline fallback
-   planner runs through the same safety pass.
-
-### Compute ladder
-
-```
-L0  LOCAL          0 ms · fully private · no key needed
-    Bionic, line focus, ruler, reader view, auto scroll, themes, TTS
-
-L1  ENGINE         ~1-3 s · structured JSON
-    Seven modes, page agent, task chunking, explanations
-
-L2  RESEARCH       ~10-20 s · grounded when quota allows
-    Topic research → mind map, node expansion, vision breakdown
-```
-
----
-
-## API
-
-| Endpoint | Purpose |
-|---|---|
-| `GET /api/health` | Liveness + whether a key is configured |
-| `GET /api/health/ai` | Live model round-trip |
-| `POST /api/chat` | Mind-map chat (Server-Sent Events) |
-| `POST /api/research/mindmap` | Topic → mind map |
-| `POST /api/research/expand` | Grow one node deeper |
-| `POST /api/agent/plan` | Goal + page snapshot → action plan |
-| `POST /api/agent/chunk` | Dense page → 3 steps |
-| `POST /api/agent/explain` | Plain-language explanation, any language |
-| `POST /api/agent/describe-image` | Chart / diagram description |
-| `POST /api/{start,simplify,learn,meet,practice,write,guide}` | The seven modes |
-| `POST /api/summarize`, `POST /api/export` | Utilities |
-
-Every AI endpoint degrades to a deterministic local result if the model is unreachable,
-and says so via `fallback: true` and `fallbackReason` — it never silently substitutes.
-
----
-
-## Configuration
-
-| Variable | Default | Purpose |
+| Endpoint | Method | Purpose |
 |---|---|---|
-| `GEMINI_API_KEY` | — | Primary provider ([free key](https://aistudio.google.com/)) |
-| `OPENAI_API_KEY` | — | Optional fallback provider |
-| `GEMINI_MODEL` | auto | Pin a model instead of using the chain |
-| `OPENAI_MODEL` | `gpt-4o-mini` | Model for the OpenAI path |
-| `PORT` | `3000` | Engine port |
-| `AI_TIMEOUT_MS` | `45000` | Per-request timeout |
-| `AI_MAX_RETRIES` | `2` | Retries per provider |
-
-**Note on the free tier:** Gemini's free tier allows 20 requests/minute and does not
-include Google Search grounding quota. Research still works from model knowledge, and
-maps are labelled `model knowledge` rather than showing sources, so nothing implies
-rigour it does not have. A paid key enables grounded research with citations.
+| `/api/health` | GET | Cheap liveness probe (AI + MongoDB status) |
+| `/api/health/ai` | GET | Deep AI model round-trip & DB status check |
+| `/api/mindmaps` | GET / POST / DELETE | MongoDB mind map persistence |
+| `/api/summaries` | GET / POST | MongoDB summaries persistence |
+| `/api/settings` | GET / POST / PUT | MongoDB user settings sync |
+| `/api/chat` | POST | Mind-map chat stream (Server-Sent Events) |
+| `/api/research/mindmap` | POST | Non-streaming topic → mind map generator |
+| `/api/research/expand` | POST | Grow one node deeper via AI research |
+| `/api/start` | POST | Mode 1: Break task freeze (Wall of Awful) |
+| `/api/simplify` | POST | Mode 2: Plain language rewrite (Grade 6) |
+| `/api/learn` | POST | Mode 3: Study material → outline & self-quiz |
+| `/api/meet` | POST | Mode 4: Meeting transcript rescue & jargon decode |
+| `/api/practice` | POST | Mode 5: Hard conversation rehearsal scripts |
+| `/api/write` | POST | Mode 6: Accessible writing & clarity critique |
+| `/api/guide` | POST | Mode 7: Step-by-step workflow with success signals |
+| `/api/agent/plan` | POST | In-page navigation planner for Chrome extension |
+| `/api/agent/chunk` | POST | Collapse dense page into 3 steps |
+| `/api/agent/explain` | POST | Visual & diagram plain-language explanation |
 
 ---
 
-## Accessibility
+## Accessibility Commitments
 
-- WCAG 2.1 AA+ contrast throughout; a AAA high-contrast theme is included
-- Full keyboard navigation, including the mind map canvas
-- Focus is never removed, only restyled
-- `prefers-reduced-motion` respected across both surfaces
-- Every control has an accessible name; live regions announce state changes
-- OpenDyslexic typeface and three text sizes in Settings
+- WCAG 2.1 AA+ contrast compliance throughout
+- Full keyboard navigation including the interactive mind map canvas (`←` collapse, `→` expand/research deeper, `↑`/`↓` navigate nodes)
+- Focus is never removed, only styled with accessible 2px cyan outline rings
+- `prefers-reduced-motion` and in-app "Keep it still" toggle completely suppress animations
+- Atkinson Hyperlegible and OpenDyslexic letterforms to eliminate letter flipping

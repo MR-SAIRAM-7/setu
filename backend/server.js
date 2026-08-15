@@ -4,6 +4,7 @@
 const express = require('express');
 const cors = require('cors');
 const config = require('./config');
+const { connectDB, closeDB } = require('./config/db');
 const apiRoutes = require('./routes/apiRoutes');
 const errorHandler = require('./middleware/errorHandler');
 
@@ -24,10 +25,13 @@ if (config.nodeEnv !== 'test') {
   });
 }
 
+// Connect to MongoDB asynchronously
+connectDB();
+
 app.use('/api', apiRoutes);
 
 app.get('/', (_req, res) => {
-  res.json({ product: 'SETU API', version: '3.0.0', docs: '/api/health' });
+  res.json({ product: 'SETU API', version: '3.0.0', database: 'MongoDB', docs: '/api/health' });
 });
 
 app.use((req, res) => {
@@ -40,12 +44,14 @@ app.use(errorHandler);
 if (require.main === module) {
   const server = app.listen(config.port, () => {
     console.log(`\n  SETU API  →  http://localhost:${config.port}`);
+    console.log(`  Database  :  MongoDB (${config.mongoUri})`);
     console.log(`  AI provider: ${config.geminiApiKey ? 'Gemini' : config.openAiApiKey ? 'OpenAI' : 'NONE — set GEMINI_API_KEY'}\n`);
   });
 
   for (const signal of ['SIGINT', 'SIGTERM']) {
-    process.on(signal, () => {
+    process.on(signal, async () => {
       console.log(`\n${signal} received, shutting down.`);
+      await closeDB();
       server.close(() => process.exit(0));
     });
   }

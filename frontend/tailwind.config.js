@@ -1,68 +1,87 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{js,jsx}'],
-  darkMode: 'class',
   theme: {
     extend: {
       colors: {
-        // Surfaces, darkest to lightest. Used via bg-ink-900 etc.
+        paper: '#f3f2f2',
+        surface: '#eae9e9',
         ink: {
-          950: '#070b16',
-          900: '#0b1020',
-          800: '#111830',
-          700: '#18203e',
-          600: '#222c52',
-          500: '#2e3a68'
+          DEFAULT: '#201e1d',
+          50: '#f6f6f6',
+          100: '#eae9e9',
+          200: '#d5d3d2',
+          300: '#b4b0ae',
+          400: '#8c8784',
+          500: '#686360',
+          600: '#4d4845',
+          700: '#383432',
+          800: '#282524',
+          900: '#201e1d'
         },
-        // Primary accent — periwinkle. Calm, high contrast on ink.
-        iris: {
-          50: '#eef0ff',
-          200: '#c5cbff',
-          300: '#a6b0ff',
-          400: '#8b97ff',
-          500: '#7c8cff',
-          600: '#5f6ce6',
-          700: '#4a54bd'
+        cyan: {
+          DEFAULT: '#0088b0',
+          50: '#f0f9fc',
+          100: '#e0f4fa',
+          200: '#bce7f4',
+          300: '#8cd3eb',
+          400: '#4bbada',
+          500: '#0088b0',
+          600: '#007599',
+          700: '#00607d',
+          800: '#004b62',
+          900: '#003648'
         },
-        // Secondary accent — signals success, active state, live data.
-        mint: {
-          300: '#86efac',
-          400: '#4ade80',
-          500: '#22c55e',
-          600: '#16a34a'
+        magenta: {
+          DEFAULT: '#d6006c',
+          50: '#fdf2f7',
+          100: '#fce4ef',
+          200: '#f8c0db',
+          500: '#d6006c',
+          700: '#a30052',
+          800: '#820042',
+          900: '#57002c'
         },
-        sun: { 400: '#fbbf24', 500: '#f59e0b' },
-        rose: { 400: '#fb7185', 500: '#f43f5e' },
-        // Per-branch mind map palette, checked for contrast on ink-800.
-        branch: {
-          1: '#7c8cff',
-          2: '#4ade80',
-          3: '#fbbf24',
-          4: '#f472b6',
-          5: '#38bdf8',
-          6: '#c084fc'
-        }
+        yellow: {
+          process: '#edbb00'
+        },
+        divider: 'var(--color-divider)'
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
-        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
-        dyslexic: ['OpenDyslexic', 'Comic Sans MS', 'Verdana', 'sans-serif']
+        serif: ['"Source Serif 4"', 'Georgia', 'serif'],
+        heading: ['"Source Serif 4"', 'Georgia', 'serif'],
+        body: ['"Source Serif 4"', 'Georgia', 'serif'],
+        sans: ['system-ui', '-apple-system', '"Segoe UI"', 'sans-serif'],
+        hyper: ['"Atkinson Hyperlegible"', 'Verdana', 'sans-serif']
       },
-      borderRadius: { xl: '0.85rem', '2xl': '1.15rem', '3xl': '1.6rem' },
+      borderRadius: {
+        sm: '2px',
+        md: '3px',
+        lg: '5px'
+      },
       boxShadow: {
-        card: '0 1px 2px rgba(0,0,0,.28), 0 8px 26px -8px rgba(0,0,0,.5)',
-        lift: '0 18px 48px -14px rgba(0,0,0,.66)',
-        glow: '0 0 0 1px rgba(124,140,255,.4), 0 0 26px -6px rgba(124,140,255,.5)'
+        sm: '0 1px 2px rgba(32, 30, 29, 0.06)',
+        md: '0 2px 6px rgba(32, 30, 29, 0.08)',
+        lg: '0 8px 24px rgba(32, 30, 29, 0.10)'
       },
       keyframes: {
-        'fade-up': { from: { opacity: 0, transform: 'translateY(8px)' }, to: { opacity: 1, transform: 'none' } },
-        breathe: { '0%,100%': { opacity: 0.45 }, '50%': { opacity: 1 } },
-        dash: { to: { strokeDashoffset: 0 } }
+        rise: {
+          from: { opacity: '0', transform: 'translateY(6px)' },
+          to: { opacity: '1', transform: 'none' }
+        },
+        breathe: {
+          '0%, 100%': { opacity: '0.35', transform: 'scale(0.96)' },
+          '50%': { opacity: '1', transform: 'scale(1.08)' }
+        },
+        draw: {
+          from: { strokeDashoffset: '300' },
+          to: { strokeDashoffset: '0' }
+        }
       },
       animation: {
-        'fade-up': 'fade-up .35s cubic-bezier(.2,.7,.3,1) both',
+        rise: 'rise 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards',
         breathe: 'breathe 2.4s ease-in-out infinite',
-        dash: 'dash .7s ease-out both'
+        draw: 'draw 0.8s ease-out forwards'
       }
     }
   },

@@ -16,11 +16,6 @@ const clean = (value) => {
 
 /**
  * Gemini model fallback chain.
- *
- * The previous build hardcoded `gemini-1.5-flash`, which has been retired from
- * the v1beta endpoint — every call returned HTTP 404 and silently dropped into
- * the canned L0 fallback, which is why the agent appeared "not working".
- * We now try a chain and remember whichever model answers first.
  */
 const GEMINI_MODEL_CHAIN = (process.env.GEMINI_MODEL
   ? [process.env.GEMINI_MODEL.trim()]
@@ -50,13 +45,10 @@ module.exports = {
   maxTextLength: 16000,
   aiTimeoutMs: Number(process.env.AI_TIMEOUT_MS || 45000),
   aiMaxRetries: Number(process.env.AI_MAX_RETRIES || 2),
-  // Ceiling on a provider-requested retry wait, so one rate-limited call
-  // cannot stall a request for minutes.
   maxRetryWaitMs: Number(process.env.AI_MAX_RETRY_WAIT_MS || 20000),
 
-  // Supabase (optional persistence)
-  supabaseUrl: clean(process.env.SUPABASE_URL),
-  supabaseKey: clean(process.env.SUPABASE_SERVICE_KEY) || clean(process.env.SUPABASE_ANON_KEY),
+  // MongoDB Database Configuration
+  mongoUri: clean(process.env.MONGODB_URI) || 'mongodb://127.0.0.1:27017/setu',
 
   corsOptions: {
     origin: true,
