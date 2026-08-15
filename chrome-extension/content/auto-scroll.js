@@ -131,20 +131,20 @@
         .bar {
           position: fixed; bottom: 24px; right: 24px;
           display: flex; align-items: center; gap: 9px;
-          padding: 9px 14px; background: var(--bg-soft);
+          padding: 8px 14px; background: var(--surface);
           border: 1px solid var(--border); border-radius: 999px;
-          box-shadow: var(--shadow); pointer-events: auto;
+          box-shadow: var(--shadow); pointer-events: auto; font-family: var(--font);
         }
         button {
           background: transparent; border: 1px solid var(--border);
           color: var(--text); width: 32px; height: 32px; border-radius: 50%;
-          cursor: pointer; font-size: 13px;
+          cursor: pointer; font-size: 13px; font-weight: 700;
         }
-        button:hover { background: rgba(255,255,255,.1); border-color: var(--accent); }
+        button:hover { background: var(--accent-100); border-color: var(--accent); color: var(--accent-700); }
         button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-        button[data-primary] { background: var(--accent); border-color: var(--accent); color: #0b1020; }
+        button[data-primary] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
         .wpm { font-size: 12px; font-weight: 700; min-width: 62px; text-align: center; color: var(--text-dim); }
-        .wpm b { color: var(--text); font-size: 13px; }
+        .wpm b { color: var(--text); font-size: 13.5px; }
       `;
       root.appendChild(style);
 

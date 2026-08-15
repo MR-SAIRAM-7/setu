@@ -90,28 +90,28 @@
         .bar {
           position: fixed; bottom: 24px; left: 24px;
           display: flex; align-items: center; gap: 8px;
-          padding: 9px 12px; background: var(--bg-soft);
+          padding: 8px 12px; background: var(--surface);
           border: 1px solid var(--border); border-radius: 999px;
-          box-shadow: var(--shadow); pointer-events: auto;
+          box-shadow: var(--shadow); pointer-events: auto; font-family: var(--font);
         }
         .icon {
-          width: 36px; height: 36px; border-radius: 50%;
+          width: 34px; height: 34px; border-radius: 50%;
           display: grid; place-items: center;
           background: transparent; border: 1px solid var(--border);
-          color: var(--text); cursor: pointer; font-size: 13px;
+          color: var(--text); cursor: pointer; font-size: 13px; font-weight: 700;
         }
-        .icon:hover { background: rgba(255,255,255,.1); border-color: var(--accent); }
+        .icon:hover { background: var(--accent-100); border-color: var(--accent); color: var(--accent-700); }
         .icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-        .icon[data-primary] { background: var(--accent); border-color: var(--accent); color: #0b1020; }
+        .icon[data-primary] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
         .sep { width:1px; height:20px; background:var(--border); }
-        .rate { font-size:12px; font-weight:700; min-width:38px; text-align:center; color:var(--text-dim); }
+        .rate { font-size:12px; font-weight:700; min-width:38px; text-align:center; color:var(--text); }
         select {
-          max-width: 140px; padding: 5px 7px; font-size: 12px;
-          background: var(--surface); color: var(--text);
-          border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+          max-width: 140px; padding: 4px 7px; font-size: 12px;
+          background: var(--bg); color: var(--text);
+          border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer;
         }
         .progress { position:absolute; left:14px; right:14px; bottom:4px; height:2px; background:var(--border); border-radius:2px; }
-        .progress-fill { height:100%; width:0; background:var(--accent-2); border-radius:2px; transition:width .2s linear; }
+        .progress-fill { height:100%; width:0; background:var(--accent); border-radius:2px; transition:width .2s linear; }
       `;
       root.appendChild(style);
 
@@ -326,9 +326,9 @@
         const style = document.createElement('style');
         style.textContent = `
           .mark {
-            position: fixed; border-radius: 4px;
-            background: color-mix(in srgb, var(--accent-2) 34%, transparent);
-            box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-2) 55%, transparent);
+            position: fixed; border-radius: 2px;
+            background: rgba(0, 136, 176, 0.22);
+            box-shadow: 0 0 0 2px rgba(0, 136, 176, 0.45);
             pointer-events: none;
             transition: top .1s ease, left .1s ease, width .1s ease, height .1s ease;
           }

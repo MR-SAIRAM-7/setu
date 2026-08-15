@@ -61,39 +61,39 @@
       style.textContent = `
         .mask {
           position: fixed; left: 0; right: 0;
-          background: rgba(6, 10, 24, var(--dim, .72));
+          background: rgba(32, 30, 29, var(--dim, .55));
           pointer-events: none;
           transition: background .2s ease;
         }
         .band {
           position: fixed; left: 0; right: 0;
           pointer-events: none;
-          border-top: 2px solid color-mix(in srgb, var(--accent) 85%, transparent);
-          border-bottom: 2px solid color-mix(in srgb, var(--accent) 85%, transparent);
-          box-shadow: 0 0 22px -4px var(--accent);
+          border-top: 2px solid var(--accent);
+          border-bottom: 2px solid var(--accent);
+          background: rgba(0, 136, 176, 0.04);
         }
         .pill {
           position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
           display: flex; align-items: center; gap: 10px;
-          padding: 7px 10px 7px 14px;
-          background: var(--bg-soft); border: 1px solid var(--border);
+          padding: 6px 10px 6px 14px;
+          background: var(--surface); border: 1px solid var(--border);
           border-radius: 999px; box-shadow: var(--shadow);
-          pointer-events: auto; white-space: nowrap;
+          pointer-events: auto; white-space: nowrap; font-family: var(--font);
         }
-        .pill-label { font-size: 12px; font-weight: 700; color: var(--accent); letter-spacing: .02em; }
+        .pill-label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--accent-700); letter-spacing: .06em; }
         .sep { width: 1px; height: 16px; background: var(--border); }
         .seg { display: flex; gap: 3px; }
         .seg button {
           background: transparent; color: var(--text-dim); border: none;
-          padding: 5px 11px; border-radius: 999px;
+          padding: 4px 10px; border-radius: 999px;
           font-size: 12px; font-weight: 600; cursor: pointer;
         }
-        .seg button:hover { background: rgba(255,255,255,.09); color: var(--text); }
-        .seg button[aria-pressed="true"] { background: var(--accent); color: #0b1020; }
+        .seg button:hover { background: var(--accent-100); color: var(--accent-700); }
+        .seg button[aria-pressed="true"] { background: var(--accent); color: var(--bg); font-weight: 700; }
         .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
         .close {
           background: transparent; border: none; color: var(--text-dim);
-          font-size: 20px; line-height: 1; cursor: pointer; padding: 0 6px;
+          font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px;
         }
         .close:hover { color: var(--danger); }
       `;

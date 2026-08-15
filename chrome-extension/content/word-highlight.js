@@ -45,7 +45,7 @@
     }
 
     onSettings() {
-      this.scope?.style.setProperty('--ruler', Store.getSetting('highlightColor') || '#7c8cff');
+      this.scope?.style.setProperty('--ruler', Store.getSetting('highlightColor') || '#0088b0');
     }
 
     build() {
@@ -55,39 +55,39 @@
       style.textContent = `
         .ruler {
           position: fixed;
-          background: color-mix(in srgb, var(--ruler) 22%, transparent);
-          border-left: 3px solid var(--ruler);
-          border-radius: 5px;
+          background: rgba(0, 136, 176, 0.14);
+          border-left: 3.5px solid var(--ruler);
+          border-radius: var(--radius);
           pointer-events: none;
           opacity: 0;
           transition: opacity .15s ease, top .07s linear, left .07s linear,
                       width .07s linear, height .07s linear;
         }
         .ruler[data-visible="true"] { opacity: 1; }
-        .ruler[data-mode="word"]  { border-radius: 3px; }
-        .ruler[data-mode="block"] { border-radius: 9px; background: color-mix(in srgb, var(--ruler) 15%, transparent); }
+        .ruler[data-mode="word"]  { border-radius: 2px; }
+        .ruler[data-mode="block"] { border-radius: var(--radius); background: rgba(0, 136, 176, 0.08); }
 
         .dock {
           position: fixed; right: 18px; bottom: 96px;
-          display: flex; flex-direction: column; gap: 5px;
-          padding: 7px; background: var(--bg-soft);
-          border: 1px solid var(--border); border-radius: 13px;
-          box-shadow: var(--shadow); pointer-events: auto;
+          display: flex; flex-direction: column; gap: 4px;
+          padding: 6px; background: var(--surface);
+          border: 1px solid var(--border); border-radius: var(--radius);
+          box-shadow: var(--shadow); pointer-events: auto; font-family: var(--font);
         }
         .dock button {
-          width: 40px; height: 32px; border-radius: 8px;
+          width: 44px; height: 30px; border-radius: var(--radius);
           background: transparent; border: 1px solid transparent;
           color: var(--text-dim); font-size: 11px; font-weight: 700; cursor: pointer;
         }
-        .dock button:hover { background: rgba(255,255,255,.09); color: var(--text); }
-        .dock button[aria-pressed="true"] { background: var(--ruler); color: #0b1020; }
+        .dock button:hover { background: var(--accent-100); color: var(--accent-700); }
+        .dock button[aria-pressed="true"] { background: var(--ruler); color: var(--bg); }
         .dock button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
       `;
       root.appendChild(style);
 
       const scope = document.createElement('div');
       scope.className = 'setu-scope';
-      scope.style.setProperty('--ruler', Store.getSetting('highlightColor') || '#7c8cff');
+      scope.style.setProperty('--ruler', Store.getSetting('highlightColor') || '#0088b0');
       scope.innerHTML = `
         <div class="ruler" data-mode="line" data-visible="false"></div>
         <div class="dock" role="group" aria-label="Reading ruler mode">

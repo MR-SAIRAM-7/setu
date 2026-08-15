@@ -76,19 +76,21 @@
       :where(button, input, select, textarea) { font: inherit; color: inherit; }
 
       .setu-scope {
-        --bg:        #0b1020;
-        --bg-soft:   #151b32;
-        --surface:   #1c2340;
-        --border:    rgba(255,255,255,.14);
-        --text:      #f2f5ff;
-        --text-dim:  #a8b2d1;
-        --accent:    #7c8cff;
-        --accent-2:  #4ade80;
-        --warn:      #fbbf24;
-        --danger:    #fb7185;
-        --radius:    14px;
-        --shadow:    0 18px 48px -12px rgba(0,0,0,.65);
-        --font:      system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        --bg:        #f3f2f2;
+        --bg-soft:   #eae9e9;
+        --surface:   #ffffff;
+        --border:    rgba(32, 30, 29, 0.16);
+        --text:      #201e1d;
+        --text-dim:  rgba(32, 30, 29, 0.65);
+        --accent:    #0088b0;
+        --accent-100:#e0f4fa;
+        --accent-700:#00607d;
+        --accent-2:  #d6006c;
+        --warn:      #edbb00;
+        --danger:    #d6006c;
+        --radius:    4px;
+        --shadow:    0 8px 24px rgba(32, 30, 29, 0.12);
+        --font:      "Source Serif 4", Georgia, system-ui, -apple-system, "Segoe UI", sans-serif;
 
         font-family: var(--font);
         font-size: 14px;
@@ -108,19 +110,19 @@
         display: inline-flex; align-items: center; justify-content: center; gap: 7px;
         min-height: 36px; padding: 8px 14px;
         background: var(--surface); color: var(--text);
-        border: 1px solid var(--border); border-radius: 10px;
+        border: 1px solid var(--border); border-radius: var(--radius);
         font-size: 13px; font-weight: 600; cursor: pointer;
         transition: background .16s ease, border-color .16s ease, transform .16s ease;
       }
-      .setu-btn:hover  { background: #26304f; border-color: var(--accent); }
+      .setu-btn:hover  { background: var(--accent-100); border-color: var(--accent); color: var(--accent-700); }
       .setu-btn:active { transform: translateY(1px); }
-      .setu-btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
-      .setu-btn[data-variant="primary"] { background: var(--accent); border-color: var(--accent); color: #0b1020; }
+      .setu-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .setu-btn[data-variant="primary"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
       .setu-btn[data-variant="danger"]  { background: transparent; border-color: var(--danger); color: var(--danger); }
       .setu-btn[disabled] { opacity: .45; cursor: not-allowed; }
 
       .setu-card {
-        background: var(--bg-soft); border: 1px solid var(--border);
+        background: var(--surface); border: 1px solid var(--border);
         border-radius: var(--radius); box-shadow: var(--shadow);
       }
 
@@ -473,17 +475,17 @@
           position: fixed; bottom: 24px; left: 50%;
           transform: translateX(-50%) translateY(8px);
           display: flex; align-items: center; gap: 10px;
-          max-width: min(420px, 90vw); padding: 12px 18px;
-          background: var(--bg-soft); border: 1px solid var(--border);
-          border-left: 3px solid var(--accent);
-          border-radius: 12px; box-shadow: var(--shadow);
-          font-size: 13.5px; font-weight: 500;
+          max-width: min(420px, 90vw); padding: 10px 16px;
+          background: var(--surface); border: 1px solid var(--border);
+          border-left: 3.5px solid var(--accent);
+          border-radius: var(--radius); box-shadow: var(--shadow);
+          font-size: 13px; font-weight: 600; color: var(--text); font-family: var(--font);
           opacity: 0; transition: opacity .2s ease, transform .2s ease;
         }
         .setu-toast[data-show="true"] { opacity: 1; transform: translateX(-50%) translateY(0); }
-        .setu-toast[data-tone="success"] { border-left-color: var(--accent-2); }
+        .setu-toast[data-tone="success"] { border-left-color: var(--accent); background: var(--accent-100); color: var(--accent-700); }
         .setu-toast[data-tone="warn"]    { border-left-color: var(--warn); }
-        .setu-toast[data-tone="error"]   { border-left-color: var(--danger); }
+        .setu-toast[data-tone="error"]   { border-left-color: var(--danger); color: var(--danger); }
       `;
       root.appendChild(style);
 

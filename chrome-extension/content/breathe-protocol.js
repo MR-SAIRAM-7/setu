@@ -146,20 +146,25 @@
       style.textContent = `
         .veil {
           position: fixed; inset: 0;
-          background: rgba(6,10,24,.82);
-          backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px);
+          background: rgba(32, 30, 29, 0.45);
+          backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
           display: grid; place-items: center; pointer-events: auto;
-          animation: fade .5s ease;
+          animation: fade .4s ease;
         }
         @keyframes fade { from { opacity:0 } to { opacity:1 } }
-        .card { width: min(400px, 90vw); text-align: center; padding: 34px 30px; }
-        .orb { width:132px; height:132px; margin:0 auto 22px; position:relative; }
+        .card {
+          width: min(420px, 90vw); text-align: center; padding: 36px 30px;
+          background: var(--surface); border: 1px solid var(--border);
+          border-radius: var(--radius); box-shadow: var(--shadow);
+          font-family: var(--font); color: var(--text);
+        }
+        .orb { width:128px; height:128px; margin:0 auto 22px; position:relative; }
         .ring {
           position:absolute; inset:0; border-radius:50%;
-          border:2px solid var(--accent);
+          border:2.5px solid var(--accent);
           animation: breathe 16s ease-in-out infinite;
         }
-        .ring:nth-child(2) { animation-delay:-1.2s; opacity:.5; }
+        .ring:nth-child(2) { animation-delay:-1.2s; opacity:.4; }
         @keyframes breathe {
           0%,100% { transform:scale(.62); opacity:.55; }  /* rest */
           25%     { transform:scale(1);   opacity:1; }    /* inhale 4s */
@@ -168,12 +173,12 @@
         }
         .phase {
           position:absolute; inset:0; display:grid; place-items:center;
-          font-size:13px; font-weight:700; letter-spacing:.14em; color:var(--accent);
+          font-size:12px; font-weight:700; letter-spacing:.12em; color:var(--accent-700);
         }
-        h2 { font-size:19px; font-weight:700; margin-bottom:9px; }
-        p  { font-size:14px; color:var(--text-dim); line-height:1.6; margin-bottom:22px; }
-        .row { display:flex; gap:9px; }
-        .row .setu-btn { flex:1; }
+        h2 { font-family: "Source Serif 4", Georgia, serif; font-size:20px; font-weight:700; color: var(--text); margin-bottom:10px; }
+        p  { font-size:13.5px; color:var(--text-dim); line-height:1.6; margin-bottom:24px; }
+        .row { display:flex; gap:10px; }
+        .row .setu-btn { flex:1; min-height: 38px; }
       `;
       root.appendChild(style);
 

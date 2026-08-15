@@ -256,23 +256,24 @@
           position: fixed; inset: 0;
           display: flex; flex-direction: column;
           background: var(--page); color: var(--ink);
+          font-family: "Source Serif 4", Georgia, serif;
         }
-        .reader[data-theme="calm"]     { --page:#0f1425; --ink:#e8ecf8; --muted:#9aa5c4; --rule:rgba(255,255,255,.12); }
+        .reader[data-theme="calm"]     { --page:#f3f2f2; --ink:#201e1d; --muted:rgba(32,30,29,0.65); --rule:rgba(32,30,29,0.16); }
         .reader[data-theme="sepia"]    { --page:#f6ecd9; --ink:#3b3226; --muted:#7a6a53; --rule:rgba(0,0,0,.14); }
-        .reader[data-theme="dark"]     { --page:#000; --ink:#e6e6e6; --muted:#9a9a9a; --rule:rgba(255,255,255,.16); }
-        .reader[data-theme="contrast"] { --page:#000; --ink:#fff; --muted:#ffe600; --rule:#fff; }
+        .reader[data-theme="dark"]     { --page:#201e1d; --ink:#f3f2f2; --muted:#9a9a9a; --rule:rgba(255,255,255,.16); }
+        .reader[data-theme="contrast"] { --page:#000; --ink:#fff; --muted:#edbb00; --rule:#fff; }
 
         .progress { position:absolute; top:0; left:0; right:0; height:3px; background:transparent; z-index:2; }
         .progress-fill { height:100%; width:0; background:var(--accent); transition:width .1s linear; }
 
         .bar {
           display:flex; align-items:center; justify-content:space-between; gap:16px;
-          padding:12px 20px; border-bottom:1px solid var(--rule); flex-shrink:0;
+          padding:12px 20px; border-bottom:1px solid var(--rule); flex-shrink:0; background: var(--page);
         }
-        .brand { font-size:12px; font-weight:800; letter-spacing:.09em; color:var(--accent); }
+        .brand { font-size:12px; font-weight:800; letter-spacing:.09em; text-transform: uppercase; color:var(--accent-700); }
         .tools { display:flex; gap:7px; flex-wrap:wrap; }
-        .tools .setu-btn { min-height:32px; padding:5px 11px; font-size:12px; background:transparent; border-color:var(--rule); color:var(--ink); }
-        .tools .setu-btn:hover { background:rgba(127,127,127,.16); }
+        .tools .setu-btn { min-height:32px; padding:5px 11px; font-size:12px; background:transparent; border-color:var(--rule); color:var(--ink); border-radius: var(--radius); }
+        .tools .setu-btn:hover { background:var(--accent-100); border-color: var(--accent); color: var(--accent-700); }
 
         .surface { flex:1; overflow-y:auto; padding:48px 24px 120px; }
         .surface:focus-visible { outline:none; }
@@ -280,20 +281,20 @@
         .doc {
           --scale:1;
           max-width:min(70ch, 92vw); margin:0 auto;
-          font-size:calc(19px * var(--scale));
+          font-size:calc(18.5px * var(--scale));
           line-height:1.75; letter-spacing:.006em;
         }
-        .doc-title { font-size:calc(34px * var(--scale)); line-height:1.22; margin-bottom:28px; font-weight:800; }
+        .doc-title { font-size:calc(32px * var(--scale)); line-height:1.22; margin-bottom:28px; font-weight:700; color: var(--ink); }
         .doc :where(p, ul, ol, blockquote, figure, table, dl) { margin-bottom:1.15em; }
-        .doc :where(h1,h2,h3,h4) { margin:1.6em 0 .5em; line-height:1.3; font-weight:700; }
-        .doc h2 { font-size:calc(25px * var(--scale)); }
-        .doc h3 { font-size:calc(21px * var(--scale)); }
+        .doc :where(h1,h2,h3,h4) { margin:1.6em 0 .5em; line-height:1.3; font-weight:700; color: var(--ink); }
+        .doc h2 { font-size:calc(24px * var(--scale)); }
+        .doc h3 { font-size:calc(20px * var(--scale)); }
         .doc :where(ul,ol) { padding-left:1.4em; }
         .doc li { margin-bottom:.45em; }
         .doc a { color:var(--accent); text-underline-offset:3px; }
-        .doc img { max-width:100%; height:auto; border-radius:10px; margin:1.2em 0; }
-        .doc blockquote { border-left:3px solid var(--accent); padding-left:1em; color:var(--muted); font-style:italic; }
-        .doc pre { background:rgba(127,127,127,.14); padding:14px; border-radius:9px; overflow-x:auto; font-size:.88em; }
+        .doc img { max-width:100%; height:auto; border-radius:var(--radius); margin:1.2em 0; border: 1px solid var(--rule); }
+        .doc blockquote { border-left:3.5px solid var(--accent); padding-left:1em; color:var(--muted); font-style:italic; }
+        .doc pre { background:rgba(32,30,29,0.06); padding:14px; border-radius:var(--radius); overflow-x:auto; font-size:.88em; border: 1px solid var(--rule); }
         .doc code { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.9em; }
         .doc table { width:100%; border-collapse:collapse; display:block; overflow-x:auto; }
         .doc :where(th,td) { border:1px solid var(--rule); padding:8px 11px; text-align:left; }

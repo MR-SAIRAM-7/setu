@@ -10,14 +10,14 @@
   <header class="top">
     <div class="brand">
       <span class="mark" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
           <path d="M3 17c3-6 6-9 9-9s6 3 9 9" />
           <circle cx="12" cy="8" r="1.6" fill="currentColor" stroke="none" />
         </svg>
       </span>
       <div>
         <h1>SETU Lens</h1>
-        <p class="tag">Bridge to a calmer web</p>
+        <p class="tag">Cognitive Accessibility Tools</p>
       </div>
     </div>
     <button class="engine" id="engine" type="button" title="Engine status — click to re-check">
@@ -55,7 +55,7 @@
           <span>Explain a chart</span>
         </button>
         <button class="tile" id="act-sanctuary" type="button">
-          <span class="tile-glyph">✦</span>
+          <span class="tile-glyph">◈</span>
           <span>To Sanctuary</span>
         </button>
       </div>
@@ -117,12 +117,12 @@
     <section class="block">
       <h2 class="label">Reading theme</h2>
       <div class="themes" id="themes" role="radiogroup" aria-label="Reading theme">
-        <button data-theme="default"  role="radio" aria-checked="true"  style="--sw:#ffffff;--sf:#111" type="button"><span></span>Off</button>
+        <button data-theme="default"  role="radio" aria-checked="true"  style="--sw:#f3f2f2;--sf:#201e1d" type="button"><span></span>Off</button>
         <button data-theme="sepia"    role="radio" aria-checked="false" style="--sw:#f6ecd9;--sf:#3b3226" type="button"><span></span>Sepia</button>
-        <button data-theme="dark"     role="radio" aria-checked="false" style="--sw:#12151c;--sf:#dfe3ea" type="button"><span></span>Dark</button>
+        <button data-theme="dark"     role="radio" aria-checked="false" style="--sw:#201e1d;--sf:#f3f2f2" type="button"><span></span>Dark</button>
         <button data-theme="calm"     role="radio" aria-checked="false" style="--sw:#eef4f2;--sf:#26332f" type="button"><span></span>Calm</button>
-        <button data-theme="contrast" role="radio" aria-checked="false" style="--sw:#000000;--sf:#ffe600" type="button"><span></span>AAA</button>
-        <button data-theme="dyslexia" role="radio" aria-checked="false" style="--sw:#fffbf0;--sf:#2b2b2b" type="button"><span></span>Dyslexia</button>
+        <button data-theme="contrast" role="radio" aria-checked="false" style="--sw:#000000;--sf:#edbb00" type="button"><span></span>AAA</button>
+        <button data-theme="dyslexia" role="radio" aria-checked="false" style="--sw:#fffbf0;--sf:#201e1d" type="button"><span></span>Dyslexia</button>
       </div>
     </section>
 
@@ -162,7 +162,7 @@
 
   <footer class="bottom">
     <button class="ghost" id="act-reset" type="button">Turn everything off</button>
-    <button class="ghost" id="act-open-web" type="button">Open Sanctuary →</button>
+    <button class="ghost primary-ghost" id="act-open-web" type="button">Open Sanctuary →</button>
   </footer>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
