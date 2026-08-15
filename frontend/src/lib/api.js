@@ -74,8 +74,63 @@ async function get(path, { signal, timeoutMs = 15000 } = {}) {
   }
 }
 
+async function del(path) {
+  try {
+    const response = await fetch(url(path), {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new ApiError(data.error || `Delete failed (${response.status})`, response.status);
+    }
+    return data;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    return { success: false, error: error.message };
+  }
+}
+
+async function put(path, body) {
+  try {
+    const response = await fetch(url(path), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new ApiError(data.error || `Update failed (${response.status})`, response.status);
+    }
+    return data;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    return null;
+  }
+}
+
 /**
- * Stream a chat turn using SSE.
+ * Upload a document file (PDF, DOCX, TXT, MD, Image) using multipart/form-data.
+ */
+export async function uploadFile(file, conversationId = null) {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (conversationId) formData.append('conversationId', conversationId);
+
+  const response = await fetch(url('/api/files/upload'), {
+    method: 'POST',
+    body: formData
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new ApiError(data.error || `Upload failed (${response.status})`, response.status);
+  }
+  return data.document;
+}
+
+/**
+ * Stream a chat turn using Server-Sent Events (SSE).
  */
 export async function streamChat(payload, handlers = {}, signal) {
   const response = await fetch(url('/api/chat'), {
@@ -119,6 +174,7 @@ export async function streamChat(payload, handlers = {}, signal) {
           else if (event === 'reply') handlers.onReply?.(data);
           else if (event === 'map') handlers.onMap?.(data);
           else if (event === 'error') handlers.onError?.(data);
+          else if (event === 'done') handlers.onDone?.(data);
         }
       }
     }
@@ -146,27 +202,51 @@ export const api = {
 
   dbStatus: () => get('/api/db/status'),
 
-  mindMap: (topic, context = '') => post('/api/research/mindmap', { topic, context }),
+  // Research & Mind Maps
+  mindMap: (topic, context = '', documentId = null) =>
+    post('/api/research/mindmap', { topic, context, documentId }),
 
   expandNode: (topic, nodeLabel, nodeDetail, path = []) =>
     post('/api/research/expand', { topic, nodeLabel, nodeDetail, path }),
 
-  // MongoDB persistence endpoints
+  // MongoDB Mind Maps persistence
   listMindMaps: (search = '') => get(`/api/mindmaps?search=${encodeURIComponent(search)}`),
   saveMindMapToDb: (map) => post('/api/mindmaps', map),
-  deleteMindMapFromDb: (id) =>
-    fetch(url(`/api/mindmaps/${id}`), { method: 'DELETE' }).then((r) => r.json()),
+  deleteMindMapFromDb: (id) => del(`/api/mindmaps/${id}`),
 
+  // File Upload & Document Management
+  uploadFile,
+  listFiles: (conversationId = '') =>
+    get(`/api/files${conversationId ? `?conversationId=${conversationId}` : ''}`),
+  getFile: (id) => get(`/api/files/${id}`),
+  deleteFile: (id) => del(`/api/files/${id}`),
+  mindMapFromFile: (id) => post(`/api/files/${id}/mindmap`, {}),
+  queryFile: (id, query) => post(`/api/files/${id}/query`, { query }),
+
+  // Conversation Threads & Chat History
+  listConversations: (search = '') =>
+    get(`/api/conversations?search=${encodeURIComponent(search)}`),
+  createConversation: (data) => post('/api/conversations', data),
+  getConversation: (id) => get(`/api/conversations/${id}`),
+  updateConversation: (id, data) => put(`/api/conversations/${id}`, data),
+  deleteConversation: (id) => del(`/api/conversations/${id}`),
+  getMessages: (conversationId) => get(`/api/conversations/${conversationId}/messages`),
+  saveMessage: (conversationId, msg) =>
+    post(`/api/conversations/${conversationId}/messages`, msg),
+
+  // Summaries & Artifacts
   listSummaries: () => get('/api/summaries'),
   saveSummaryToDb: (summary) => post('/api/summaries', summary),
 
+  // Settings
   getSettingsFromDb: () => get('/api/settings'),
   saveSettingsToDb: (settings) => post('/api/settings', settings),
 
+  // General helpers
   summarize: (text) => post('/api/summarize', { text }),
   explain: (text, language = 'English') => post('/api/agent/explain', { text, language }),
 
-  // The seven cognitive modes
+  // Seven cognitive modes
   start: (task, isStuck = false) => post('/api/start', { task, isStuck }),
   simplify: (text) => post('/api/simplify', { text }),
   learn: (text) => post('/api/learn', { text }),

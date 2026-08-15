@@ -13,6 +13,16 @@ const MindMapSchema = new mongoose.Schema(
       default: 'anonymous_user',
       index: true
     },
+    conversationId: {
+      type: String,
+      default: null,
+      index: true
+    },
+    documentId: {
+      type: String,
+      default: null,
+      index: true
+    },
     title: {
       type: String,
       required: true,
@@ -48,9 +58,17 @@ const MindMapSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.Mixed,
       required: true
     },
+    nodeCount: {
+      type: Number,
+      default: 1
+    },
     isLensHandoff: {
       type: Boolean,
       default: false
+    },
+    metadata: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
     }
   },
   {

@@ -1,8 +1,10 @@
 /**
  * SETU Broadsheet Storage & Preferences Module
- *
- * Maps and reading preferences are saved in this browser by default.
- * When the backend is reachable, it automatically synchronizes with MongoDB.
+ * --------------------------------------------
+ * Resilient Multi-Tier Storage Engine:
+ *  1. Safe LocalStorage Detection (respects browser Tracking Prevention, private mode, and sandboxed iframes)
+ *  2. In-Memory Resilient Fallback (ensures smooth UI operations without throwing Tracking Prevention errors)
+ *  3. Seamless MongoDB Cloud/Local Synchronization
  */
 
 const MAPS_KEY = 'setu.maps.v1';
@@ -74,21 +76,73 @@ export const DEFAULT_WORKED_MAP = {
   updatedAt: new Date().toISOString()
 };
 
-function read(key, fallback) {
+/* -------------------------------------------------------------------------- */
+/* Safe Storage Adapter (Tracking Prevention & Private Mode Resilient)        */
+/* -------------------------------------------------------------------------- */
+
+let storageSupported = null;
+const inMemoryStore = new Map();
+
+/**
+ * Checks if browser storage is accessible without triggering repeated Tracking Prevention errors.
+ */
+function isStorageAvailable() {
+  if (storageSupported !== null) return storageSupported;
+
   try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
+    if (typeof window === 'undefined') {
+      storageSupported = false;
+      return false;
+    }
+    const testKey = '__setu_storage_probe__';
+    window.localStorage.setItem(testKey, '1');
+    window.localStorage.removeItem(testKey);
+    storageSupported = true;
+    return true;
   } catch (_) {
-    return fallback;
+    // Tracking Prevention, 3rd-party cookie blocking, sandboxed iframe, or quota reached
+    storageSupported = false;
+    return false;
   }
 }
 
+function read(key, fallback) {
+  if (isStorageAvailable()) {
+    try {
+      const raw = window.localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch (_) {
+      // Fallback to memory
+    }
+  }
+
+  if (inMemoryStore.has(key)) {
+    return inMemoryStore.get(key);
+  }
+  return fallback;
+}
+
 function write(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-    return true;
-  } catch (_) {
-    return false;
+  // Always update in-memory store for instant sync
+  inMemoryStore.set(key, value);
+
+  if (isStorageAvailable()) {
+    try {
+      window.localStorage.setItem(key, JSON.stringify(value));
+      return true;
+    } catch (_) {
+      return true; // Still preserved in-memory
+    }
+  }
+  return true;
+}
+
+function remove(key) {
+  inMemoryStore.delete(key);
+  if (isStorageAvailable()) {
+    try {
+      window.localStorage.removeItem(key);
+    } catch (_) {}
   }
 }
 
@@ -97,7 +151,6 @@ function write(key, value) {
 export function listMaps() {
   const maps = read(MAPS_KEY, null);
   if (!maps || !maps.length) {
-    // Seed initial worked example map so library and workspace are never empty!
     write(MAPS_KEY, [DEFAULT_WORKED_MAP]);
     return [DEFAULT_WORKED_MAP];
   }
@@ -133,7 +186,7 @@ export function saveMap(map) {
   const updatedMaps = [record, ...maps].slice(0, MAX_MAPS);
   write(MAPS_KEY, updatedMaps);
 
-  // Background sync with MongoDB if available
+  // Background sync with MongoDB if backend is running
   try {
     fetch('/api/mindmaps', {
       method: 'POST',
@@ -212,6 +265,7 @@ export function savePrefs(patch) {
 
 /** Reflect reading preferences onto <html> so CSS variables and fonts act globally. */
 export function applyPrefs(prefs = getPrefs()) {
+  if (typeof document === 'undefined') return;
   const root = document.documentElement;
 
   // Font classes
@@ -227,12 +281,14 @@ export function applyPrefs(prefs = getPrefs()) {
   else root.classList.add('text-normal');
 
   // Motion class
-  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (prefs.motion === 'still' || prefersReduced) {
-    root.classList.add('motion-still');
-    root.style.setProperty('scroll-behavior', 'auto');
-  } else {
-    root.classList.remove('motion-still');
-    root.style.removeProperty('scroll-behavior');
-  }
+  try {
+    const prefersReduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+    if (prefs.motion === 'still' || prefersReduced) {
+      root.classList.add('motion-still');
+      root.style.setProperty('scroll-behavior', 'auto');
+    } else {
+      root.classList.remove('motion-still');
+      root.style.removeProperty('scroll-behavior');
+    }
+  } catch (_) {}
 }

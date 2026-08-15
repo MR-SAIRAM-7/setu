@@ -85,11 +85,19 @@ export default function CommandPalette({ isOpen, onClose, currentMap, onStartFoc
       run: () => navigate('/modes?mode=meet')
     },
     {
+      id: 'do-upload',
+      group: 'Do',
+      icon: 'ph-file-arrow-up',
+      label: 'Upload a document or source file',
+      hint: 'PDF, Word, TXT, or Notes for mind maps & Q&A',
+      run: () => navigate('/mindmap')
+    },
+    {
       id: 'do-export',
       group: 'Do',
       icon: 'ph-export',
-      label: 'Export this map to Markdown',
-      hint: 'Download full outline and sources',
+      label: 'Export this map to Markdown / PDF',
+      hint: 'Download full visual outline and sources',
       run: () => onExportMap?.()
     },
 

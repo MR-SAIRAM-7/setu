@@ -50,11 +50,11 @@ export default function Settings() {
             Settings
           </h1>
           <p className="text-[15px] text-[color-mix(in_srgb,var(--color-text)_75%,transparent)]">
-            Reading preferences apply across the whole workspace and are saved on this device.
+            Reading preferences and AI engine configurations across the workspace.
           </p>
         </header>
 
-        {/* 1. Reading Section (Whitespace separated, no cards) */}
+        {/* 1. Reading Section */}
         <section className="space-y-5">
           <span className="kicker block">Reading Preferences</span>
 
@@ -153,7 +153,7 @@ export default function Settings() {
 
         {/* 2. Engine & Database Section */}
         <section className="space-y-4 pt-4 border-t border-[var(--color-divider)]">
-          <span className="kicker block">Engine & Persistence</span>
+          <span className="kicker block">Engine & OpenRouter AI Configuration</span>
 
           <dl className="space-y-2.5 text-[14px]">
             <div className="flex justify-between py-1.5 border-b border-[var(--color-divider)]">
@@ -181,12 +181,18 @@ export default function Settings() {
             </div>
 
             <div className="flex justify-between py-1.5 border-b border-[var(--color-divider)]">
-              <dt className="text-[color-mix(in_srgb,var(--color-text)_60%,transparent)]">AI Provider</dt>
+              <dt className="text-[color-mix(in_srgb,var(--color-text)_60%,transparent)]">Primary AI Engine</dt>
               <dd className="font-semibold text-right">
                 {health?.aiConfigured ? (
-                  <span className="text-[var(--color-accent-700)]">Configured (Gemini / OpenAI fallback)</span>
+                  <span className="text-[var(--color-accent-700)]">
+                    {health?.primaryProvider === 'openrouter'
+                      ? 'OpenRouter (Multi-Model Fallback Chain)'
+                      : health?.primaryProvider === 'gemini'
+                        ? 'Google Gemini Direct'
+                        : 'OpenAI Direct'}
+                  </span>
                 ) : (
-                  <span className="text-[#edbb00]">Set GEMINI_API_KEY in .env</span>
+                  <span className="text-[#edbb00]">Set OPENROUTER_API_KEY in .env</span>
                 )}
               </dd>
             </div>
@@ -248,10 +254,10 @@ export default function Settings() {
 
         {/* 4. Your Data Section */}
         <section className="space-y-3 pt-4 border-t border-[var(--color-divider)]">
-          <span className="kicker kicker-magenta block">Your Data</span>
+          <span className="kicker kicker-magenta block">Your Data & Storage</span>
           <p className="text-[14.5px] leading-relaxed text-[color-mix(in_srgb,var(--color-text)_75%,transparent)]">
-            {mapsCount} map{mapsCount === 1 ? '' : 's'} stored in this browser. Nothing is uploaded
-            to third-party tracking services. Clearing your browser data removes them.
+            {mapsCount} mind map{mapsCount === 1 ? '' : 's'} stored. When connected to MongoDB,
+            your library automatically synchronizes across sessions with full privacy.
           </p>
           <button
             onClick={handleDeleteAll}

@@ -1,19 +1,41 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import MindMap from '../components/MindMap';
+import FileUploadModal from '../components/FileUploadModal';
 import { listMaps, deleteMap, saveMap } from '../lib/storage';
+import { api } from '../lib/api';
+import { exportMindMapToPDF } from '../lib/exportUtils';
 
 export default function Library() {
+  const [activeTab, setActiveTab] = useState('maps'); // 'maps' | 'files'
   const [maps, setMaps] = useState([]);
+  const [files, setFiles] = useState([]);
   const [openId, setOpenId] = useState(null);
   const [query, setQuery] = useState('');
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [loadingFiles, setLoadingFiles] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
     setMaps(listMaps());
+    loadFiles();
   }, []);
 
-  const filtered = useMemo(() => {
+  const loadFiles = async () => {
+    setLoadingFiles(true);
+    try {
+      const res = await api.listFiles();
+      if (res?.files) {
+        setFiles(res.files);
+      }
+    } catch (_) {
+      // Fallback
+    } finally {
+      setLoadingFiles(false);
+    }
+  };
+
+  const filteredMaps = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return maps;
     return maps.filter(
@@ -21,6 +43,16 @@ export default function Library() {
         m.title.toLowerCase().includes(needle) || (m.summary || '').toLowerCase().includes(needle)
     );
   }, [maps, query]);
+
+  const filteredFiles = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return files;
+    return files.filter(
+      (f) =>
+        (f.originalName || '').toLowerCase().includes(needle) ||
+        (f.summary || '').toLowerCase().includes(needle)
+    );
+  }, [files, query]);
 
   const openMap = maps.find((m) => m.id === openId);
 
@@ -31,9 +63,29 @@ export default function Library() {
     if (openId === id) setOpenId(null);
   };
 
+  const removeFile = async (e, id) => {
+    e.stopPropagation();
+    try {
+      await api.deleteFile(id);
+      setFiles((prev) => prev.filter((f) => f.id !== id));
+    } catch (_) {}
+  };
+
+  const handleMindMapFromFile = async (file) => {
+    try {
+      const freshMap = await api.mindMapFromFile(file.id);
+      saveMap(freshMap);
+      setMaps(listMaps());
+      setOpenId(freshMap.id);
+      setActiveTab('maps');
+    } catch (err) {
+      alert(`Could not build mind map: ${err.message}`);
+    }
+  };
+
   if (openMap) {
     return (
-      <div className="flex h-full flex-col gap-3 p-4 sm:p-6 bg-[var(--color-bg)]">
+      <div className="flex h-full flex-col gap-3 p-4 sm:p-6 bg-[var(--color-bg)] text-left">
         <header className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-divider)] shadow-[var(--shadow-sm)]">
           <div className="flex items-center gap-3 min-w-0">
             <button
@@ -52,13 +104,22 @@ export default function Library() {
               </p>
             </div>
           </div>
-          <button
-            onClick={() => navigate('/mindmap')}
-            className="btn btn-primary !min-h-[32px] text-[12.5px]"
-          >
-            <i className="ph-duotone ph-plus"></i>
-            Ask a new topic
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => exportMindMapToPDF(openMap)}
+              className="btn btn-secondary !min-h-[32px] text-[12px]"
+            >
+              <i className="ph-duotone ph-file-pdf"></i>
+              Export PDF
+            </button>
+            <button
+              onClick={() => navigate('/mindmap')}
+              className="btn btn-primary !min-h-[32px] text-[12.5px]"
+            >
+              <i className="ph-duotone ph-plus"></i>
+              Ask a new topic
+            </button>
+          </div>
         </header>
 
         <div className="flex-1 min-h-[350px]">
@@ -77,99 +138,259 @@ export default function Library() {
   return (
     <div className="h-full overflow-y-auto p-6 sm:p-10 bg-[var(--color-bg)] text-left">
       <div className="max-w-[1180px] mx-auto space-y-6">
-        <header className="space-y-1.5">
-          <h1 className="text-3xl sm:text-[34px] font-bold text-[var(--color-text)]">
-            Your library
-          </h1>
-          <p className="text-[15px] text-[color-mix(in_srgb,var(--color-text)_75%,transparent)] max-w-2xl">
-            Every map you've made, saved on this device. Nothing is uploaded — clearing your browser
-            data is the only thing that removes them.
-          </p>
+        {/* Page Header */}
+        <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <h1 className="text-3xl sm:text-[34px] font-bold text-[var(--color-text)]">
+              Your Library
+            </h1>
+            <p className="text-[14.5px] text-[color-mix(in_srgb,var(--color-text)_75%,transparent)] max-w-2xl">
+              All your visual mind maps, research notes, and uploaded source documents saved securely.
+            </p>
+          </div>
+          <button
+            onClick={() => setUploadModalOpen(true)}
+            className="btn btn-primary text-xs font-semibold py-2 self-start sm:self-auto"
+          >
+            <i className="ph-duotone ph-cloud-arrow-up text-base"></i>
+            Upload Source File
+          </button>
         </header>
 
-        {maps.length > 0 && (
-          <div className="max-w-[380px]">
+        {/* Tabs & Search Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--color-divider)] pb-3">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setActiveTab('maps')}
+              className={`btn !min-h-[34px] !px-3.5 text-xs font-semibold ${
+                activeTab === 'maps' ? 'btn-primary' : 'btn-ghost'
+              }`}
+            >
+              <i className="ph-duotone ph-graph"></i>
+              Mind Maps ({maps.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('files')}
+              className={`btn !min-h-[34px] !px-3.5 text-xs font-semibold ${
+                activeTab === 'files' ? 'btn-primary' : 'btn-ghost'
+              }`}
+            >
+              <i className="ph-duotone ph-file-text"></i>
+              Uploaded Documents ({files.length})
+            </button>
+          </div>
+
+          <div className="w-full sm:w-72">
             <input
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search your maps…"
-              className="input text-[14px]"
-              aria-label="Search maps"
+              placeholder={activeTab === 'maps' ? 'Search mind maps…' : 'Search documents…'}
+              className="input text-[13.5px] !min-h-[36px]"
+              aria-label="Search library"
             />
           </div>
+        </div>
+
+        {/* -------------------- Mind Maps Tab -------------------- */}
+        {activeTab === 'maps' && (
+          <>
+            {filteredMaps.length === 0 ? (
+              <div className="p-12 text-center bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-divider)]">
+                <div className="max-w-md mx-auto space-y-3">
+                  <i className="ph-duotone ph-books text-4xl text-[var(--color-accent)]"></i>
+                  <h2 className="text-xl font-bold text-[var(--color-text)]">
+                    {maps.length ? 'Nothing matches that search' : 'No mind maps yet'}
+                  </h2>
+                  <p className="text-[14px] text-[color-mix(in_srgb,var(--color-text)_70%,transparent)]">
+                    {maps.length
+                      ? 'Try a different word or topic title.'
+                      : 'Ask about any topic on the Mind Map page or upload a document to build your first map.'}
+                  </p>
+                  {!maps.length && (
+                    <button
+                      onClick={() => navigate('/mindmap')}
+                      className="btn btn-primary text-sm font-semibold mt-2"
+                    >
+                      Make your first map
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredMaps.map((m) => (
+                  <article
+                    key={m.id}
+                    onClick={() => setOpenId(m.id)}
+                    className="card elev-sm p-4 flex flex-col justify-between hover:shadow-[var(--shadow-md)] cursor-pointer group transition-all duration-150 border border-[var(--color-divider)] hover:border-[var(--color-accent)]"
+                  >
+                    <div className="space-y-2">
+                      <span className="kicker block text-[10.5px]">
+                        {m.isLensHandoff
+                          ? 'Sent from Lens'
+                          : new Date(m.updatedAt || m.createdAt).toLocaleDateString(undefined, {
+                              month: 'short',
+                              day: 'numeric',
+                              year: 'numeric'
+                            })}
+                      </span>
+                      <h2 className="text-[16px] font-bold text-[var(--color-text)] leading-snug group-hover:text-[var(--color-accent-700)] transition-colors">
+                        {m.title}
+                      </h2>
+                      <p className="text-[13px] text-[color-mix(in_srgb,var(--color-text)_70%,transparent)] line-clamp-3 leading-relaxed">
+                        {m.summary}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-3 mt-4 border-t border-[var(--color-divider)]">
+                      <span className="tag tag-neutral text-[11px]">
+                        {countNodes(m.root)} topics
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            exportMindMapToPDF(m);
+                          }}
+                          className="btn btn-quiet !min-h-[26px] !px-2 text-[11px]"
+                          title="Export PDF"
+                        >
+                          <i className="ph-duotone ph-file-pdf"></i>
+                        </button>
+                        <button
+                          onClick={(e) => removeMap(e, m.id)}
+                          className="btn btn-quiet !min-h-[26px] !px-2 text-[11.5px] hover:!text-[var(--color-accent-2-700)]"
+                          title="Delete map"
+                        >
+                          Delete
+                        </button>
+                        <span className="btn btn-ghost !min-h-[26px] !px-2.5 text-[11.5px]">
+                          Open
+                        </span>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </>
         )}
 
-        {filtered.length === 0 ? (
-          <div className="p-12 text-center bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-divider)]">
-            <div className="max-w-md mx-auto space-y-3">
-              <i className="ph-duotone ph-books text-4xl text-[var(--color-accent)]"></i>
-              <h2 className="text-xl font-bold text-[var(--color-text)]">
-                {maps.length ? 'Nothing matches that search' : 'No maps yet'}
-              </h2>
-              <p className="text-[14px] text-[color-mix(in_srgb,var(--color-text)_70%,transparent)]">
-                {maps.length
-                  ? 'Try a different word or topic title.'
-                  : 'Ask about any topic on the Mind Map page and it will be saved here automatically.'}
-              </p>
-              {!maps.length && (
-                <button
-                  onClick={() => navigate('/mindmap')}
-                  className="btn btn-primary text-sm font-semibold mt-2"
-                >
-                  Make your first map
-                </button>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map((m) => (
-              <article
-                key={m.id}
-                onClick={() => setOpenId(m.id)}
-                className="card elev-sm p-4 flex flex-col justify-between hover:shadow-[var(--shadow-md)] cursor-pointer group transition-all duration-150 border border-[var(--color-divider)] hover:border-[var(--color-accent)]"
-              >
-                <div className="space-y-2">
-                  <span className="kicker block text-[10.5px]">
-                    {m.isLensHandoff
-                      ? 'Sent from Lens'
-                      : new Date(m.updatedAt || m.createdAt).toLocaleDateString(undefined, {
-                          month: 'short',
-                          day: 'numeric',
-                          year: 'numeric'
-                        })}
-                  </span>
-                  <h2 className="text-[16px] font-bold text-[var(--color-text)] leading-snug group-hover:text-[var(--color-accent-700)] transition-colors">
-                    {m.title}
+        {/* -------------------- Uploaded Documents Tab -------------------- */}
+        {activeTab === 'files' && (
+          <>
+            {filteredFiles.length === 0 ? (
+              <div className="p-12 text-center bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-divider)]">
+                <div className="max-w-md mx-auto space-y-3">
+                  <i className="ph-duotone ph-file-arrow-up text-4xl text-[var(--color-accent)]"></i>
+                  <h2 className="text-xl font-bold text-[var(--color-text)]">
+                    {files.length ? 'No documents match that search' : 'No uploaded files yet'}
                   </h2>
-                  <p className="text-[13px] text-[color-mix(in_srgb,var(--color-text)_70%,transparent)] line-clamp-3 leading-relaxed">
-                    {m.summary}
+                  <p className="text-[14px] text-[color-mix(in_srgb,var(--color-text)_70%,transparent)]">
+                    Upload your PDF, Word documents, research papers, or image notes. The AI agent
+                    will extract content, generate mind maps, and answer questions.
                   </p>
+                  <button
+                    onClick={() => setUploadModalOpen(true)}
+                    className="btn btn-primary text-sm font-semibold mt-2"
+                  >
+                    Upload your first document
+                  </button>
                 </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredFiles.map((file) => (
+                  <article
+                    key={file.id}
+                    className="card elev-sm p-4 flex flex-col justify-between hover:shadow-[var(--shadow-md)] transition-all duration-150 border border-[var(--color-divider)] hover:border-[var(--color-accent)]"
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="tag tag-accent text-[10.5px]">
+                          {file.mimeType?.includes('pdf')
+                            ? 'PDF'
+                            : file.mimeType?.includes('word') || file.originalName?.endsWith('.docx')
+                              ? 'DOCX'
+                              : file.mimeType?.startsWith('image')
+                                ? 'IMAGE'
+                                : 'TEXT'}
+                        </span>
+                        <span className="text-[11px] text-[color-mix(in_srgb,var(--color-text)_55%,transparent)]">
+                          {new Date(file.createdAt).toLocaleDateString(undefined, {
+                            month: 'short',
+                            day: 'numeric'
+                          })}
+                        </span>
+                      </div>
 
-                <div className="flex items-center justify-between pt-3 mt-4 border-t border-[var(--color-divider)]">
-                  <span className="tag tag-neutral text-[11px]">
-                    {countNodes(m.root)} topics
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={(e) => removeMap(e, m.id)}
-                      className="btn btn-quiet !min-h-[26px] !px-2 text-[11.5px] hover:!text-[var(--color-accent-2-700)]"
-                      title="Delete map"
-                    >
-                      Delete
-                    </button>
-                    <span className="btn btn-ghost !min-h-[26px] !px-2.5 text-[11.5px]">
-                      Open
-                    </span>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
+                      <h2 className="text-[16px] font-bold text-[var(--color-text)] leading-snug truncate">
+                        {file.originalName}
+                      </h2>
+
+                      <p className="text-[13px] text-[color-mix(in_srgb,var(--color-text)_70%,transparent)] line-clamp-3 leading-relaxed">
+                        {file.summary || 'Uploaded document ready for cognitive analysis.'}
+                      </p>
+                    </div>
+
+                    <div className="space-y-2 pt-3 mt-4 border-t border-[var(--color-divider)]">
+                      <div className="flex items-center gap-2 text-[11px] text-[color-mix(in_srgb,var(--color-text)_60%,transparent)]">
+                        <span>{file.pageCount || 1} pgs</span>
+                        <span>·</span>
+                        <span>{Math.round((file.size || 0) / 1024)} KB</span>
+                        <span>·</span>
+                        <span>~{file.tokenCount || 0} tokens</span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-1.5 pt-1">
+                        <button
+                          onClick={() => handleMindMapFromFile(file)}
+                          className="btn btn-secondary !min-h-[26px] !px-2 text-[11px]"
+                          title="Generate Mind Map"
+                        >
+                          <i className="ph-duotone ph-graph"></i>
+                          Map
+                        </button>
+                        <button
+                          onClick={() => navigate(`/mindmap?topic=Query file: ${file.originalName}`)}
+                          className="btn btn-primary !min-h-[26px] !px-2 text-[11px]"
+                          title="Chat with Document"
+                        >
+                          <i className="ph-duotone ph-chats-circle"></i>
+                          Query
+                        </button>
+                        <button
+                          onClick={(e) => removeFile(e, file.id)}
+                          className="btn btn-quiet !min-h-[26px] !px-1.5 text-[11px] hover:!text-[var(--color-accent-2-700)]"
+                          title="Delete document"
+                        >
+                          <i className="ph-duotone ph-trash"></i>
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
+
+      {/* File Upload Modal */}
+      <FileUploadModal
+        isOpen={uploadModalOpen}
+        onClose={() => {
+          setUploadModalOpen(false);
+          loadFiles();
+        }}
+        onMindMapGenerated={(freshMap) => {
+          saveMap(freshMap);
+          setMaps(listMaps());
+          setOpenId(freshMap.id);
+          setActiveTab('maps');
+        }}
+      />
     </div>
   );
 }

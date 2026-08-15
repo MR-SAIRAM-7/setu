@@ -1,8 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import MindMap from '../components/MindMap';
+import FileUploadModal from '../components/FileUploadModal';
 import { streamChat, api } from '../lib/api';
 import { saveMap, listMaps, DEFAULT_WORKED_MAP } from '../lib/storage';
+import {
+  exportMindMapToPDF,
+  exportMindMapToPNG,
+  exportMindMapToSVG,
+  exportMindMapToMarkdown,
+  exportMindMapToJSON
+} from '../lib/exportUtils';
 
 const SUGGESTIONS = [
   'How does a transformer neural network work?',
@@ -11,6 +19,16 @@ const SUGGESTIONS = [
   'The causes of the French Revolution',
   'How does compound interest build wealth?'
 ];
+
+function normalizeMessageContent(content) {
+  if (typeof content === 'string') return content;
+  if (typeof content === 'number' || typeof content === 'boolean') return String(content);
+  if (content && typeof content === 'object') {
+    if (typeof content.text === 'string') return content.text;
+    if (typeof content.message === 'string') return content.message;
+  }
+  return '';
+}
 
 export default function MindMapChat() {
   const [messages, setMessages] = useState([]);
@@ -22,6 +40,10 @@ export default function MindMapChat() {
   const [detail, setDetail] = useState(null);
   const [showChat, setShowChat] = useState(true);
   const [handoffBanner, setHandoffBanner] = useState(null);
+  const [attachedDoc, setAttachedDoc] = useState(null);
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [conversationId, setConversationId] = useState(() => `conv_${Date.now()}`);
 
   const abortRef = useRef(null);
   const logRef = useRef(null);
@@ -109,7 +131,7 @@ export default function MindMapChat() {
       setInput('');
       setError(null);
       setBusy(true);
-      setStatus('Reading around the topic…');
+      setStatus(attachedDoc ? `Analyzing "${attachedDoc.originalName}"…` : 'Reading around the topic…');
 
       const history = [...messages, { role: 'user', content: text }];
       setMessages(history);
@@ -121,12 +143,30 @@ export default function MindMapChat() {
         await streamChat(
           {
             messages: history.map(({ role, content }) => ({ role, content })),
+            conversationId,
+            documentId: attachedDoc?.id || null,
             map: map ? { title: map.title, summary: map.summary, root: map.root } : null
           },
           {
             onStatus: (update) => setStatus(update.message || update.stage),
             onReply: (reply) =>
-              setMessages((current) => [...current, { role: 'assistant', content: reply.text }]),
+              setMessages((current) => {
+                const replyText = normalizeMessageContent(
+                  reply?.text ?? reply?.message ?? reply?.content
+                ).trim();
+                if (!replyText) return current;
+
+                if (reply.final) {
+                  // Replace the latest assistant placeholder, or append when none exists.
+                  const last = current[current.length - 1];
+                  if (last?.role === 'assistant') {
+                    const next = [...current];
+                    next[next.length - 1] = { ...last, content: replyText };
+                    return next;
+                  }
+                }
+                return [...current, { role: 'assistant', content: replyText }];
+              }),
             onMap: (fresh) => {
               setMap(fresh);
               setDetail(null);
@@ -136,7 +176,10 @@ export default function MindMapChat() {
                 { role: 'assistant', content: `Here's your map of **${fresh.title}**.` }
               ]);
             },
-            onError: (payload) => setError(payload.message)
+            onError: (payload) => setError(payload.message),
+            onDone: (data) => {
+              if (data.conversationId) setConversationId(data.conversationId);
+            }
           },
           controller.signal
         );
@@ -153,7 +196,7 @@ export default function MindMapChat() {
         abortRef.current = null;
       }
     },
-    [input, busy, messages, map]
+    [input, busy, messages, map, attachedDoc, conversationId]
   );
 
   const stop = () => {
@@ -169,7 +212,57 @@ export default function MindMapChat() {
     setDetail(null);
     setError(null);
     setHandoffBanner(null);
+    setAttachedDoc(null);
+    setConversationId(`conv_${Date.now()}`);
     inputRef.current?.focus();
+  };
+
+  const handleMindMapFromFile = (freshMap) => {
+    setMap(freshMap);
+    setDetail(null);
+    saveMap(freshMap);
+    setMessages([
+      {
+        role: 'user',
+        content: `Created mind map from file: ${freshMap.title}`
+      },
+      {
+        role: 'assistant',
+        content: `I analyzed your uploaded source and generated the interactive visual mind map on the right. You can ask follow-up questions or explore any branch.`
+      }
+    ]);
+  };
+
+  const handleExportPDF = () => {
+    if (!map) return;
+    exportMindMapToPDF(map);
+    setExportMenuOpen(false);
+  };
+
+  const handleExportPNG = () => {
+    const el = document.getElementById('mindmap-canvas-container');
+    if (!el || !map) return;
+    exportMindMapToPNG(el, map.title);
+    setExportMenuOpen(false);
+  };
+
+  const handleExportSVG = () => {
+    const svg = document.getElementById('mindmap-canvas-svg');
+    if (!svg || !map) return;
+    exportMindMapToSVG(svg, map.title);
+    setExportMenuOpen(false);
+  };
+
+  const handleExportMarkdown = () => {
+    if (!map) return;
+    exportMindMapToMarkdown(map);
+    setExportMenuOpen(false);
+  };
+
+  const handleExportJSON = () => {
+    if (!map) return;
+    exportMindMapToJSON(map);
+    setExportMenuOpen(false);
   };
 
   return (
@@ -188,16 +281,24 @@ export default function MindMapChat() {
               <div>
                 <h1 className="text-[20px] font-bold text-[var(--color-text)]">Ask anything</h1>
                 <p className="text-[12px] text-[color-mix(in_srgb,var(--color-text)_58%,transparent)]">
-                  I'll research it and lay it out as a map
+                  Research topics or upload your own files
                 </p>
               </div>
               <div className="flex items-center gap-1.5">
                 <button
+                  onClick={() => setUploadModalOpen(true)}
+                  className="btn btn-secondary !min-h-[30px] !px-2.5 text-[12px]"
+                  title="Upload PDF, DOCX, or Notes"
+                >
+                  <i className="ph-duotone ph-file-arrow-up"></i>
+                  Upload
+                </button>
+                <button
                   onClick={startNewMap}
-                  className="btn btn-ghost !min-h-[30px] !px-2.5 text-[12px]"
+                  className="btn btn-ghost !min-h-[30px] !px-2 text-[12px]"
                   title="Start a new map"
                 >
-                  New map
+                  New
                 </button>
                 <button
                   onClick={() => setShowChat(false)}
@@ -246,6 +347,30 @@ export default function MindMapChat() {
               </div>
             )}
 
+            {/* Attached Document Banner */}
+            {attachedDoc && (
+              <div className="mx-4 mt-3 p-2.5 bg-[var(--color-surface)] border border-[var(--color-accent)] rounded-[var(--radius-md)] flex items-center justify-between gap-2.5 text-left animate-setu-rise">
+                <div className="flex items-center gap-2 min-w-0">
+                  <i className="ph-duotone ph-paperclip text-lg text-[var(--color-accent)] shrink-0"></i>
+                  <div className="min-w-0">
+                    <p className="text-[12.5px] font-semibold text-[var(--color-text)] truncate">
+                      {attachedDoc.originalName}
+                    </p>
+                    <span className="text-[10.5px] text-[color-mix(in_srgb,var(--color-text)_60%,transparent)]">
+                      Grounded document query active
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setAttachedDoc(null)}
+                  className="btn btn-quiet !min-h-[24px] !px-1.5 text-[11px]"
+                  title="Detach file"
+                >
+                  <i className="ph-duotone ph-x"></i>
+                </button>
+              </div>
+            )}
+
             {/* Transcript Area */}
             <div
               ref={logRef}
@@ -256,9 +381,9 @@ export default function MindMapChat() {
               {messages.length === 0 && !busy && (
                 <div className="space-y-4 py-2">
                   <p className="text-[14.5px] leading-relaxed text-[color-mix(in_srgb,var(--color-text)_80%,transparent)]">
-                    Name any complex topic. SETU researches it and organizes it into an interactive
-                    visual hierarchy.
+                    Name any complex topic or upload a file (PDF, Word, TXT, Notes). SETU researches it and organizes it into an interactive visual hierarchy.
                   </p>
+
                   <div className="space-y-2 pt-2">
                     <span className="kicker block">Try an example</span>
                     {SUGGESTIONS.map((suggestion) => (
@@ -271,14 +396,29 @@ export default function MindMapChat() {
                       </button>
                     ))}
                   </div>
+
+                  <div className="p-3 bg-[var(--color-surface)] rounded-[var(--radius-md)] border border-[var(--color-divider)] space-y-2">
+                    <span className="kicker block">Upload your own source</span>
+                    <button
+                      onClick={() => setUploadModalOpen(true)}
+                      className="w-full btn btn-secondary text-xs flex items-center justify-center gap-2 py-2"
+                    >
+                      <i className="ph-duotone ph-cloud-arrow-up text-base"></i>
+                      Upload PDF or Document
+                    </button>
+                  </div>
                 </div>
               )}
 
               {messages.map((message, index) => (
-                <MessageItem key={index} role={message.role} content={message.content} />
+                <MessageItem
+                  key={index}
+                  role={message?.role || 'assistant'}
+                  content={normalizeMessageContent(message?.content)}
+                />
               ))}
 
-              {/* 3-Stage Progress Lines (Never a dead panel) */}
+              {/* 3-Stage Progress Lines */}
               {busy && <StagedProgress status={status} />}
 
               {error && (
@@ -311,12 +451,28 @@ export default function MindMapChat() {
               }}
               className="flex items-center gap-2 p-3 border-t border-[var(--color-divider)] bg-[var(--color-bg)]"
             >
+              <button
+                type="button"
+                onClick={() => setUploadModalOpen(true)}
+                className="btn btn-ghost min-h-[44px] px-2.5 text-[var(--color-accent)]"
+                title="Upload or attach document"
+                aria-label="Upload document"
+              >
+                <i className="ph-duotone ph-paperclip text-lg"></i>
+              </button>
+
               <input
                 ref={inputRef}
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder={map ? 'Ask a follow-up, or name a new topic…' : 'Name any topic…'}
+                placeholder={
+                  attachedDoc
+                    ? `Ask anything about ${attachedDoc.originalName}…`
+                    : map
+                      ? 'Ask a follow-up or name a new topic…'
+                      : 'Name any topic or ask a question…'
+                }
                 className="input min-h-[44px] text-[14px]"
                 aria-label="Message prompt"
                 disabled={busy}
@@ -352,8 +508,8 @@ export default function MindMapChat() {
       >
         {map ? (
           <>
-            {/* Map Header with flex-wrap and 1 1 260px basis */}
-            <header className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-divider)] shadow-[var(--shadow-sm)]">
+            {/* Map Header with flex-wrap and export dropdown */}
+            <header className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-divider)] shadow-[var(--shadow-sm)] relative">
               <div className="flex-1 basis-[260px] min-w-0 text-left">
                 <h2 className="text-[19px] sm:text-[22px] font-bold text-[var(--color-text)] truncate leading-tight">
                   {map.title}
@@ -371,17 +527,64 @@ export default function MindMapChat() {
                     {map.sources?.length || 0} web sources
                   </span>
                 ) : (
-                  <span className="tag tag-neutral" title="Built from verified model knowledge">
-                    model knowledge
+                  <span className="tag tag-neutral" title="Verified knowledge synthesis">
+                    verified synthesis
                   </span>
                 )}
-                <button
-                  onClick={() => downloadMarkdown(map)}
-                  className="btn btn-secondary !min-h-[32px] !px-3 text-[12.5px]"
-                >
-                  <i className="ph-duotone ph-export"></i>
-                  Export
-                </button>
+
+                {/* Visual Export Menu */}
+                <div className="relative">
+                  <button
+                    onClick={() => setExportMenuOpen((prev) => !prev)}
+                    className="btn btn-secondary !min-h-[32px] !px-3 text-[12.5px] flex items-center gap-1.5"
+                    aria-label="Export mind map options"
+                  >
+                    <i className="ph-duotone ph-export"></i>
+                    Export Visual
+                    <i className="ph-duotone ph-caret-down text-xs"></i>
+                  </button>
+
+                  {exportMenuOpen && (
+                    <div className="absolute right-0 top-full mt-1.5 w-48 rounded-[var(--radius-md)] bg-[var(--color-bg)] border border-[var(--color-divider)] shadow-xl py-1.5 z-50 text-left animate-setu-rise">
+                      <button
+                        onClick={handleExportPDF}
+                        className="w-full px-3.5 py-2 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface)] hover:text-[var(--color-accent)] flex items-center gap-2.5 transition-colors cursor-pointer bg-transparent border-0"
+                      >
+                        <i className="ph-duotone ph-file-pdf text-base text-[var(--color-accent-2)]"></i>
+                        Visual PDF Document
+                      </button>
+                      <button
+                        onClick={handleExportPNG}
+                        className="w-full px-3.5 py-2 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface)] hover:text-[var(--color-accent)] flex items-center gap-2.5 transition-colors cursor-pointer bg-transparent border-0"
+                      >
+                        <i className="ph-duotone ph-image text-base text-[var(--color-accent)]"></i>
+                        High-Res Image (PNG)
+                      </button>
+                      <button
+                        onClick={handleExportSVG}
+                        className="w-full px-3.5 py-2 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface)] hover:text-[var(--color-accent)] flex items-center gap-2.5 transition-colors cursor-pointer bg-transparent border-0"
+                      >
+                        <i className="ph-duotone ph-bezier-curve text-base text-[#0088b0]"></i>
+                        Vector Graphic (SVG)
+                      </button>
+                      <div className="my-1 h-px bg-[var(--color-divider)]" />
+                      <button
+                        onClick={handleExportMarkdown}
+                        className="w-full px-3.5 py-2 text-xs text-[color-mix(in_srgb,var(--color-text)_80%,transparent)] hover:bg-[var(--color-surface)] flex items-center gap-2.5 transition-colors cursor-pointer bg-transparent border-0"
+                      >
+                        <i className="ph-duotone ph-file-text text-base"></i>
+                        Markdown Outline
+                      </button>
+                      <button
+                        onClick={handleExportJSON}
+                        className="w-full px-3.5 py-2 text-xs text-[color-mix(in_srgb,var(--color-text)_80%,transparent)] hover:bg-[var(--color-surface)] flex items-center gap-2.5 transition-colors cursor-pointer bg-transparent border-0"
+                      >
+                        <i className="ph-duotone ph-code text-base"></i>
+                        JSON Data Schema
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </header>
 
@@ -441,9 +644,26 @@ export default function MindMapChat() {
             )}
           </>
         ) : (
-          <EmptyCanvas busy={busy} status={status} onStart={() => inputRef.current?.focus()} />
+          <EmptyCanvas
+            busy={busy}
+            status={status}
+            onStart={() => inputRef.current?.focus()}
+            onUpload={() => setUploadModalOpen(true)}
+          />
         )}
       </section>
+
+      {/* File Upload Modal */}
+      <FileUploadModal
+        isOpen={uploadModalOpen}
+        onClose={() => setUploadModalOpen(false)}
+        conversationId={conversationId}
+        onMindMapGenerated={handleMindMapFromFile}
+        onFileAttached={(doc) => {
+          setAttachedDoc(doc);
+          inputRef.current?.focus();
+        }}
+      />
     </div>
   );
 }
@@ -452,9 +672,11 @@ export default function MindMapChat() {
 
 function MessageItem({ role, content }) {
   const isUser = role === 'user';
+  const safeContent = normalizeMessageContent(content);
 
-  // Render markdown bold highlights
-  const parts = content.split(/(\*\*[^*]+\*\*)/g).map((part, index) =>
+  if (!safeContent) return null;
+
+  const parts = safeContent.split(/(\*\*[^*]+\*\*)/g).map((part, index) =>
     part.startsWith('**') && part.endsWith('**') ? (
       <strong key={index} className="font-semibold text-[var(--color-text)]">
         {part.slice(2, -2)}
@@ -475,13 +697,12 @@ function MessageItem({ role, content }) {
             borderRadius: 'var(--radius-lg) var(--radius-lg) 2px var(--radius-lg)'
           }}
         >
-          {content}
+          {safeContent}
         </div>
       </div>
     );
   }
 
-  // Assistant messages are plain text at 84% ink — NOT bubbles!
   return (
     <div className="flex justify-start animate-setu-rise">
       <div className="text-[15px] leading-relaxed text-[color-mix(in_srgb,var(--color-text)_84%,transparent)] max-w-[95%]">
@@ -507,7 +728,7 @@ function StagedProgress({ status }) {
         }`}
       >
         <i className="ph-duotone ph-book-open text-base"></i>
-        <span>Reading around the topic</span>
+        <span>{status || 'Reading around the topic'}</span>
       </div>
       <div
         className={`flex items-center gap-2.5 text-[13px] ${
@@ -517,7 +738,7 @@ function StagedProgress({ status }) {
         }`}
       >
         <i className="ph-duotone ph-tree-structure text-base"></i>
-        <span>Finding the branches</span>
+        <span>Structuring branches</span>
       </div>
       <div
         className={`flex items-center gap-2.5 text-[13px] ${
@@ -527,7 +748,7 @@ function StagedProgress({ status }) {
         }`}
       >
         <i className="ph-duotone ph-pen-nib text-base"></i>
-        <span>Drawing your map</span>
+        <span>Laying out visual map</span>
       </div>
     </div>
   );
@@ -535,7 +756,7 @@ function StagedProgress({ status }) {
 
 /* ------------------------------ Empty Canvas ------------------------------ */
 
-function EmptyCanvas({ busy, status, onStart }) {
+function EmptyCanvas({ busy, status, onStart, onUpload }) {
   return (
     <div className="flex h-full w-full items-center justify-center p-8 text-center bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-divider)]">
       <div className="max-w-md space-y-4">
@@ -549,52 +770,26 @@ function EmptyCanvas({ busy, status, onStart }) {
           <p className="text-[14.5px] leading-relaxed text-[color-mix(in_srgb,var(--color-text)_70%,transparent)]">
             {busy
               ? 'Exploring verified references and mapping out clear cognitive branches.'
-              : 'Type any question on the left or try an example suggestion to generate an interactive map.'}
+              : 'Type any question on the left, try an example, or upload a source document.'}
           </p>
         </div>
         {!busy && (
-          <button onClick={onStart} className="btn btn-primary text-sm font-semibold mt-2">
-            Ask a question
-          </button>
+          <div className="flex items-center justify-center gap-2.5 pt-2">
+            <button onClick={onStart} className="btn btn-primary text-sm font-semibold">
+              Ask a question
+            </button>
+            <button onClick={onUpload} className="btn btn-secondary text-sm font-semibold">
+              <i className="ph-duotone ph-file-arrow-up"></i>
+              Upload file
+            </button>
+          </div>
         )}
       </div>
     </div>
   );
 }
 
-/* ------------------------------ Helpers ------------------------------ */
-
 function countNodes(node) {
   if (!node) return 0;
   return 1 + (node.children || []).reduce((sum, child) => sum + countNodes(child), 0);
-}
-
-function downloadMarkdown(map) {
-  const lines = [`# ${map.title}`, '', map.summary || '', ''];
-
-  if (map.keyFacts?.length) {
-    lines.push('## Key facts', ...map.keyFacts.map((fact) => `- ${fact}`), '');
-  }
-
-  const walk = (node, depth) => {
-    lines.push(`${'  '.repeat(Math.max(0, depth - 1))}- **${node.label}** — ${node.detail || ''}`);
-    (node.children || []).forEach((child) => walk(child, depth + 1));
-  };
-  lines.push('## Mind Map Outline');
-  (map.root?.children || []).forEach((branch) => walk(branch, 1));
-
-  if (map.sources?.length) {
-    lines.push(
-      '',
-      '## Sources',
-      ...map.sources.map((source) => `- [${source.title}](${source.url})`)
-    );
-  }
-
-  const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = `${(map.title || 'setu-mindmap').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.md`;
-  link.click();
-  URL.revokeObjectURL(link.href);
 }

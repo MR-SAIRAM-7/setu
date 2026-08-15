@@ -179,7 +179,10 @@ export default function MindMap({ map, onMapChange, onNodeFocus }) {
   if (!root) return null;
 
   return (
-    <div className="relative h-full w-full overflow-hidden rounded-[var(--radius-lg)] bg-[var(--color-surface)] shadow-[var(--shadow-sm)] border border-[var(--color-divider)]">
+    <div
+      id="mindmap-canvas-container"
+      className="relative h-full w-full overflow-hidden rounded-[var(--radius-lg)] bg-[var(--color-surface)] shadow-[var(--shadow-sm)] border border-[var(--color-divider)]"
+    >
       {/* 24px dot grid ground */}
       <div
         aria-hidden
@@ -212,6 +215,7 @@ export default function MindMap({ map, onMapChange, onNodeFocus }) {
         >
           {/* Connector SVG */}
           <svg
+            id="mindmap-canvas-svg"
             className="pointer-events-none absolute inset-0 overflow-visible"
             width={width}
             height={height}

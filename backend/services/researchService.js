@@ -1,15 +1,11 @@
 /**
  * SETU Research & Mind Map Service
  * -------------------------------
- * Turns a plain-language topic into an interactive, expandable mind map.
+ * Turns a plain-language topic or source document into an interactive, expandable mind map.
  *
- * The pipeline is deliberately two-pass:
- *   1. RESEARCH  — grounded (Google Search) when the key allows it, otherwise
- *                  model knowledge. Produces prose plus citations.
- *   2. STRUCTURE — reshapes that prose into a strict node tree the UI can render.
- *
- * Splitting the passes matters: Gemini cannot combine search grounding with JSON
- * schema mode, and a single pass that tries to do both silently loses one.
+ * Pipeline:
+ *   1. RESEARCH  — grounded research via OpenRouter / Gemini with source citations.
+ *   2. STRUCTURE — transforms research into a strict hierarchical cognitive node tree.
  */
 
 const { requestStructuredAI, requestResearch, requestText } = require('./aiService');
@@ -76,8 +72,8 @@ const intentSchema = {
   properties: {
     intent: {
       type: 'string',
-      enum: ['research_topic', 'expand_map', 'answer_question', 'smalltalk'],
-      description: 'research_topic when the user names a subject to map. expand_map when they want more depth on the existing map. answer_question for a direct question about the current map. smalltalk otherwise.'
+      enum: ['research_topic', 'expand_map', 'answer_question', 'query_document', 'smalltalk'],
+      description: 'research_topic when user wants a subject researched into a map. expand_map when they want more depth on an existing branch. answer_question for questions about current map. query_document when asking about an attached file. smalltalk for greetings.'
     },
     topic: { type: 'string', description: 'The subject to research, cleaned up. Empty when not applicable.' },
     reply: { type: 'string', description: 'A short, warm reply to show the user while work happens.' }
@@ -144,19 +140,18 @@ function buildTree(topic, structured) {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Full research → mind map pipeline for a topic.
- * `onProgress` receives human-readable stage updates for the chat UI.
+ * Full research → mind map pipeline for a topic or document context.
  */
 async function researchMindMap({ topic, context = '', onProgress = () => {} }) {
   const cleanTopic = String(topic || '').trim();
-  if (!cleanTopic) throw Object.assign(new Error('A topic is required.'), { status: 400 });
+  if (!cleanTopic) throw Object.assign(new Error('A topic or title is required.'), { status: 400 });
 
   onProgress({ stage: 'researching', message: `Researching "${cleanTopic}"…` });
 
   const research = await requestResearch({
     instructions: RESEARCH_SYSTEM,
     input: context
-      ? `TOPIC: ${cleanTopic}\n\nADDITIONAL CONTEXT FROM THE USER:\n${context}`
+      ? `TOPIC: ${cleanTopic}\n\nADDITIONAL CONTEXT / SOURCE MATERIAL:\n${context}`
       : `TOPIC: ${cleanTopic}`
   });
 
@@ -183,7 +178,7 @@ async function researchMindMap({ topic, context = '', onProgress = () => {} }) {
     summary: structured.summary,
     keyFacts: structured.keyFacts || [],
     followUps: structured.followUps || [],
-    sources: research.sources,
+    sources: research.sources || [],
     grounded: research.grounded,
     root: buildTree(cleanTopic, structured),
     createdAt: new Date().toISOString()
@@ -212,32 +207,50 @@ WHAT IT CURRENTLY SAYS: ${nodeDetail || '(no detail)'}`,
   return (result.children || []).map((child) => decorate(child, path.length + 1));
 }
 
-/** Classify a chat turn so the agent knows whether to research, expand, or just reply. */
-async function classifyTurn({ messages, hasMap, currentTopic }) {
+/** Classify a chat turn. */
+async function classifyTurn({ messages, hasMap, currentTopic, hasDocument }) {
   const recent = messages
     .slice(-6)
     .map((m) => `${m.role === 'assistant' ? 'SETU' : 'USER'}: ${m.content}`)
     .join('\n');
 
-  return requestStructuredAI({
-    name: 'setu_intent',
-    schema: intentSchema,
-    instructions: `You route messages inside SETU's mind-map chat.
+  try {
+    return await requestStructuredAI({
+      name: 'setu_intent',
+      schema: intentSchema,
+      instructions: `You route messages inside SETU's mind-map chat.
 
-Current state: ${hasMap ? `a mind map about "${currentTopic}" is on screen` : 'no map yet'}.
+Current state:
+- Mind Map: ${hasMap ? `open on "${currentTopic}"` : 'none'}
+- Attached Document: ${hasDocument ? 'present' : 'none'}
 
-Choose "research_topic" whenever the user names any subject they want mapped or
-explained — this is the common case, and it applies even to a bare noun phrase
-like "photosynthesis" or "the French Revolution".
-Choose "expand_map" only when they ask to go deeper on the map already shown.
-Choose "answer_question" for a direct question about the existing map.
-Choose "smalltalk" only for greetings and meta-conversation.
+Choose:
+- "query_document" if the user has an attached document and is asking questions about it.
+- "research_topic" whenever the user names any subject they want mapped or explained.
+- "expand_map" when they want more depth on the existing mind map.
+- "answer_question" for questions about the on-screen map.
+- "smalltalk" for general greetings.
 
-The "reply" field is shown immediately while any research runs, so make it warm,
-brief, and specific to what they asked.`,
-    input: recent,
-    temperature: 0.2
-  });
+Make the "reply" warm, brief, and reassuring.`,
+      input: recent,
+      temperature: 0.2
+    });
+  } catch (_) {
+    // Robust fallback intent
+    const last = messages[messages.length - 1]?.content || '';
+    if (hasDocument) {
+      return {
+        intent: 'query_document',
+        topic: currentTopic || 'Document',
+        reply: 'Analyzing your document…'
+      };
+    }
+    return {
+      intent: 'research_topic',
+      topic: last,
+      reply: `Looking into "${last}"…`
+    };
+  }
 }
 
 /** Conversational answer grounded in the map currently on screen. */
@@ -259,7 +272,7 @@ offer to research it as a new map.
 
 ${outline}`,
     messages: messages.slice(-8),
-    temperature: 0.6
+    temperature: 0.5
   });
 }
 

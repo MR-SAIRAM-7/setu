@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import FileUploadModal from '../components/FileUploadModal';
 
 const MODES_DATA = [
   {
@@ -215,6 +216,7 @@ export default function Modes() {
   const [results, setResults] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
 
   const activeMode = MODES_DATA.find((m) => m.key === activeKey) || MODES_DATA[0];
 
@@ -315,7 +317,17 @@ export default function Modes() {
         {/* Input Form */}
         <form onSubmit={handleRun} className="space-y-4 max-w-3xl">
           <div className="space-y-2">
-            <label className="kicker block">{activeMode.fieldLabel}</label>
+            <div className="flex items-center justify-between">
+              <label className="kicker block">{activeMode.fieldLabel}</label>
+              <button
+                type="button"
+                onClick={() => setUploadModalOpen(true)}
+                className="btn btn-ghost !min-h-[26px] !px-2 text-xs flex items-center gap-1.5 text-[var(--color-accent)]"
+              >
+                <i className="ph-duotone ph-file-arrow-up text-sm"></i>
+                Upload file instead
+              </button>
+            </div>
             <textarea
               rows={activeMode.rows}
               value={inputVal}
@@ -376,6 +388,14 @@ export default function Modes() {
           <RenderModeResult modeKey={activeKey} data={currentResult} />
         </section>
       </main>
+
+      <FileUploadModal
+        isOpen={uploadModalOpen}
+        onClose={() => setUploadModalOpen(false)}
+        onFileAttached={(doc) => {
+          setInputVal(doc.extractedText || doc.summary || '');
+        }}
+      />
     </div>
   );
 }

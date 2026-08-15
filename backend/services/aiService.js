@@ -1,40 +1,51 @@
 /**
  * SETU Shared AI Orchestration Engine
  * -----------------------------------
- * One engine, two providers (Gemini primary, OpenAI fallback), three call shapes:
+ * Primary Provider: OpenRouter (with automated multi-model fallback chain)
+ * Secondary Provider: Google Gemini Direct
+ * Tertiary Provider: OpenAI Direct
+ * Offline Fallback: Deterministic L0 Cognitive Rule Engine
  *
- *   requestStructuredAI() -> validated JSON matching a supplied schema
- *   requestText()         -> free-form prose (chat turns, explanations)
- *   streamText()          -> async generator of text chunks for SSE
- *
- * Design notes:
- *  - Model names are a *chain*, not a constant. A retired model no longer takes
- *    the whole product down; we walk the chain and cache the first that answers.
- *  - Gemini gets a real `responseSchema`, not just a mime-type hint, so the JSON
- *    actually conforms instead of being best-effort.
- *  - Every failure is surfaced with a typed reason so callers can decide between
- *    retrying, falling back to L0, or reporting honestly to the user.
+ * Design features:
+ *  - Automated Model Fallback Chain: If OpenRouter rate limits (429), runs out of
+ *    credits (402), or encounters provider overload (503/504), it walks down the
+ *    prioritized model chain seamlessly without interrupting the user.
+ *  - Multi-provider Redundancy: Falls over between OpenRouter -> Gemini -> OpenAI.
+ *  - Multimodal Vision: Supports diagrams, PDFs screenshots, charts and visual OCR.
+ *  - SSE Streaming & Strict Structured Schema extraction with loose JSON recovery.
  */
 
 const config = require('../config');
 
+const OPENROUTER_BASE = config.openRouterBaseUrl || 'https://openrouter.ai/api/v1';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const OPENAI_BASE = 'https://api.openai.com/v1';
 
-/** Remembers the last Gemini model that answered, so we try it first. */
+/** Remembers the last working OpenRouter and Gemini models so we try them first */
+let resolvedOpenRouterModel = null;
 let resolvedGeminiModel = null;
 
-/** model name -> epoch ms until which it is known to be quota-exhausted. */
+/** Model name -> epoch ms until which it is known to be quota-exhausted */
 const exhaustedUntil = new Map();
 
 /**
- * Preferred model first, then the rest of the chain, skipping any model we
- * know is rate-limited right now.
- *
- * This matters on Gemini's free tier, where the quota is 20 requests *per day
- * per model*. Once a model is spent, retrying it is futile — but a sibling
- * model has its own separate allowance, so falling through keeps the product
- * alive instead of failing for the rest of the day.
+ * Returns available OpenRouter models in order of priority, skipping cooldowns.
+ */
+function openRouterChain() {
+  const now = Date.now();
+  const ordered = resolvedOpenRouterModel
+    ? [
+        resolvedOpenRouterModel,
+        ...config.openRouterModelChain.filter((m) => m !== resolvedOpenRouterModel)
+      ]
+    : [...config.openRouterModelChain];
+
+  const available = ordered.filter((model) => (exhaustedUntil.get(model) || 0) <= now);
+  return available.length ? available : ordered;
+}
+
+/**
+ * Returns available direct Gemini models in order of priority, skipping cooldowns.
  */
 function geminiChain() {
   const now = Date.now();
@@ -43,31 +54,25 @@ function geminiChain() {
     : [...config.geminiModelChain];
 
   const available = ordered.filter((model) => (exhaustedUntil.get(model) || 0) <= now);
-  // If everything is spent, still try them all rather than refusing outright.
   return available.length ? available : ordered;
 }
 
 class AIError extends Error {
-  constructor(message, { provider, status, retryable = false, retryAfterMs = null } = {}) {
+  constructor(message, { provider, status, model, retryable = false, retryAfterMs = null } = {}) {
     super(message);
     this.name = 'AIError';
     this.provider = provider;
     this.status = status;
+    this.model = model;
     this.retryable = retryable;
-    /** Provider-supplied wait before retrying, in ms. */
     this.retryAfterMs = retryAfterMs;
   }
 }
 
 /* -------------------------------------------------------------------------- */
-/* Schema translation                                                         */
+/* Schema translation & JSON Recovery                                         */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Gemini accepts a subset of OpenAPI 3.0 schema. Keywords that are valid for
- * OpenAI's strict JSON-schema mode (additionalProperties, minItems, ...) make
- * Gemini reject the whole request, so strip them on the way in.
- */
 function toGeminiSchema(schema) {
   if (!schema || typeof schema !== 'object') return schema;
   if (Array.isArray(schema)) return schema.map(toGeminiSchema);
@@ -88,14 +93,13 @@ function toGeminiSchema(schema) {
     }
   }
 
-  // Preserve field order in the model's output for stable, readable JSON.
   if (out.type === 'object' && out.properties && !out.propertyOrdering) {
     out.propertyOrdering = Object.keys(out.properties);
   }
   return out;
 }
 
-/** Models sometimes wrap JSON in prose or a ```json fence. Recover it. */
+/** Models sometimes wrap JSON in prose or a ```json fence. Recover it cleanly. */
 function parseJsonLoose(raw) {
   if (!raw || typeof raw !== 'string') {
     throw new AIError('Model returned an empty response.', { retryable: true });
@@ -131,10 +135,10 @@ function parseJsonLoose(raw) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Transport                                                                  */
+/* HTTP Transport                                                             */
 /* -------------------------------------------------------------------------- */
 
-async function postJson(url, body, { headers = {}, timeoutMs = config.aiTimeoutMs, provider } = {}) {
+async function postJson(url, body, { headers = {}, timeoutMs = config.aiTimeoutMs, provider, model } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -148,14 +152,13 @@ async function postJson(url, body, { headers = {}, timeoutMs = config.aiTimeoutM
 
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
-      let message = detail.slice(0, 300);
+      let message = detail.slice(0, 400);
       let retryAfterMs = null;
 
       try {
         const parsed = JSON.parse(detail);
-        message = parsed?.error?.message || message;
+        message = parsed?.error?.message || parsed?.message || message;
 
-        // Providers tell us how long to wait; honour it instead of guessing.
         const retryInfo = (parsed?.error?.details || []).find((d) =>
           String(d['@type'] || '').includes('RetryInfo')
         );
@@ -168,20 +171,26 @@ async function postJson(url, body, { headers = {}, timeoutMs = config.aiTimeoutM
         if (Number.isFinite(header)) retryAfterMs = header * 1000;
       }
 
-      // Rate limits are the one 4xx worth surfacing in the user's own words.
       if (response.status === 429) {
         const wait = retryAfterMs ? Math.ceil(retryAfterMs / 1000) : null;
         throw new AIError(
-          `Rate limit reached on ${provider}${wait ? ` — try again in about ${wait}s` : ''}.`,
-          { provider, status: 429, retryable: true, retryAfterMs }
+          `Rate limit reached on ${provider}${model ? ` (${model})` : ''}${wait ? ` — retry in ${wait}s` : ''}`,
+          { provider, model, status: 429, retryable: true, retryAfterMs }
         );
       }
 
-      throw new AIError(`${provider} HTTP ${response.status}: ${message}`, {
+      if (response.status === 402) {
+        throw new AIError(
+          `Insufficient credits or quota on ${provider}${model ? ` for model ${model}` : ''}`,
+          { provider, model, status: 402, retryable: true }
+        );
+      }
+
+      throw new AIError(`${provider}${model ? ` (${model})` : ''} HTTP ${response.status}: ${message}`, {
         provider,
+        model,
         status: response.status,
-        // 5xx is transient; other 4xx are configuration errors we should not retry.
-        retryable: response.status >= 500,
+        retryable: response.status >= 500 || response.status === 429 || response.status === 402,
         retryAfterMs
       });
     }
@@ -189,8 +198,9 @@ async function postJson(url, body, { headers = {}, timeoutMs = config.aiTimeoutM
     return response;
   } catch (error) {
     if (error.name === 'AbortError') {
-      throw new AIError(`${provider} request timed out after ${timeoutMs}ms.`, {
+      throw new AIError(`${provider}${model ? ` (${model})` : ''} request timed out after ${timeoutMs}ms.`, {
         provider,
+        model,
         retryable: true
       });
     }
@@ -201,14 +211,173 @@ async function postJson(url, body, { headers = {}, timeoutMs = config.aiTimeoutM
 }
 
 /* -------------------------------------------------------------------------- */
-/* Gemini                                                                     */
+/* 1. OpenRouter (Primary Engine with automated model fallback chain)          */
+/* -------------------------------------------------------------------------- */
+
+async function callOpenRouter({ system, messages, schema, name, temperature }) {
+  if (!config.openRouterApiKey) {
+    throw new AIError('No OpenRouter API key configured.', { provider: 'openrouter' });
+  }
+
+  const chain = openRouterChain();
+  let lastError;
+
+  for (const model of chain) {
+    try {
+      const body = {
+        model,
+        messages: [
+          ...(system
+            ? [
+                {
+                  role: 'system',
+                  content: schema
+                    ? `${system}\n\nIMPORTANT: You must reply ONLY with a valid, raw JSON object conforming strictly to the requested schema. Do not enclose in markdown prose.`
+                    : system
+                }
+              ]
+            : []),
+          ...messages
+        ],
+        temperature: temperature ?? 0.7
+      };
+
+      if (schema) {
+        body.response_format = { type: 'json_object' };
+      }
+
+      const response = await postJson(`${OPENROUTER_BASE}/chat/completions`, body, {
+        provider: 'openrouter',
+        model,
+        headers: {
+          Authorization: `Bearer ${config.openRouterApiKey}`,
+          'HTTP-Referer': config.openRouterSiteUrl,
+          'X-Title': config.openRouterAppName
+        }
+      });
+
+      const payload = await response.json();
+      const text = payload?.choices?.[0]?.message?.content;
+      if (!text) {
+        throw new AIError(`OpenRouter model ${model} returned empty content.`, {
+          provider: 'openrouter',
+          model,
+          retryable: true
+        });
+      }
+
+      if (resolvedOpenRouterModel !== model) {
+        resolvedOpenRouterModel = model;
+        console.log(`[SETU AI] OpenRouter active model locked in: ${model}`);
+      }
+
+      return text;
+    } catch (error) {
+      lastError = error;
+
+      // If rate limited, credit exhausted, unavailable, or 5xx: mark cooldown and try next model
+      if (
+        error.status === 429 ||
+        error.status === 402 ||
+        error.status === 404 ||
+        error.status === 400 ||
+        error.status >= 500
+      ) {
+        const cooldown = error.retryAfterMs && error.retryAfterMs > 30000 ? error.retryAfterMs : 45000;
+        exhaustedUntil.set(model, Date.now() + cooldown);
+        if (resolvedOpenRouterModel === model) resolvedOpenRouterModel = null;
+        console.warn(
+          `[SETU AI] OpenRouter model "${model}" failed (${error.status || error.message}) — falling back to next model in chain.`
+        );
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw lastError || new AIError('All OpenRouter fallback models failed.', { provider: 'openrouter' });
+}
+
+async function* streamOpenRouter({ system, messages, temperature }) {
+  if (!config.openRouterApiKey) {
+    throw new AIError('No OpenRouter API key configured.', { provider: 'openrouter' });
+  }
+
+  const chain = openRouterChain();
+  let lastError;
+
+  for (const model of chain) {
+    try {
+      const response = await postJson(
+        `${OPENROUTER_BASE}/chat/completions`,
+        {
+          model,
+          messages: [...(system ? [{ role: 'system', content: system }] : []), ...messages],
+          temperature: temperature ?? 0.7,
+          stream: true
+        },
+        {
+          provider: 'openrouter',
+          model,
+          headers: {
+            Authorization: `Bearer ${config.openRouterApiKey}`,
+            'HTTP-Referer': config.openRouterSiteUrl,
+            'X-Title': config.openRouterAppName
+          }
+        }
+      );
+
+      resolvedOpenRouterModel = model;
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      for await (const chunk of response.body) {
+        buffer += decoder.decode(chunk, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const payload = line.slice(5).trim();
+          if (!payload || payload === '[DONE]') continue;
+          try {
+            const delta = JSON.parse(payload)?.choices?.[0]?.delta?.content;
+            if (delta) yield delta;
+          } catch (_) {
+            /* partial frame */
+          }
+        }
+      }
+      return;
+    } catch (error) {
+      lastError = error;
+      if (
+        error.status === 429 ||
+        error.status === 402 ||
+        error.status === 404 ||
+        error.status === 400 ||
+        error.status >= 500
+      ) {
+        exhaustedUntil.set(model, Date.now() + 45000);
+        if (resolvedOpenRouterModel === model) resolvedOpenRouterModel = null;
+        console.warn(`[SETU AI] OpenRouter streaming model "${model}" failed — trying next model in chain.`);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw lastError || new AIError('All OpenRouter models failed to stream.', { provider: 'openrouter' });
+}
+
+/* -------------------------------------------------------------------------- */
+/* 2. Google Gemini Direct (Secondary Provider)                               */
 /* -------------------------------------------------------------------------- */
 
 function buildGeminiBody({ system, messages, schema, temperature, grounded }) {
   const generationConfig = { temperature: temperature ?? 0.7 };
 
-  // Grounding and JSON mode are mutually exclusive on Gemini, so callers that
-  // need both run two passes: grounded research first, then schema shaping.
   if (schema && !grounded) {
     generationConfig.responseMimeType = 'application/json';
     generationConfig.responseSchema = toGeminiSchema(schema);
@@ -243,7 +412,6 @@ function readGeminiText(payload) {
   return text;
 }
 
-/** Pull the citation list out of a grounded Gemini response. */
 function readGeminiSources(payload) {
   const chunks = payload?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
   const seen = new Set();
@@ -272,11 +440,11 @@ async function callGemini({ system, messages, schema, temperature, grounded, wit
       const response = await postJson(
         `${GEMINI_BASE}/models/${model}:generateContent?key=${config.geminiApiKey}`,
         body,
-        { provider: 'gemini' }
+        { provider: 'gemini', model }
       );
       const payload = await response.json();
       const text = readGeminiText(payload);
-      if (!text) throw new AIError('Gemini returned no text.', { provider: 'gemini', retryable: true });
+      if (!text) throw new AIError('Gemini returned no text.', { provider: 'gemini', model, retryable: true });
 
       if (resolvedGeminiModel !== model) {
         resolvedGeminiModel = model;
@@ -286,22 +454,16 @@ async function callGemini({ system, messages, schema, temperature, grounded, wit
     } catch (error) {
       lastError = error;
 
-      // 404/400 = model retired or unavailable to this key.
       if (error.status === 404 || error.status === 400) {
-        console.warn(`[SETU AI] Gemini model "${model}" unavailable — trying next. (${error.message})`);
         if (resolvedGeminiModel === model) resolvedGeminiModel = null;
         continue;
       }
 
-      // 429 = this model's quota is spent. Park it and try a sibling, which
-      // has its own allowance, rather than retrying into the same wall.
       if (error.status === 429) {
-        const cooldown = error.retryAfterMs && error.retryAfterMs > 60000
-          ? error.retryAfterMs
-          : 60000;
+        const cooldown = error.retryAfterMs && error.retryAfterMs > 60000 ? error.retryAfterMs : 60000;
         exhaustedUntil.set(model, Date.now() + cooldown);
         if (resolvedGeminiModel === model) resolvedGeminiModel = null;
-        console.warn(`[SETU AI] Gemini model "${model}" rate-limited — falling through to the next model.`);
+        console.warn(`[SETU AI] Gemini model "${model}" rate-limited — falling through to next model.`);
         continue;
       }
 
@@ -323,7 +485,7 @@ async function* streamGemini({ system, messages, temperature }) {
       response = await postJson(
         `${GEMINI_BASE}/models/${model}:streamGenerateContent?alt=sse&key=${config.geminiApiKey}`,
         body,
-        { provider: 'gemini' }
+        { provider: 'gemini', model }
       );
     } catch (error) {
       lastError = error;
@@ -352,7 +514,7 @@ async function* streamGemini({ system, messages, temperature }) {
           const text = readGeminiText(JSON.parse(payload));
           if (text) yield text;
         } catch (_) {
-          /* partial frame — ignore and keep reading */
+          /* partial frame */
         }
       }
     }
@@ -363,7 +525,7 @@ async function* streamGemini({ system, messages, temperature }) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* OpenAI                                                                     */
+/* 3. OpenAI Direct (Tertiary Fallback)                                       */
 /* -------------------------------------------------------------------------- */
 
 async function callOpenAI({ system, messages, schema, name, temperature }) {
@@ -384,6 +546,7 @@ async function callOpenAI({ system, messages, schema, name, temperature }) {
 
   const response = await postJson(`${OPENAI_BASE}/chat/completions`, body, {
     provider: 'openai',
+    model: config.openAiModel,
     headers: { Authorization: `Bearer ${config.openAiApiKey}` }
   });
 
@@ -401,7 +564,7 @@ async function* streamOpenAI({ system, messages, temperature }) {
       temperature: temperature ?? 0.7,
       stream: true
     },
-    { provider: 'openai', headers: { Authorization: `Bearer ${config.openAiApiKey}` } }
+    { provider: 'openai', model: config.openAiModel, headers: { Authorization: `Bearer ${config.openAiApiKey}` } }
   );
 
   const decoder = new TextDecoder();
@@ -427,7 +590,7 @@ async function* streamOpenAI({ system, messages, temperature }) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Public API                                                                 */
+/* Public Multi-Provider Orchestrator                                         */
 /* -------------------------------------------------------------------------- */
 
 function normalizeMessages(input, messages) {
@@ -445,16 +608,19 @@ function normalizeMessages(input, messages) {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Run `attempt` against Gemini, then OpenAI, retrying retryable failures with
- * exponential backoff. Throws an aggregate AIError if every provider fails.
+ * Runs `attempt` across the provider hierarchy:
+ *  1. OpenRouter (Primary with multi-model fallback chain)
+ *  2. Gemini (Secondary with multi-model fallback chain)
+ *  3. OpenAI (Tertiary)
  */
 async function withProviders(attempt) {
   const providers = [];
+  if (config.openRouterApiKey) providers.push('openrouter');
   if (config.geminiApiKey) providers.push('gemini');
   if (config.openAiApiKey) providers.push('openai');
 
   if (!providers.length) {
-    throw new AIError('No AI provider configured. Set GEMINI_API_KEY or OPENAI_API_KEY.');
+    throw new AIError('No AI provider configured. Set OPENROUTER_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY.');
   }
 
   const errors = [];
@@ -467,8 +633,6 @@ async function withProviders(attempt) {
         errors.push(error);
         if (!error.retryable || tryIndex === config.aiMaxRetries) break;
 
-        // Honour the provider's own retry hint, capped so a request never
-        // hangs for a minute; otherwise fall back to exponential backoff.
         const wait = error.retryAfterMs
           ? Math.min(error.retryAfterMs, config.maxRetryWaitMs)
           : 400 * 2 ** tryIndex;
@@ -477,10 +641,8 @@ async function withProviders(attempt) {
     }
   }
 
-  // A rate limit is actionable for the user; other failures are not, so lead
-  // with it rather than burying it in a concatenated dump.
-  const rateLimited = errors.find((error) => error.status === 429);
-  if (rateLimited) throw rateLimited;
+  const actionable = errors.find((error) => error.status === 429 || error.status === 402);
+  if (actionable) throw actionable;
 
   throw new AIError(
     `All AI providers failed — ${errors.map((error) => error.message).join(' | ')}`
@@ -488,14 +650,18 @@ async function withProviders(attempt) {
 }
 
 /** Structured JSON generation against a schema. */
-async function requestStructuredAI({ name, schema, instructions, input, messages, temperature = 0.4 }) {
+async function requestStructuredAI({ name, schema, instructions, input, messages, temperature = 0.3 }) {
   const chat = normalizeMessages(input, messages);
 
   return withProviders(async (provider) => {
-    const raw =
-      provider === 'gemini'
-        ? await callGemini({ system: instructions, messages: chat, schema, temperature })
-        : await callOpenAI({ system: instructions, messages: chat, schema, name, temperature });
+    let raw;
+    if (provider === 'openrouter') {
+      raw = await callOpenRouter({ system: instructions, messages: chat, schema, name, temperature });
+    } else if (provider === 'gemini') {
+      raw = await callGemini({ system: instructions, messages: chat, schema, temperature });
+    } else {
+      raw = await callOpenAI({ system: instructions, messages: chat, schema, name, temperature });
+    }
     return parseJsonLoose(raw);
   });
 }
@@ -504,22 +670,24 @@ async function requestStructuredAI({ name, schema, instructions, input, messages
 async function requestText({ instructions, input, messages, temperature = 0.7 }) {
   const chat = normalizeMessages(input, messages);
 
-  return withProviders(async (provider) =>
-    provider === 'gemini'
-      ? callGemini({ system: instructions, messages: chat, temperature })
-      : callOpenAI({ system: instructions, messages: chat, temperature })
-  );
+  return withProviders(async (provider) => {
+    if (provider === 'openrouter') {
+      return callOpenRouter({ system: instructions, messages: chat, temperature });
+    } else if (provider === 'gemini') {
+      return callGemini({ system: instructions, messages: chat, temperature });
+    } else {
+      return callOpenAI({ system: instructions, messages: chat, temperature });
+    }
+  });
 }
 
 /**
- * Web-grounded research pass. Uses Gemini's Google Search tool so answers are
- * built on retrieved sources rather than recall alone; returns the prose plus
- * its citations. Falls back to ungrounded generation when grounding is
- * unavailable, flagging `grounded: false` so callers never imply false rigor.
+ * Web-grounded / deep research pass.
  */
-async function requestResearch({ instructions, input, messages, temperature = 0.5 }) {
+async function requestResearch({ instructions, input, messages, temperature = 0.4 }) {
   const chat = normalizeMessages(input, messages);
 
+  // If Gemini direct is configured and has search grounding:
   if (config.geminiApiKey) {
     try {
       const { text, sources } = await callGemini({
@@ -531,7 +699,7 @@ async function requestResearch({ instructions, input, messages, temperature = 0.
       });
       return { text, sources, grounded: true };
     } catch (error) {
-      console.warn('[SETU AI] Grounded research unavailable, using model knowledge:', error.message);
+      console.warn('[SETU AI] Gemini grounded research unavailable, falling back to OpenRouter/Model knowledge:', error.message);
     }
   }
 
@@ -543,12 +711,21 @@ async function requestResearch({ instructions, input, messages, temperature = 0.
 async function* streamText({ instructions, input, messages, temperature = 0.7 }) {
   const chat = normalizeMessages(input, messages);
 
+  if (config.openRouterApiKey) {
+    try {
+      yield* streamOpenRouter({ system: instructions, messages: chat, temperature });
+      return;
+    } catch (error) {
+      console.warn('[SETU AI] OpenRouter stream failed, attempting next provider:', error.message);
+    }
+  }
+
   if (config.geminiApiKey) {
     try {
       yield* streamGemini({ system: instructions, messages: chat, temperature });
       return;
     } catch (error) {
-      console.warn('[SETU AI] Gemini stream failed, falling back:', error.message);
+      console.warn('[SETU AI] Gemini stream failed, attempting next provider:', error.message);
     }
   }
 
@@ -561,13 +738,56 @@ async function* streamText({ instructions, input, messages, temperature = 0.7 })
 }
 
 /**
- * Describe an image (chart, diagram, screenshot) in plain language.
- * `imageBase64` is raw base64 with no data: prefix.
+ * Describe an image (chart, document screenshot, visual graphic) in plain language.
  */
 async function describeImage({ imageBase64, mimeType = 'image/jpeg', instructions, prompt }) {
+  if (config.openRouterApiKey) {
+    const chain = openRouterChain();
+    for (const model of chain) {
+      try {
+        const response = await postJson(
+          `${OPENROUTER_BASE}/chat/completions`,
+          {
+            model,
+            messages: [
+              ...(instructions ? [{ role: 'system', content: instructions }] : []),
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: prompt || 'Describe this image clearly and extract key information.' },
+                  { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageBase64}` } }
+                ]
+              }
+            ],
+            temperature: 0.3
+          },
+          {
+            provider: 'openrouter',
+            model,
+            headers: {
+              Authorization: `Bearer ${config.openRouterApiKey}`,
+              'HTTP-Referer': config.openRouterSiteUrl,
+              'X-Title': config.openRouterAppName
+            }
+          }
+        );
+
+        const text = (await response.json())?.choices?.[0]?.message?.content;
+        if (text) {
+          resolvedOpenRouterModel = model;
+          return text;
+        }
+      } catch (error) {
+        if (error.status === 429 || error.status === 402 || error.status >= 500) {
+          exhaustedUntil.set(model, Date.now() + 45000);
+          continue;
+        }
+      }
+    }
+  }
+
   if (config.geminiApiKey) {
     const chain = geminiChain();
-
     for (const model of chain) {
       try {
         const response = await postJson(
@@ -580,9 +800,9 @@ async function describeImage({ imageBase64, mimeType = 'image/jpeg', instruction
               }
             ],
             systemInstruction: { parts: [{ text: instructions }] },
-            generationConfig: { temperature: 0.4 }
+            generationConfig: { temperature: 0.3 }
           },
-          { provider: 'gemini' }
+          { provider: 'gemini', model }
         );
 
         const text = readGeminiText(await response.json());
@@ -615,9 +835,9 @@ async function describeImage({ imageBase64, mimeType = 'image/jpeg', instruction
             ]
           }
         ],
-        temperature: 0.4
+        temperature: 0.3
       },
-      { provider: 'openai', headers: { Authorization: `Bearer ${config.openAiApiKey}` } }
+      { provider: 'openai', model: config.openAiModel, headers: { Authorization: `Bearer ${config.openAiApiKey}` } }
     );
 
     const text = (await response.json())?.choices?.[0]?.message?.content;
@@ -627,20 +847,32 @@ async function describeImage({ imageBase64, mimeType = 'image/jpeg', instruction
   throw new AIError('No provider could describe this image.');
 }
 
-/** Live provider probe used by /api/health. */
+/** Live provider probe used by /api/health and /api/health/ai. */
 async function checkHealth() {
   if (!config.aiEnabled) {
-    return { ok: false, provider: null, model: null, reason: 'No API key configured' };
+    return { ok: false, provider: null, model: null, reason: 'No API key configured (set OPENROUTER_API_KEY or GEMINI_API_KEY)' };
   }
   try {
+    const primary = config.primaryProvider;
     await requestText({ instructions: 'Reply with the single word: ok', input: 'ping', temperature: 0 });
     return {
       ok: true,
-      provider: config.geminiApiKey ? 'gemini' : 'openai',
-      model: resolvedGeminiModel || config.openAiModel
+      provider: primary,
+      model:
+        primary === 'openrouter'
+          ? resolvedOpenRouterModel || config.openRouterModelChain[0]
+          : primary === 'gemini'
+            ? resolvedGeminiModel || config.geminiModelChain[0]
+            : config.openAiModel,
+      fallbackChain:
+        primary === 'openrouter'
+          ? config.openRouterModelChain
+          : primary === 'gemini'
+            ? config.geminiModelChain
+            : [config.openAiModel]
     };
   } catch (error) {
-    return { ok: false, provider: null, model: null, reason: error.message };
+    return { ok: false, provider: config.primaryProvider, model: null, reason: error.message };
   }
 }
 

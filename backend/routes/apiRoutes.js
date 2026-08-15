@@ -1,6 +1,10 @@
 /**
- * SETU API Routes
+ * SETU Production API Routes
+ * --------------------------
+ * Integrates OpenRouter AI agent, MongoDB persistence, document parsing,
+ * conversation threads, and 7 cognitive accessibility modes.
  */
+
 const express = require('express');
 const router = express.Router();
 
@@ -8,19 +12,26 @@ const modes = require('../controllers/modeControllers');
 const chat = require('../controllers/chatController');
 const agent = require('../controllers/agentController');
 const dbCtrl = require('../controllers/databaseController');
+const fileCtrl = require('../controllers/fileController');
+const convCtrl = require('../controllers/conversationController');
 
 const { validateInputMiddleware } = require('../middleware/validator');
 const { checkHealth } = require('../services/aiService');
 const { getStatus } = require('../config/db');
 const config = require('../config');
 
-/** Cheap liveness probe — reports AI status and MongoDB connection. */
+/* -------------------------------------------------------------------------- */
+/* Health Probes & System Status                                              */
+/* -------------------------------------------------------------------------- */
+
+/** Cheap liveness probe — reports AI provider status and MongoDB state */
 router.get('/health', (_req, res) => {
   const dbStatus = getStatus();
   res.json({
     status: 'healthy',
     product: 'SETU — Cognitive Operating System',
     version: '3.0.0',
+    primaryProvider: config.primaryProvider,
     aiConfigured: config.aiEnabled,
     database: {
       provider: 'MongoDB',
@@ -32,7 +43,7 @@ router.get('/health', (_req, res) => {
   });
 });
 
-/** Deep probe — actually round-trips the model and reports DB. */
+/** Deep probe — live round-trips the AI model and database connection */
 router.get('/health/ai', async (_req, res) => {
   const aiHealth = await checkHealth();
   const dbStatus = getStatus();
@@ -50,7 +61,33 @@ router.get('/health/ai', async (_req, res) => {
 /** Database status probe */
 router.get('/db/status', dbCtrl.handleDbStatus);
 
-/* --- MongoDB Persistence Endpoints --- */
+/* -------------------------------------------------------------------------- */
+/* File Upload & Document Ingestion Endpoints                                 */
+/* -------------------------------------------------------------------------- */
+
+router.post('/files/upload', fileCtrl.handleUploadFile);
+router.get('/files', fileCtrl.handleListFiles);
+router.get('/files/:id', fileCtrl.handleGetFileById);
+router.delete('/files/:id', fileCtrl.handleDeleteFile);
+router.post('/files/:id/mindmap', fileCtrl.handleMindMapFromFile);
+router.post('/files/:id/query', fileCtrl.handleQueryFile);
+
+/* -------------------------------------------------------------------------- */
+/* Conversation Threads & Interaction History                                 */
+/* -------------------------------------------------------------------------- */
+
+router.get('/conversations', convCtrl.handleListConversations);
+router.post('/conversations', convCtrl.handleCreateConversation);
+router.get('/conversations/:id', convCtrl.handleGetConversation);
+router.put('/conversations/:id', convCtrl.handleUpdateConversation);
+router.delete('/conversations/:id', convCtrl.handleDeleteConversation);
+router.get('/conversations/:id/messages', convCtrl.handleGetMessages);
+router.post('/conversations/:id/messages', convCtrl.handleSaveMessage);
+
+/* -------------------------------------------------------------------------- */
+/* Mind Map & Artifact Database Persistence                                   */
+/* -------------------------------------------------------------------------- */
+
 router.get('/mindmaps', dbCtrl.handleGetMindMaps);
 router.post('/mindmaps', dbCtrl.handleSaveMindMap);
 router.get('/mindmaps/:id', dbCtrl.handleGetMindMapById);
@@ -64,29 +101,41 @@ router.get('/settings', dbCtrl.handleGetSettings);
 router.post('/settings', dbCtrl.handleSaveSettings);
 router.put('/settings', dbCtrl.handleSaveSettings);
 
-/* --- Seven cognitive modes --- */
-router.post('/start', validateInputMiddleware('task', 1000), modes.handleStartMode);
+/* -------------------------------------------------------------------------- */
+/* Conversational AI & Research Streaming                                     */
+/* -------------------------------------------------------------------------- */
+
+router.post('/chat', chat.handleChat);
+router.post('/research/mindmap', validateInputMiddleware('topic', 1000), chat.handleMindMap);
+router.post('/research/expand', chat.handleExpandNode);
+
+/* -------------------------------------------------------------------------- */
+/* Seven Cognitive Modes                                                      */
+/* -------------------------------------------------------------------------- */
+
+router.post('/start', validateInputMiddleware('task', 2000), modes.handleStartMode);
 router.post('/simplify', validateInputMiddleware('text', config.maxTextLength), modes.handleSimplifyMode);
 router.post('/learn', validateInputMiddleware('text', config.maxTextLength), modes.handleLearnMode);
 router.post('/meet', validateInputMiddleware('transcript', config.maxTextLength), modes.handleMeetMode);
-router.post('/practice', validateInputMiddleware('topic', 1000), modes.handlePracticeMode);
+router.post('/practice', validateInputMiddleware('topic', 2000), modes.handlePracticeMode);
 router.post('/write', validateInputMiddleware('text', config.maxTextLength), modes.handleWriteMode);
-router.post('/guide', validateInputMiddleware('goal', 1000), modes.handleGuideMode);
+router.post('/guide', validateInputMiddleware('goal', 2000), modes.handleGuideMode);
 
-/* --- Mind map chat --- */
-router.post('/chat', chat.handleChat);
-router.post('/research/mindmap', validateInputMiddleware('topic', 500), chat.handleMindMap);
-router.post('/research/expand', chat.handleExpandNode);
+/* -------------------------------------------------------------------------- */
+/* In-Page Agent & Assistive Tools                                            */
+/* -------------------------------------------------------------------------- */
 
-/* --- In-page agent --- */
-router.post('/agent/plan', validateInputMiddleware('task', 1000), agent.handleAgentPlan);
-router.post('/agent/navigate', validateInputMiddleware('task', 1000), agent.handleAgentPlan);
+router.post('/agent/plan', validateInputMiddleware('task', 2000), agent.handleAgentPlan);
+router.post('/agent/navigate', validateInputMiddleware('task', 2000), agent.handleAgentPlan);
 router.post('/agent/explain', validateInputMiddleware('text', config.maxTextLength), agent.handleExplain);
 router.post('/agent/chunk', agent.handleChunkPage);
 router.post('/agent/describe-image', agent.handleDescribeImage);
 router.post('/explain', validateInputMiddleware('text', config.maxTextLength), agent.handleExplain);
 
-/* --- Utilities --- */
+/* -------------------------------------------------------------------------- */
+/* Utilities                                                                  */
+/* -------------------------------------------------------------------------- */
+
 router.post('/summarize', validateInputMiddleware('text', config.maxTextLength), modes.handleSummarize);
 router.post('/export', modes.handleExport);
 

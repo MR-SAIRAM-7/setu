@@ -1,16 +1,22 @@
 /**
- * Mind Map Chat Controller
- * ------------------------
- * Backs the conversational surface: the user names any topic, the agent
- * researches it, and a mind map streams back into the conversation.
- *
- * Transport is Server-Sent Events so the UI can show research progress instead
- * of a spinner that hides a 20-second wait.
+ * Mind Map & Document Chat Controller
+ * -----------------------------------
+ * Backs the conversational AI assistant: researches topics, generates mind maps,
+ * answers queries grounded in attached documents, and saves conversations/messages
+ * directly to MongoDB.
  */
 
 const research = require('../services/researchService');
+const documentService = require('../services/documentService');
+const mongoService = require('../services/mongodbService');
 
-/** Open an SSE stream and hand back a typed writer. */
+function toText(value, fallback = '') {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return fallback;
+}
+
+/** Open an SSE stream and hand back a typed writer */
 function openStream(res) {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -41,80 +47,174 @@ function openStream(res) {
 
 /**
  * POST /api/chat  (SSE)
- * body: { messages: [{role, content}], map?: MindMap }
- *
- * Emits: status | reply | map | error | done
+ * body: {
+ *   messages: [{role, content}],
+ *   conversationId?: string,
+ *   documentId?: string,
+ *   map?: MindMap
+ * }
  */
 async function handleChat(req, res) {
   const stream = openStream(res);
 
   try {
+    const userId = req.headers['x-user-id'] || req.body.userId || 'anonymous_user';
+    const conversationId =
+      req.headers['x-conversation-id'] || req.body.conversationId || `conv_${Date.now()}`;
     const messages = Array.isArray(req.body.messages) ? req.body.messages : [];
     const currentMap = req.body.map || null;
+    const documentId = req.body.documentId || null;
 
     if (!messages.length) {
       stream.send('error', { message: 'No messages supplied.' });
       return stream.end();
     }
 
-    stream.send('status', { stage: 'thinking', message: 'Thinking…' });
+    const lastUserMessage = messages[messages.length - 1] || {};
+    const lastUserText = toText(lastUserMessage.content, '').trim();
+
+    // Persist user turn to MongoDB
+    await mongoService.saveMessage({
+      conversationId,
+      userId,
+      role: 'user',
+      content: lastUserText,
+      fileAttachments: documentId ? [{ fileId: documentId }] : []
+    }).catch(() => {});
+
+    stream.send('status', { stage: 'thinking', message: 'Analyzing…' });
+
+    // If a document is attached, fetch it for grounded context
+    let attachedDoc = null;
+    if (documentId) {
+      attachedDoc = await mongoService.getDocumentFileById(documentId).catch(() => null);
+    }
 
     const routed = await research.classifyTurn({
       messages,
       hasMap: Boolean(currentMap),
-      currentTopic: currentMap?.title || ''
+      currentTopic: currentMap?.title || attachedDoc?.originalName || '',
+      hasDocument: Boolean(attachedDoc)
     });
+    const routedIntent = toText(routed?.intent, 'research_topic') || 'research_topic';
 
-    // Show the warm acknowledgement immediately, before any slow work starts.
-    stream.send('reply', { text: routed.reply, intent: routed.intent });
+    // Send immediate acknowledgment
+    const ackReply = toText(routed?.reply, 'Working on that now.').trim() || 'Working on that now.';
+    stream.send('reply', { text: ackReply, intent: routedIntent });
 
-    if (routed.intent === 'research_topic') {
-      const map = await research.researchMindMap({
-        topic: routed.topic || messages[messages.length - 1].content,
+    let finalAssistantReply = ackReply;
+    let generatedMap = null;
+    let sources = [];
+
+    if (routedIntent === 'query_document' && attachedDoc) {
+      stream.send('status', { stage: 'reading', message: `Reviewing ${attachedDoc.originalName}…` });
+      const queryResult = await documentService.queryDocument({
+        documentId: attachedDoc.id,
+        query: lastUserText,
+        messages,
+        userId
+      });
+      finalAssistantReply = toText(queryResult?.answer, 'I could not produce a grounded answer yet.');
+      sources = queryResult.sources;
+      stream.send('reply', {
+        text: finalAssistantReply,
+        intent: 'document_answer',
+        final: true,
+        sources
+      });
+    } else if (routedIntent === 'research_topic') {
+      const topicQuery = toText(routed?.topic, '').trim() || lastUserText;
+      const context = attachedDoc
+        ? `From uploaded document "${attachedDoc.originalName}":\n${attachedDoc.extractedText.slice(0, 10000)}`
+        : '';
+
+      generatedMap = await research.researchMindMap({
+        topic: topicQuery,
+        context,
         onProgress: (update) => stream.send('status', update)
       });
-      stream.send('map', map);
-    } else if (routed.intent === 'expand_map' && currentMap) {
-      stream.send('status', { stage: 'researching', message: 'Going deeper…' });
-      const map = await research.researchMindMap({
+
+      sources = generatedMap.sources || [];
+      stream.send('map', generatedMap);
+
+      // Save generated mind map in MongoDB
+      await mongoService.saveMindMap({
+        ...generatedMap,
+        userId,
+        conversationId,
+        documentId: attachedDoc?.id || null
+      }).catch(() => {});
+    } else if (routedIntent === 'expand_map' && currentMap) {
+      stream.send('status', { stage: 'researching', message: 'Going deeper into branches…' });
+      generatedMap = await research.researchMindMap({
         topic: currentMap.title,
-        context: `The user already has a map of this topic and asked: "${
-          messages[messages.length - 1].content
-        }". Go materially deeper and cover facets the existing map missed.`,
+        context: `The user has an existing map and asked: "${lastUserText}". Deepen existing branches and discover missing facets.`,
         onProgress: (update) => stream.send('status', update)
       });
-      stream.send('map', map);
-    } else if (routed.intent === 'answer_question') {
+      sources = generatedMap.sources || [];
+      stream.send('map', generatedMap);
+
+      await mongoService.saveMindMap({
+        ...generatedMap,
+        userId,
+        conversationId
+      }).catch(() => {});
+    } else if (routedIntent === 'answer_question') {
       const answer = await research.answerAboutMap({ messages, map: currentMap });
-      stream.send('reply', { text: answer, intent: 'answer', final: true });
+      finalAssistantReply = toText(answer, 'I could not answer that from the current map yet.');
+      stream.send('reply', { text: finalAssistantReply, intent: 'answer', final: true });
     }
 
-    stream.send('done', { ok: true });
+    // Persist assistant message in MongoDB
+    await mongoService.saveMessage({
+      conversationId,
+      userId,
+      role: 'assistant',
+      content: finalAssistantReply,
+      intent: routedIntent,
+      sources,
+      mindMapData: generatedMap ? { title: generatedMap.title, summary: generatedMap.summary } : null
+    }).catch(() => {});
+
+    stream.send('done', { ok: true, conversationId });
   } catch (error) {
-    console.error('[SETU Chat]', error);
-    stream.send('error', { message: error.message || 'Something went wrong.' });
+    console.error('[SETU Chat Error]', error);
+    stream.send('error', { message: error.message || 'Something went wrong processing your message.' });
   } finally {
     stream.end();
   }
 }
 
 /**
- * POST /api/research/mindmap — non-streaming mind map generation.
- * Used by the extension and any client that would rather await one JSON blob.
+ * POST /api/research/mindmap
  */
 async function handleMindMap(req, res, next) {
   try {
+    const userId = req.headers['x-user-id'] || req.body.userId || 'anonymous_user';
+    const conversationId = req.headers['x-conversation-id'] || req.body.conversationId || null;
+    const documentId = req.body.documentId || null;
+
     const map = await research.researchMindMap({
       topic: req.body.topic,
       context: req.body.context || ''
     });
-    res.json(map);
+
+    const saved = await mongoService.saveMindMap({
+      ...map,
+      userId,
+      conversationId,
+      documentId
+    });
+
+    res.json(saved || map);
   } catch (error) {
     next(error);
   }
 }
 
-/** POST /api/research/expand — grow one node of an existing map. */
+/**
+ * POST /api/research/expand
+ */
 async function handleExpandNode(req, res, next) {
   try {
     const { topic, nodeLabel, nodeDetail, path } = req.body;
