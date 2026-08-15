@@ -5,76 +5,21 @@
  *  1. Safe LocalStorage Detection (respects browser Tracking Prevention, private mode, and sandboxed iframes)
  *  2. In-Memory Resilient Fallback (ensures smooth UI operations without throwing Tracking Prevention errors)
  *  3. Seamless MongoDB Cloud/Local Synchronization
+ *
+ * Writes are local-first: the browser copy is the source of truth for the UI and
+ * the MongoDB mirror is best-effort, so the app stays fully usable with the
+ * engine offline.
  */
+
+import { syncInBackground } from './api';
+import { SEED_MAPS } from './seedData';
 
 const MAPS_KEY = 'setu.maps.v1';
 const PREFS_KEY = 'setu.prefs.v1';
+const SEEDED_KEY = 'setu.seeded.v1';
 const MAX_MAPS = 40;
 
-export const DEFAULT_WORKED_MAP = {
-  id: 'map_transformer_worked_example',
-  title: 'Transformer neural networks',
-  topic: 'How does a transformer neural network work?',
-  summary: 'Attention replaces recurrence — the whole sequence is considered at once.',
-  keyFacts: [
-    'Self-attention allows each token to attend to every other token simultaneously.',
-    'Positional encodings inject sequence order without sequential processing.',
-    'Multi-head attention captures distinct relational patterns in parallel.',
-    'Feed-forward layers process each position independently and store factual representations.'
-  ],
-  followUps: [
-    'Why did attention beat recurrence in LSTMs?',
-    'How does multi-head attention work mathematically?',
-    'What is the role of residual connections and layer norm?'
-  ],
-  sources: [
-    { title: 'Attention Is All You Need (Vaswani et al.)', url: 'https://arxiv.org/abs/1706.03762' },
-    { title: 'The Illustrated Transformer (Jay Alammar)', url: 'https://jalammar.github.io/illustrated-transformer/' }
-  ],
-  grounded: true,
-  root: {
-    id: 'root',
-    label: 'Transformer',
-    detail: 'The architecture that replaced recurrence',
-    children: [
-      {
-        id: 'b1',
-        label: 'Self-attention',
-        detail: 'Every word weighs every other word in parallel',
-        children: [
-          { id: 'b1_1', label: 'Query, key, value', detail: 'Dot-product attention scoring mechanism' },
-          { id: 'b1_2', label: 'Multi-head attention', detail: 'Multiple representation subspaces simultaneously' }
-        ]
-      },
-      {
-        id: 'b2',
-        label: 'Positional encoding',
-        detail: 'Sequence order without sequential processing',
-        children: [
-          { id: 'b2_1', label: 'Sinusoidal vs learned', detail: 'Fixed trigonometric frequencies or learned embedding weights' }
-        ]
-      },
-      {
-        id: 'b3',
-        label: 'Feed-forward layers',
-        detail: 'Where relational representations are transformed',
-        children: [
-          { id: 'b3_1', label: 'Pointwise expansion', detail: 'Independent two-layer dense network with ReLU or GELU' }
-        ]
-      },
-      {
-        id: 'b4',
-        label: 'Training at scale',
-        detail: 'Why it powered modern foundation models',
-        children: [
-          { id: 'b4_1', label: 'Pre-training objective', detail: 'Masked language modeling and next token prediction' }
-        ]
-      }
-    ]
-  },
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString()
-};
+export { DEFAULT_WORKED_MAP } from './seedData';
 
 /* -------------------------------------------------------------------------- */
 /* Safe Storage Adapter (Tracking Prevention & Private Mode Resilient)        */
@@ -148,21 +93,44 @@ function remove(key) {
 
 /* ----------------------------- Maps ----------------------------- */
 
+/**
+ * All maps for this browser, newest first.
+ *
+ * On first run the library is seeded with the reference maps in seedData so the
+ * app never opens on an empty shelf. Seeding is recorded separately from the map
+ * list, so deleting every map genuinely leaves it empty rather than silently
+ * restoring the seeds on the next read.
+ */
 export function listMaps() {
   const maps = read(MAPS_KEY, null);
-  if (!maps || !maps.length) {
-    write(MAPS_KEY, [DEFAULT_WORKED_MAP]);
-    return [DEFAULT_WORKED_MAP];
+
+  if (Array.isArray(maps)) return maps;
+
+  if (read(SEEDED_KEY, false)) {
+    // Seeded before, then emptied — respect that.
+    write(MAPS_KEY, []);
+    return [];
   }
-  return maps;
+
+  const seeds = SEED_MAPS.map((map) => ({ ...map }));
+  write(MAPS_KEY, seeds);
+  write(SEEDED_KEY, true);
+  return seeds;
 }
 
+/**
+ * Persist a map locally and mirror it to MongoDB in the background.
+ *
+ * Always returns the stored record — callers must use the returned `id` rather
+ * than the id they passed in, because a map arriving straight from the engine
+ * may carry no id at all and one is minted here.
+ */
 export function saveMap(map) {
   if (!map?.title || !map?.root) return null;
 
   const maps = listMaps();
   const record = {
-    id: map.id || `map_${Date.now()}`,
+    id: map.id || `map_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     title: map.title,
     topic: map.topic || map.title,
     summary: map.summary || '',
@@ -172,6 +140,7 @@ export function saveMap(map) {
     grounded: Boolean(map.grounded),
     root: map.root,
     isLensHandoff: Boolean(map.isLensHandoff),
+    isSeed: Boolean(map.isSeed),
     createdAt: map.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
@@ -186,14 +155,7 @@ export function saveMap(map) {
   const updatedMaps = [record, ...maps].slice(0, MAX_MAPS);
   write(MAPS_KEY, updatedMaps);
 
-  // Background sync with MongoDB if backend is running
-  try {
-    fetch('/api/mindmaps', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(record)
-    }).catch(() => {});
-  } catch (_) {}
+  syncInBackground('POST', '/api/mindmaps', record);
 
   return record;
 }
@@ -205,18 +167,33 @@ export function getMap(id) {
 export function deleteMap(id) {
   const filtered = listMaps().filter((map) => map.id !== id);
   write(MAPS_KEY, filtered);
-
-  // Background sync delete with MongoDB
-  try {
-    fetch(`/api/mindmaps/${id}`, { method: 'DELETE' }).catch(() => {});
-  } catch (_) {}
+  syncInBackground('DELETE', `/api/mindmaps/${encodeURIComponent(id)}`);
 }
 
 export function clearAllMaps() {
   write(MAPS_KEY, []);
-  try {
-    fetch('/api/mindmaps', { method: 'DELETE' }).catch(() => {});
-  } catch (_) {}
+  syncInBackground('DELETE', '/api/mindmaps');
+}
+
+/**
+ * Put the reference library back without touching the user's own maps.
+ * Exposed in Settings so a cleared demo can be reset before a walkthrough.
+ */
+export function restoreSeedMaps() {
+  const existing = listMaps();
+  const own = existing.filter((map) => !map.isSeed);
+  const missing = SEED_MAPS.filter((seed) => !existing.some((map) => map.id === seed.id));
+
+  const merged = [...own, ...missing.map((map) => ({ ...map }))]
+    .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
+    .slice(0, MAX_MAPS);
+
+  write(MAPS_KEY, merged);
+  write(SEEDED_KEY, true);
+
+  for (const seed of missing) syncInBackground('POST', '/api/mindmaps', seed);
+
+  return merged;
 }
 
 /* --------------------------- Preferences --------------------------- */
@@ -251,14 +228,7 @@ export function savePrefs(patch) {
   write(PREFS_KEY, next);
   applyPrefs(next);
 
-  // Background sync with MongoDB
-  try {
-    fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(next)
-    }).catch(() => {});
-  } catch (_) {}
+  syncInBackground('POST', '/api/settings', next);
 
   return next;
 }

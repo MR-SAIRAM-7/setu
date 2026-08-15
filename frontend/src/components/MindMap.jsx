@@ -13,6 +13,7 @@ export default function MindMap({ map, onMapChange, onNodeFocus }) {
   const [collapsed, setCollapsed] = useState(() => new Set());
   const [selected, setSelected] = useState(null);
   const [expanding, setExpanding] = useState(null);
+  const [expandError, setExpandError] = useState(null);
   const [view, setView] = useState({ x: 20, y: 20, scale: 1 });
   const [dragging, setDragging] = useState(false);
 
@@ -125,31 +126,42 @@ export default function MindMap({ map, onMapChange, onNodeFocus }) {
     async (node) => {
       if (expanding || !map) return;
       setExpanding(node.id);
+      setExpandError(null);
 
       try {
         const path = pathTo(root, node.id) || [node.label];
         const { children } = await api.expandNode(map.title, node.label, node.detail, path);
 
-        if (children?.length) {
-          const updated = {
-            ...map,
-            root: withChildren(root, node.id, [...(node.raw.children || []), ...children])
-          };
-          onMapChange?.(updated);
-          setCollapsed((current) => {
-            const next = new Set(current);
-            next.delete(node.id);
-            return next;
-          });
+        if (!children?.length) {
+          setExpandError(`No deeper detail came back for “${node.label}”.`);
+          return;
         }
+
+        const updated = {
+          ...map,
+          root: withChildren(root, node.id, [...(node.raw.children || []), ...children])
+        };
+        onMapChange?.(updated);
+        setCollapsed((current) => {
+          const next = new Set(current);
+          next.delete(node.id);
+          return next;
+        });
       } catch (err) {
-        console.error('Could not expand node:', err);
+        setExpandError(err.message || `Could not research deeper into “${node.label}”.`);
       } finally {
         setExpanding(null);
       }
     },
     [expanding, map, root, onMapChange]
   );
+
+  // Clear a stale expansion error after a few seconds so it does not linger.
+  useEffect(() => {
+    if (!expandError) return undefined;
+    const timer = setTimeout(() => setExpandError(null), 6000);
+    return () => clearTimeout(timer);
+  }, [expandError]);
 
   const selectNode = (node) => {
     setSelected(node.id);
@@ -225,6 +237,7 @@ export default function MindMap({ map, onMapChange, onNodeFocus }) {
               <path
                 key={edge.id}
                 d={edgePath(edge)}
+                pathLength="1"
                 fill="none"
                 stroke={PLATE_COLORS[edge.branch ?? 0]}
                 strokeOpacity={edge.depth === 1 ? 0.6 : 0.4}
@@ -264,6 +277,16 @@ export default function MindMap({ map, onMapChange, onNodeFocus }) {
         onExpandAll={() => setCollapsed(new Set())}
       />
 
+      {/* Expansion failure notice */}
+      {expandError && (
+        <div
+          role="status"
+          className="absolute bottom-11 left-4 right-4 sm:right-auto sm:max-w-md p-2.5 rounded-[var(--radius-md)] bg-[var(--color-accent-2-100)] border border-[var(--color-accent-2)] text-[12.5px] leading-snug text-[var(--color-accent-2-900)] shadow-[var(--shadow-md)] animate-setu-rise"
+        >
+          {expandError}
+        </div>
+      )}
+
       {/* Bottom hint */}
       <p className="pointer-events-none absolute bottom-3 left-4 text-[11.5px] text-[color-mix(in_srgb,var(--color-text)_55%,transparent)] select-none">
         Click a topic to read it · double-click to research deeper · arrow keys work too
@@ -279,8 +302,10 @@ function Node({ node, color, selected, expanding, onSelect, onToggle, onExpand, 
   const labelSize = isRoot ? '16.5px' : node.depth === 1 ? '14px' : '12.5px';
 
   return (
+    // `group` lives on the wrapper so hovering the node reveals the sibling
+    // affordance below. On the button it would never reach it.
     <div
-      className="absolute animate-setu-rise"
+      className="group absolute animate-setu-rise"
       style={{ left: node.x, top: node.y, width: node.width, height: node.height }}
     >
       <button
@@ -289,7 +314,8 @@ function Node({ node, color, selected, expanding, onSelect, onToggle, onExpand, 
         onDoubleClick={onExpand}
         onKeyDown={onKeyDown}
         aria-expanded={node.childCount ? !node.collapsed : undefined}
-        className={`group relative h-full w-full rounded-[var(--radius-md)] bg-[var(--color-bg)] p-2.5 text-left transition-all duration-150 shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] ${
+        title={node.detail || node.label}
+        className={`relative h-full w-full rounded-[var(--radius-md)] bg-[var(--color-bg)] p-2.5 text-left transition-all duration-150 shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] overflow-hidden ${
           selected
             ? 'ring-2 ring-[var(--color-accent)] ring-offset-2 ring-offset-[var(--color-surface)]'
             : ''
@@ -333,8 +359,8 @@ function Node({ node, color, selected, expanding, onSelect, onToggle, onExpand, 
             }}
             disabled={expanding}
             aria-label={`Research deeper into ${node.label}`}
-            title="Go deeper"
-            className="grid h-[22px] w-[22px] place-items-center rounded-full border border-dashed border-[var(--color-divider)] bg-[var(--color-bg)] text-[12px] font-bold text-[var(--color-text)] opacity-0 group-hover:opacity-100 hover:opacity-100 hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] transition-opacity cursor-pointer disabled:opacity-100"
+            title="Research this one level deeper"
+            className="grid h-[22px] w-[22px] place-items-center rounded-full border border-dashed border-[var(--color-divider)] bg-[var(--color-bg)] text-[12px] font-bold text-[var(--color-text)] opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] transition-opacity cursor-pointer disabled:opacity-100"
           >
             {expanding ? (
               <i className="ph-duotone ph-spinner animate-spin text-[12px] text-[var(--color-accent)]"></i>

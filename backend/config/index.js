@@ -31,6 +31,12 @@ const DEFAULT_OPENROUTER_CHAIN = [
   'qwen/qwen-2.5-72b-instruct'
 ];
 
+/** Comma-separated list of web origins permitted to call the API. */
+const allowedOrigins = (clean(process.env.CORS_ORIGINS) || '')
+  .split(',')
+  .map((origin) => origin.trim().replace(/\/+$/, ''))
+  .filter(Boolean);
+
 const customOpenRouterModel = clean(process.env.OPENROUTER_MODEL);
 const customOpenRouterChain = clean(process.env.OPENROUTER_MODEL_CHAIN)
   ? process.env.OPENROUTER_MODEL_CHAIN.split(',').map((s) => s.trim()).filter(Boolean)
@@ -84,10 +90,50 @@ module.exports = {
   // MongoDB Database Configuration
   mongoUri: clean(process.env.MONGODB_URI) || 'mongodb://127.0.0.1:27017/setu',
 
+  /** Credentials stripped — safe to print in logs and health payloads. */
+  get safeMongoUri() {
+    if (!this.mongoUri) return null;
+    return this.mongoUri.replace(/:\/\/[^@/]+@/, '://***:***@');
+  },
+
+  /**
+   * Browser origins allowed to call the API.
+   *
+   * The Chrome extension is a first-class client, so `chrome-extension://` and
+   * origin-less requests (extension service workers, curl, server-to-server)
+   * must pass. Set CORS_ORIGINS to lock the web app down to known hosts in
+   * production; leaving it unset reflects the caller's origin, which is what a
+   * local demo needs.
+   */
   corsOptions: {
-    origin: true,
+    origin(origin, callback) {
+      if (!origin) return callback(null, true);
+      if (origin.startsWith('chrome-extension://') || origin.startsWith('moz-extension://')) {
+        return callback(null, true);
+      }
+      if (!allowedOrigins.length) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error(`Origin ${origin} is not allowed by CORS.`));
+    },
+    credentials: false,
+    maxAge: 86400,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id', 'x-conversation-id']
+  },
+
+  allowedOrigins,
+
+  /** Serve the built SPA from the API process (single-service deploy). */
+  serveStatic: clean(process.env.SERVE_STATIC) !== 'false',
+
+  rateLimit: {
+    // AI calls are the expensive, quota-bound path. 30/min per user is well above
+    // what hands-on use produces, while still stopping a runaway client.
+    aiWindowMs: Number(process.env.RATE_LIMIT_AI_WINDOW_MS || 60000),
+    aiMax: Number(process.env.RATE_LIMIT_AI_MAX || 30),
+    // Everything else is cheap; this only stops runaway loops.
+    generalWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60000),
+    generalMax: Number(process.env.RATE_LIMIT_MAX || 240)
   },
 
   get aiEnabled() {
@@ -99,5 +145,27 @@ module.exports = {
     if (this.geminiApiKey) return 'gemini';
     if (this.openAiApiKey) return 'openai';
     return 'offline_l0';
+  },
+
+  /**
+   * Configuration problems worth printing at boot. Never throws: the engine is
+   * designed to run degraded (offline rule engine, browser-local storage) rather
+   * than refuse to start, so these are warnings, not fatal errors.
+   */
+  warnings() {
+    const notes = [];
+    if (!this.aiEnabled) {
+      notes.push(
+        'No AI key set (OPENROUTER_API_KEY / GEMINI_API_KEY / OPENAI_API_KEY). ' +
+          'Running on the deterministic offline engine only.'
+      );
+    }
+    if (this.nodeEnv === 'production' && !allowedOrigins.length) {
+      notes.push('CORS_ORIGINS is unset in production — the API will accept any web origin.');
+    }
+    if (!Number.isFinite(this.port) || this.port <= 0) {
+      notes.push(`PORT "${process.env.PORT}" is not a valid port number.`);
+    }
+    return notes;
   }
 };

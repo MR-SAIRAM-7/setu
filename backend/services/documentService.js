@@ -142,14 +142,26 @@ async function processAndSaveFile({ buffer, originalName, mimeType, userId = 'an
 async function createMindMapFromDocument({ documentId, userId = 'anonymous_user', onProgress = () => {} }) {
   const doc = await mongoService.getDocumentFileById(documentId);
   if (!doc) {
-    throw new Error('Document not found in database.');
+    const error = new Error(
+      'That document is no longer stored on the engine. Upload it again to build a map from it.'
+    );
+    error.status = 404;
+    throw error;
+  }
+
+  const text = typeof doc.extractedText === 'string' ? doc.extractedText : '';
+  if (!text) {
+    const error = new Error(`No readable text was extracted from "${doc.originalName}".`);
+    error.status = 422;
+    throw error;
   }
 
   onProgress({ stage: 'researching', message: `Analyzing "${doc.originalName}"…` });
 
   const map = await researchMindMap({
+    // Strip the extension so the map is titled after the subject, not the file.
     topic: doc.originalName.replace(/\.[^/.]+$/, ''),
-    context: `This mind map must be constructed from the following source document:\n\nDOCUMENT SUMMARY:\n${doc.summary}\n\nDOCUMENT TEXT EXCERPT:\n${doc.extractedText.slice(0, 16000)}`,
+    context: `This mind map must be constructed from the following source document:\n\nDOCUMENT SUMMARY:\n${doc.summary}\n\nDOCUMENT TEXT EXCERPT:\n${text.slice(0, 16000)}`,
     onProgress
   });
 
@@ -169,7 +181,16 @@ async function createMindMapFromDocument({ documentId, userId = 'anonymous_user'
 async function queryDocument({ documentId, query, messages = [], userId = 'anonymous_user' }) {
   const doc = await mongoService.getDocumentFileById(documentId);
   if (!doc) {
-    throw new Error('Document not found.');
+    const error = new Error('That document is no longer stored on the engine.');
+    error.status = 404;
+    throw error;
+  }
+
+  const text = typeof doc.extractedText === 'string' ? doc.extractedText : '';
+  if (!text) {
+    const error = new Error(`No readable text was extracted from "${doc.originalName}".`);
+    error.status = 422;
+    throw error;
   }
 
   const promptContext = `DOCUMENT TITLE: ${doc.originalName}
@@ -177,7 +198,7 @@ PAGE COUNT: ${doc.pageCount}
 SUMMARY: ${doc.summary}
 
 DOCUMENT EXCERPT:
-${doc.extractedText.slice(0, 20000)}`;
+${text.slice(0, 20000)}`;
 
   const answer = await requestText({
     instructions: `You are SETU Document Copilot. Answer the user's question specifically and accurately based on the uploaded document provided below.

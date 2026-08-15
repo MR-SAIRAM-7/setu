@@ -99,6 +99,35 @@ function toGeminiSchema(schema) {
   return out;
 }
 
+/**
+ * Render a JSON schema as an instruction block.
+ *
+ * OpenRouter's `json_object` response format only guarantees *valid* JSON, not
+ * JSON matching a schema, and the chain spans models with very different levels
+ * of structured-output support — asking for `json_schema` strict mode would 400
+ * on several of them and burn the whole fallback chain. Putting the schema in
+ * the prompt is the one approach every model in the chain honours, and it is
+ * what keeps field names stable across providers.
+ */
+function schemaInstruction(schema, name) {
+  const required = Array.isArray(schema?.required) ? schema.required : [];
+
+  return [
+    '',
+    'You must reply with a single raw JSON object and nothing else.',
+    'No markdown, no code fence, no commentary before or after.',
+    '',
+    `It must match this JSON Schema exactly${name ? ` (${name})` : ''}:`,
+    JSON.stringify(schema, null, 2),
+    '',
+    'Use these exact key names and nesting. Do not rename, add, or omit keys.',
+    required.length ? `Every one of these keys is required: ${required.join(', ')}.` : '',
+    'Where a property lists an "enum", the value must be one of those strings verbatim.'
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
 /** Models sometimes wrap JSON in prose or a ```json fence. Recover it cleanly. */
 function parseJsonLoose(raw) {
   if (!raw || typeof raw !== 'string') {
@@ -224,19 +253,14 @@ async function callOpenRouter({ system, messages, schema, name, temperature }) {
 
   for (const model of chain) {
     try {
+      const systemContent = schema
+        ? `${system || ''}\n${schemaInstruction(schema, name)}`.trim()
+        : system;
+
       const body = {
         model,
         messages: [
-          ...(system
-            ? [
-                {
-                  role: 'system',
-                  content: schema
-                    ? `${system}\n\nIMPORTANT: You must reply ONLY with a valid, raw JSON object conforming strictly to the requested schema. Do not enclose in markdown prose.`
-                    : system
-                }
-              ]
-            : []),
+          ...(systemContent ? [{ role: 'system', content: systemContent }] : []),
           ...messages
         ],
         temperature: temperature ?? 0.7
@@ -649,6 +673,36 @@ async function withProviders(attempt) {
   );
 }
 
+/**
+ * Check a parsed response against the schema's top-level contract.
+ *
+ * Only the shallow shape is enforced. That is the layer that actually breaks —
+ * a model inventing `success_signal` where the schema said `tip` produces a
+ * response the UI renders as blank — while deep validation would reject
+ * otherwise-usable answers over a nested detail.
+ */
+function findContractViolation(value, schema) {
+  if (!schema || schema.type !== 'object') return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return 'response was not a JSON object';
+  }
+
+  const missing = (schema.required || []).filter((key) => value[key] === undefined);
+  if (missing.length) return `missing required key(s): ${missing.join(', ')}`;
+
+  for (const [key, spec] of Object.entries(schema.properties || {})) {
+    if (value[key] === undefined) continue;
+    if (spec.type === 'array' && !Array.isArray(value[key])) {
+      return `"${key}" should be an array`;
+    }
+    if (spec.type === 'object' && (typeof value[key] !== 'object' || Array.isArray(value[key]))) {
+      return `"${key}" should be an object`;
+    }
+  }
+
+  return null;
+}
+
 /** Structured JSON generation against a schema. */
 async function requestStructuredAI({ name, schema, instructions, input, messages, temperature = 0.3 }) {
   const chat = normalizeMessages(input, messages);
@@ -662,7 +716,19 @@ async function requestStructuredAI({ name, schema, instructions, input, messages
     } else {
       raw = await callOpenAI({ system: instructions, messages: chat, schema, name, temperature });
     }
-    return parseJsonLoose(raw);
+
+    const parsed = parseJsonLoose(raw);
+
+    const violation = findContractViolation(parsed, schema);
+    if (violation) {
+      // Retryable: the retry loop gets another sample, then the next provider.
+      throw new AIError(`${provider} returned an off-contract response — ${violation}.`, {
+        provider,
+        retryable: true
+      });
+    }
+
+    return parsed;
   });
 }
 

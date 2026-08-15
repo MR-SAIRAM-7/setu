@@ -48,70 +48,49 @@ export default function MindMapChat() {
   const abortRef = useRef(null);
   const logRef = useRef(null);
   const inputRef = useRef(null);
+  const exportMenuRef = useRef(null);
+  const pendingRef = useRef(null);
   const [params, setParams] = useSearchParams();
 
-  // Load default initial map if none is open
+  // Open the most recent map on first mount so the canvas is never blank.
   useEffect(() => {
-    if (!map) {
-      const stored = listMaps();
-      const current = stored[0] || DEFAULT_WORKED_MAP;
-      setMap(current);
-    }
+    const stored = listMaps();
+    setMap(stored[0] || DEFAULT_WORKED_MAP);
   }, []);
 
-  // Check URL parameters for search query or extension import
+  /**
+   * Handle the three deep links the app supports, exactly once each.
+   *
+   * `pendingRef` holds the parsed intent so the work happens in a second effect
+   * that can safely depend on `send`. Consuming the param immediately (before
+   * any await) is what stops a re-render from replaying the same deep link.
+   */
   useEffect(() => {
     const topicParam = params.get('topic');
-    if (topicParam && !busy && messages.length === 0) {
-      params.delete('topic');
-      setParams(params, { replace: true });
-      send(topicParam);
-    }
-  }, [params, setParams]);
+    const docParam = params.get('doc');
+    const importParam = params.get('import');
 
-  /* Handle Extension Import Handoff */
-  useEffect(() => {
-    const imported = params.get('import');
-    if (!imported) return;
+    if (!topicParam && !docParam && !importParam) return;
+
+    const next = new URLSearchParams(params);
+    next.delete('topic');
+    next.delete('doc');
+    next.delete('import');
+    setParams(next, { replace: true });
+
+    if (topicParam) {
+      pendingRef.current = { kind: 'topic', topic: topicParam };
+      return;
+    }
+    if (docParam) {
+      pendingRef.current = { kind: 'doc', documentId: docParam };
+      return;
+    }
 
     try {
-      const payload = JSON.parse(decodeURIComponent(imported));
-      params.delete('import');
-      setParams(params, { replace: true });
-
-      setHandoffBanner({
-        title: payload.title || 'Page sent from Lens',
-        url: payload.url || ''
-      });
-
-      setMessages([
-        { role: 'user', content: `Map this page for me: ${payload.title}` },
-        {
-          role: 'assistant',
-          content: `Reading “${payload.title}” and laying out an accessible mind map…`
-        }
-      ]);
-      setBusy(true);
-      setStatus('Reading around the topic…');
-
-      api
-        .mindMap(payload.title, payload.text?.slice(0, 12000) || '')
-        .then((fresh) => {
-          const withHandoff = { ...fresh, isLensHandoff: true };
-          setMap(withHandoff);
-          saveMap(withHandoff);
-          setMessages((current) => [
-            ...current,
-            { role: 'assistant', content: `Here's your map of **${fresh.title}**.` }
-          ]);
-        })
-        .catch((err) => setError(err.message))
-        .finally(() => {
-          setBusy(false);
-          setStatus(null);
-        });
+      pendingRef.current = { kind: 'import', payload: JSON.parse(decodeURIComponent(importParam)) };
     } catch (_) {
-      // Ignore malformed import
+      // A malformed handoff should not break the page.
     }
   }, [params, setParams]);
 
@@ -122,6 +101,25 @@ export default function MindMapChat() {
 
   /* Cancel stream on unmount */
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  /* Close the export menu on outside click or Escape */
+  useEffect(() => {
+    if (!exportMenuOpen) return undefined;
+
+    const onPointerDown = (event) => {
+      if (!exportMenuRef.current?.contains(event.target)) setExportMenuOpen(false);
+    };
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') setExportMenuOpen(false);
+    };
+
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [exportMenuOpen]);
 
   const send = useCallback(
     async (raw) => {
@@ -168,9 +166,10 @@ export default function MindMapChat() {
                 return [...current, { role: 'assistant', content: replyText }];
               }),
             onMap: (fresh) => {
-              setMap(fresh);
+              // Use the stored record: saveMap mints an id when the engine sent none.
+              const stored = saveMap(fresh);
+              setMap(stored || fresh);
               setDetail(null);
-              saveMap(fresh);
               setMessages((current) => [
                 ...current,
                 { role: 'assistant', content: `Here's your map of **${fresh.title}**.` }
@@ -199,6 +198,67 @@ export default function MindMapChat() {
     [input, busy, messages, map, attachedDoc, conversationId]
   );
 
+  /**
+   * Execute whatever the deep link asked for.
+   *
+   * Declared after `send` because it depends on it — referencing `send` in a
+   * dependency array above its own declaration would hit the temporal dead zone.
+   */
+  useEffect(() => {
+    const pending = pendingRef.current;
+    if (!pending || busy) return;
+    pendingRef.current = null;
+
+    if (pending.kind === 'topic') {
+      send(pending.topic);
+      return;
+    }
+
+    if (pending.kind === 'doc') {
+      api
+        .getFile(pending.documentId)
+        .then((result) => {
+          if (result?.document) {
+            setAttachedDoc(result.document);
+            inputRef.current?.focus();
+          } else {
+            setError('That document is no longer available on the engine.');
+          }
+        })
+        .catch((err) => setError(err.message));
+      return;
+    }
+
+    if (pending.kind === 'import') {
+      const payload = pending.payload || {};
+      const title = payload.title || 'Page sent from Lens';
+
+      setHandoffBanner({ title, url: payload.url || '' });
+      setMessages([
+        { role: 'user', content: `Map this page for me: ${title}` },
+        { role: 'assistant', content: `Reading “${title}” and laying out an accessible mind map…` }
+      ]);
+      setBusy(true);
+      setStatus('Reading around the topic…');
+
+      api
+        .mindMap(title, payload.text?.slice(0, 12000) || '')
+        .then((fresh) => {
+          const stored = saveMap({ ...fresh, isLensHandoff: true });
+          setMap(stored || { ...fresh, isLensHandoff: true });
+          setMessages((current) => [
+            ...current,
+            { role: 'assistant', content: `Here's your map of **${fresh.title}**.` }
+          ]);
+        })
+        .catch((err) => setError(err.message))
+        .finally(() => {
+          setBusy(false);
+          setStatus(null);
+        });
+    }
+  }, [params, busy, send]);
+
   const stop = () => {
     abortRef.current?.abort();
     setBusy(false);
@@ -218,9 +278,9 @@ export default function MindMapChat() {
   };
 
   const handleMindMapFromFile = (freshMap) => {
-    setMap(freshMap);
+    const stored = saveMap(freshMap);
+    setMap(stored || freshMap);
     setDetail(null);
-    saveMap(freshMap);
     setMessages([
       {
         role: 'user',
@@ -233,37 +293,23 @@ export default function MindMapChat() {
     ]);
   };
 
-  const handleExportPDF = () => {
-    if (!map) return;
-    exportMindMapToPDF(map);
-    setExportMenuOpen(false);
-  };
-
-  const handleExportPNG = () => {
-    const el = document.getElementById('mindmap-canvas-container');
-    if (!el || !map) return;
-    exportMindMapToPNG(el, map.title);
-    setExportMenuOpen(false);
-  };
-
-  const handleExportSVG = () => {
-    const svg = document.getElementById('mindmap-canvas-svg');
-    if (!svg || !map) return;
-    exportMindMapToSVG(svg, map.title);
-    setExportMenuOpen(false);
-  };
-
-  const handleExportMarkdown = () => {
-    if (!map) return;
-    exportMindMapToMarkdown(map);
-    setExportMenuOpen(false);
-  };
-
-  const handleExportJSON = () => {
-    if (!map) return;
-    exportMindMapToJSON(map);
-    setExportMenuOpen(false);
-  };
+  /**
+   * All exports run through here so a failure surfaces in the UI instead of
+   * silently doing nothing, and the menu always closes.
+   */
+  const runExport = useCallback(
+    async (label, exporter) => {
+      if (!map) return;
+      setExportMenuOpen(false);
+      setError(null);
+      try {
+        await exporter(map);
+      } catch (err) {
+        setError(`${label} export failed: ${err.message || 'unknown error'}`);
+      }
+    },
+    [map]
+  );
 
   return (
     <div className="flex h-full w-full flex-col lg:flex-row overflow-hidden bg-[var(--color-bg)]">
@@ -533,10 +579,12 @@ export default function MindMapChat() {
                 )}
 
                 {/* Visual Export Menu */}
-                <div className="relative">
+                <div className="relative" ref={exportMenuRef}>
                   <button
                     onClick={() => setExportMenuOpen((prev) => !prev)}
                     className="btn btn-secondary !min-h-[32px] !px-3 text-[12.5px] flex items-center gap-1.5"
+                    aria-haspopup="menu"
+                    aria-expanded={exportMenuOpen}
                     aria-label="Export mind map options"
                   >
                     <i className="ph-duotone ph-export"></i>
@@ -545,23 +593,26 @@ export default function MindMapChat() {
                   </button>
 
                   {exportMenuOpen && (
-                    <div className="absolute right-0 top-full mt-1.5 w-48 rounded-[var(--radius-md)] bg-[var(--color-bg)] border border-[var(--color-divider)] shadow-xl py-1.5 z-50 text-left animate-setu-rise">
+                    <div
+                      role="menu"
+                      className="absolute right-0 top-full mt-1.5 w-48 rounded-[var(--radius-md)] bg-[var(--color-bg)] border border-[var(--color-divider)] shadow-xl py-1.5 z-50 text-left animate-setu-rise"
+                    >
                       <button
-                        onClick={handleExportPDF}
+                        onClick={() => runExport('PDF', exportMindMapToPDF)}
                         className="w-full px-3.5 py-2 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface)] hover:text-[var(--color-accent)] flex items-center gap-2.5 transition-colors cursor-pointer bg-transparent border-0"
                       >
                         <i className="ph-duotone ph-file-pdf text-base text-[var(--color-accent-2)]"></i>
                         Visual PDF Document
                       </button>
                       <button
-                        onClick={handleExportPNG}
+                        onClick={() => runExport('PNG', exportMindMapToPNG)}
                         className="w-full px-3.5 py-2 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface)] hover:text-[var(--color-accent)] flex items-center gap-2.5 transition-colors cursor-pointer bg-transparent border-0"
                       >
                         <i className="ph-duotone ph-image text-base text-[var(--color-accent)]"></i>
                         High-Res Image (PNG)
                       </button>
                       <button
-                        onClick={handleExportSVG}
+                        onClick={() => runExport('SVG', exportMindMapToSVG)}
                         className="w-full px-3.5 py-2 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface)] hover:text-[var(--color-accent)] flex items-center gap-2.5 transition-colors cursor-pointer bg-transparent border-0"
                       >
                         <i className="ph-duotone ph-bezier-curve text-base text-[#0088b0]"></i>
@@ -569,14 +620,14 @@ export default function MindMapChat() {
                       </button>
                       <div className="my-1 h-px bg-[var(--color-divider)]" />
                       <button
-                        onClick={handleExportMarkdown}
+                        onClick={() => runExport('Markdown', exportMindMapToMarkdown)}
                         className="w-full px-3.5 py-2 text-xs text-[color-mix(in_srgb,var(--color-text)_80%,transparent)] hover:bg-[var(--color-surface)] flex items-center gap-2.5 transition-colors cursor-pointer bg-transparent border-0"
                       >
                         <i className="ph-duotone ph-file-text text-base"></i>
                         Markdown Outline
                       </button>
                       <button
-                        onClick={handleExportJSON}
+                        onClick={() => runExport('JSON', exportMindMapToJSON)}
                         className="w-full px-3.5 py-2 text-xs text-[color-mix(in_srgb,var(--color-text)_80%,transparent)] hover:bg-[var(--color-surface)] flex items-center gap-2.5 transition-colors cursor-pointer bg-transparent border-0"
                       >
                         <i className="ph-duotone ph-code text-base"></i>

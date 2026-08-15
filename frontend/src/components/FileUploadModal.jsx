@@ -1,12 +1,25 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { api } from '../lib/api';
 
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+
+const ACCEPTED_EXTENSIONS = [
+  'pdf', 'docx', 'txt', 'md', 'markdown', 'json', 'csv',
+  'png', 'jpg', 'jpeg', 'webp', 'gif'
+];
+
+/**
+ * @param {'full'|'text'} variant  'full' offers mind map + chat actions;
+ *                                 'text' only hands the extracted text back.
+ */
 export default function FileUploadModal({
   isOpen,
   onClose,
   onMindMapGenerated,
   onFileAttached,
-  conversationId = null
+  conversationId = null,
+  variant = 'full',
+  attachLabel = 'Ask & Query this File'
 }) {
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -14,6 +27,28 @@ export default function FileUploadModal({
   const [error, setError] = useState(null);
   const [statusMessage, setStatusMessage] = useState('');
   const fileInputRef = useRef(null);
+  const dialogRef = useRef(null);
+
+  // Escape closes; focus moves into the dialog so keyboard users are not stranded.
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape' && !uploading) onClose?.();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    dialogRef.current?.focus();
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, uploading, onClose]);
+
+  // Reset transient state whenever the dialog is reopened.
+  useEffect(() => {
+    if (!isOpen) {
+      setDocResult(null);
+      setError(null);
+      setStatusMessage('');
+      setDragging(false);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -44,33 +79,59 @@ export default function FileUploadModal({
   };
 
   const processFile = async (file) => {
+    if (!file) return;
+
+    // Validate before the round trip so the user gets an answer immediately.
+    const extension = file.name.split('.').pop()?.toLowerCase() || '';
+    if (!ACCEPTED_EXTENSIONS.includes(extension)) {
+      setError(
+        `"${file.name}" is not a supported format. Use PDF, Word (.docx), Markdown, TXT, CSV, JSON, or an image.`
+      );
+      return;
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setError(
+        `"${file.name}" is ${(file.size / 1024 / 1024).toFixed(1)}MB. The limit is 25MB — try splitting it up.`
+      );
+      return;
+    }
+    if (file.size === 0) {
+      setError(`"${file.name}" is empty.`);
+      return;
+    }
+
     setUploading(true);
     setError(null);
     setDocResult(null);
-    setStatusMessage(`Uploading & extracting text from "${file.name}"…`);
+    setStatusMessage(`Uploading and extracting text from "${file.name}"…`);
 
     try {
       const doc = await api.uploadFile(file, conversationId);
+      if (!doc) throw new Error('The engine returned no document.');
       setDocResult(doc);
-      setStatusMessage('Document extracted and summarized successfully.');
+      setStatusMessage('Document extracted and summarised successfully.');
     } catch (err) {
-      setError(err.message || 'File processing failed. Please check backend connection.');
+      setError(err.message || 'File processing failed. Check that the backend is running.');
     } finally {
       setUploading(false);
+      // Allow re-selecting the same file after an error.
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
   const handleGenerateMindMap = async () => {
     if (!docResult) return;
     setUploading(true);
-    setStatusMessage(`Synthesizing mind map from "${docResult.originalName}"…`);
+    setError(null);
+    setStatusMessage(`Researching and mapping "${docResult.originalName}"… this takes a few seconds.`);
 
     try {
       const map = await api.mindMapFromFile(docResult.id);
+      if (!map?.root) throw new Error('The engine returned a map with no branches.');
       onMindMapGenerated?.(map);
       onClose();
     } catch (err) {
-      setError(err.message || 'Could not generate mind map from file.');
+      setError(err.message || 'Could not generate a mind map from this file.');
     } finally {
       setUploading(false);
     }
@@ -95,8 +156,16 @@ export default function FileUploadModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="upload-modal-title"
+      onClick={() => {
+        if (!uploading) onClose?.();
+      }}
     >
-      <div className="w-full max-w-xl rounded-[var(--radius-lg)] bg-[var(--color-bg)] border border-[var(--color-divider)] shadow-2xl p-6 space-y-5 text-left max-h-[90vh] overflow-y-auto">
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-xl rounded-[var(--radius-lg)] bg-[var(--color-bg)] border border-[var(--color-divider)] shadow-2xl p-6 space-y-5 text-left max-h-[90vh] overflow-y-auto outline-none"
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[var(--color-divider)] pb-3">
           <div className="flex items-center gap-2.5">
@@ -138,7 +207,7 @@ export default function FileUploadModal({
               ref={fileInputRef}
               type="file"
               onChange={handleFileChange}
-              accept=".pdf,.docx,.txt,.md,.json,.csv,.png,.jpg,.jpeg,.webp"
+              accept={ACCEPTED_EXTENSIONS.map((ext) => `.${ext}`).join(',')}
               className="hidden"
             />
             <div className="max-w-xs mx-auto space-y-3 pointer-events-none">
@@ -223,19 +292,28 @@ export default function FileUploadModal({
 
             {/* Actions */}
             <div className="flex flex-wrap items-center gap-2.5 pt-2">
-              <button
-                onClick={handleGenerateMindMap}
-                className="btn btn-primary flex-1 text-xs py-2"
-              >
-                <i className="ph-duotone ph-graph"></i>
-                Generate Mind Map from File
-              </button>
+              {variant === 'full' && (
+                <button
+                  onClick={handleGenerateMindMap}
+                  disabled={uploading}
+                  className="btn btn-primary flex-1 min-w-[180px] text-xs py-2"
+                >
+                  <i className="ph-duotone ph-graph"></i>
+                  Generate Mind Map from File
+                </button>
+              )}
               <button
                 onClick={handleAttachAndChat}
-                className="btn btn-secondary flex-1 text-xs py-2"
+                className={`btn flex-1 min-w-[180px] text-xs py-2 ${
+                  variant === 'full' ? 'btn-secondary' : 'btn-primary'
+                }`}
               >
-                <i className="ph-duotone ph-chats-circle"></i>
-                Ask & Query this File
+                <i
+                  className={`ph-duotone ${
+                    variant === 'full' ? 'ph-chats-circle' : 'ph-text-align-left'
+                  }`}
+                ></i>
+                {attachLabel}
               </button>
             </div>
           </div>

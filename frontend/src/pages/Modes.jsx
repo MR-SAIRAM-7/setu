@@ -90,8 +90,20 @@ const MODES_DATA = [
         {
           question: 'Where do the light-dependent reactions of photosynthesis take place?',
           options: ['Thylakoid membrane', 'Stroma', 'Mitochondrial matrix', 'Outer membrane'],
-          correctAnswerIndex: 0,
+          answerIndex: 0,
           explanation: 'Thylakoid membranes contain chlorophyll and ATP synthase complexes.'
+        },
+        {
+          question: 'What does the Calvin cycle actually consume to build sugar?',
+          options: [
+            'ATP and NADPH made by the light reactions',
+            'Oxygen released from water',
+            'Chlorophyll pigment itself',
+            'Sunlight directly'
+          ],
+          answerIndex: 0,
+          explanation:
+            'The Calvin cycle is light-independent: it spends the ATP and NADPH the light reactions produced.'
         }
       ]
     }
@@ -163,13 +175,25 @@ const MODES_DATA = [
     rows: 6,
     run: (val) => api.write(val),
     workedExample: {
-      readingGrade: 'Grade 7 (Clear & Accessible)',
-      accessibleRewrite:
-        'We updated the login system today. You can now use your email address or Google account to sign in immediately without waiting for an SMS code.',
-      passiveVoiceInstances: ['"SMS codes were dispatched by our server" → changed to active voice.'],
-      improvements: [
-        'Split the 42-word run-on sentence into two concise sentences.',
-        'Removed redundant corporate jargon ("seamless synchronization paradigm").'
+      originalGradeLevel: 'Grade 12.4 → rewritten at Grade 7',
+      improvedText:
+        'We updated the login system today. You can now sign in with your email address or your Google account. You no longer have to wait for an SMS code.',
+      passiveVoiceInstances: [
+        'SMS codes were dispatched by our authentication server',
+        'Users are advised that credentials will be migrated'
+      ],
+      clarityFixes: [
+        {
+          originalSnippet:
+            'Please be advised that as of today our authentication subsystem has been upgraded to facilitate a seamless synchronization paradigm across identity providers.',
+          suggestedSnippet: 'We updated the login system today.',
+          reason: 'A 24-word sentence of corporate jargon replaced with the one fact the reader needs.'
+        },
+        {
+          originalSnippet: 'SMS codes were dispatched by our authentication server.',
+          suggestedSnippet: 'You no longer have to wait for an SMS code.',
+          reason: 'Passive voice hides who acts. Active voice tells the reader what changes for them.'
+        }
       ]
     }
   },
@@ -185,22 +209,28 @@ const MODES_DATA = [
     rows: 3,
     run: (val) => api.guide(val),
     workedExample: {
-      goal: 'Setting up Git SSH Authentication',
+      workflowName: 'Setting up Git SSH authentication',
+      totalSteps: 3,
       steps: [
         {
           stepNumber: 1,
-          action: 'Run ssh-keygen -t ed25519 -C "your_email@example.com" in terminal.',
-          successSignal: 'Terminal outputs "Your identification has been saved in /id_ed25519".'
+          title: 'Generate your key pair',
+          actionRequired:
+            'Run ssh-keygen -t ed25519 -C "your_email@example.com" in the terminal and press Enter at every prompt.',
+          tip: 'the terminal prints "Your identification has been saved in ~/.ssh/id_ed25519".'
         },
         {
           stepNumber: 2,
-          action: 'Copy the public key using cat ~/.ssh/id_ed25519.pub and paste it into GitHub SSH Settings.',
-          successSignal: 'GitHub displays green key icon with your email address.'
+          title: 'Give GitHub the public half',
+          actionRequired:
+            'Run cat ~/.ssh/id_ed25519.pub, copy the whole line, and paste it into GitHub → Settings → SSH and GPG keys → New SSH key.',
+          tip: 'the key appears in the list with your email beside it.'
         },
         {
           stepNumber: 3,
-          action: 'Test the connection with ssh -T git@github.com.',
-          successSignal: 'You see "Hi username! You\'ve successfully authenticated".'
+          title: 'Prove the connection works',
+          actionRequired: 'Run ssh -T git@github.com and type yes if it asks about the fingerprint.',
+          tip: 'you see "Hi username! You\'ve successfully authenticated".'
         }
       ]
     }
@@ -375,14 +405,34 @@ export default function Modes() {
 
         {/* Result Area */}
         <section className="space-y-6 max-w-3xl animate-setu-rise">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="kicker">Last result</span>
-              {isWorkedExample && (
+              {isWorkedExample ? (
                 <span className="tag tag-neutral text-[10.5px]">worked example</span>
+              ) : currentResult?.fallback ? (
+                <span
+                  className="tag tag-neutral text-[10.5px]"
+                  title={currentResult.fallbackReason || 'The AI engine was unreachable.'}
+                >
+                  <i className="ph-duotone ph-plugs"></i>
+                  offline engine
+                </span>
+              ) : (
+                <span className="tag tag-accent text-[10.5px]">
+                  <i className="ph-duotone ph-sparkle"></i>
+                  AI result
+                </span>
               )}
             </div>
           </div>
+
+          {!isWorkedExample && currentResult?.fallback && currentResult.fallbackReason && (
+            <p className="text-[12.5px] leading-snug text-[color-mix(in_srgb,var(--color-text)_62%,transparent)] -mt-3">
+              The AI engine could not be reached, so this came from SETU's built-in offline rules.
+              Reason: {currentResult.fallbackReason}
+            </p>
+          )}
 
           {/* Render Result Content */}
           <RenderModeResult modeKey={activeKey} data={currentResult} />
@@ -392,8 +442,13 @@ export default function Modes() {
       <FileUploadModal
         isOpen={uploadModalOpen}
         onClose={() => setUploadModalOpen(false)}
+        variant="text"
+        attachLabel="Load this text into the field"
         onFileAttached={(doc) => {
-          setInputVal(doc.extractedText || doc.summary || '');
+          // The engine caps mode input at 64k chars; trim here so the textarea stays usable.
+          const text = doc.extractedText || doc.summary || '';
+          setInputVal(text.slice(0, 60000));
+          setError(null);
         }}
       />
     </div>
@@ -551,18 +606,21 @@ function RenderModeResult({ modeKey, data }) {
                 >
                   <p className="font-semibold text-[14.5px] text-[var(--color-text)]">{q.question}</p>
                   <div className="space-y-1.5 pl-2">
-                    {(q.options || []).map((opt, optIdx) => (
-                      <div
-                        key={optIdx}
-                        className={`p-2 rounded text-[13px] ${
-                          optIdx === q.correctAnswerIndex
-                            ? 'bg-[var(--color-accent-100)] text-[var(--color-accent-900)] font-semibold'
-                            : 'text-[color-mix(in_srgb,var(--color-text)_80%,transparent)]'
-                        }`}
-                      >
-                        {optIdx === q.correctAnswerIndex ? '✓ ' : '• '} {opt}
-                      </div>
-                    ))}
+                    {(q.options || []).map((opt, optIdx) => {
+                      const isAnswer = optIdx === (q.answerIndex ?? q.correctAnswerIndex);
+                      return (
+                        <div
+                          key={optIdx}
+                          className={`p-2 rounded text-[13px] ${
+                            isAnswer
+                              ? 'bg-[var(--color-accent-100)] text-[var(--color-accent-900)] font-semibold'
+                              : 'text-[color-mix(in_srgb,var(--color-text)_80%,transparent)]'
+                          }`}
+                        >
+                          {isAnswer ? '✓ ' : '• '} {opt}
+                        </div>
+                      );
+                    })}
                   </div>
                   {q.explanation && (
                     <p className="text-[12px] text-[color-mix(in_srgb,var(--color-text)_60%,transparent)] italic pt-1 border-t border-[var(--color-divider)]">
@@ -682,23 +740,67 @@ function RenderModeResult({ modeKey, data }) {
         </div>
       );
 
-    case 'write':
+    case 'write': {
+      // Contract mirrors backend writeSchema; older keys kept as a safety net.
+      const grade = data.originalGradeLevel || data.readingGrade;
+      const rewrite = data.improvedText || data.accessibleRewrite;
+      const fixes = data.clarityFixes || [];
+
       return (
         <div className="space-y-5">
-          {data.readingGrade && (
-            <span className="tag tag-accent">{data.readingGrade}</span>
-          )}
+          {grade && <span className="tag tag-accent">{grade}</span>}
 
-          {data.accessibleRewrite && (
+          {rewrite && (
             <div className="space-y-1.5">
               <span className="kicker block">Clear rewrite</span>
               <p className="text-[15px] leading-relaxed text-[var(--color-text)] p-4 bg-[var(--color-surface)] rounded-[var(--radius-md)] border border-[var(--color-divider)]">
-                {data.accessibleRewrite}
+                {rewrite}
               </p>
             </div>
           )}
 
-          {data.improvements?.length > 0 && (
+          {data.passiveVoiceInstances?.length > 0 && (
+            <div className="space-y-2">
+              <span className="kicker block">Passive voice found</span>
+              <ul className="space-y-1.5 pl-0 list-none">
+                {data.passiveVoiceInstances.map((instance, idx) => (
+                  <li
+                    key={idx}
+                    className="p-2.5 bg-[var(--color-surface)] rounded-[var(--radius-sm)] border-l-[3px] border-[#edbb00] text-[13.5px] text-[var(--color-text)] italic"
+                  >
+                    “{instance}”
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {fixes.length > 0 && (
+            <div className="space-y-2.5">
+              <span className="kicker block">Line edits</span>
+              {fixes.map((fix, idx) => (
+                <div
+                  key={idx}
+                  className="p-3.5 bg-[var(--color-surface)] rounded-[var(--radius-md)] border border-[var(--color-divider)] space-y-2"
+                >
+                  <p className="text-[13px] leading-snug text-[color-mix(in_srgb,var(--color-text)_62%,transparent)] line-through decoration-[var(--color-accent-2)]">
+                    {fix.originalSnippet}
+                  </p>
+                  <p className="text-[14.5px] leading-relaxed font-semibold text-[var(--color-text)]">
+                    {fix.suggestedSnippet}
+                  </p>
+                  {fix.reason && (
+                    <p className="text-[12.5px] text-[var(--color-accent-700)] pt-1.5 border-t border-[var(--color-divider)]">
+                      {fix.reason}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Older shape, kept so cached results still render */}
+          {!fixes.length && data.improvements?.length > 0 && (
             <div className="space-y-2">
               <span className="kicker block">What was changed</span>
               <ul className="space-y-1 pl-5 list-disc text-[13.5px] text-[var(--color-text)]">
@@ -710,33 +812,45 @@ function RenderModeResult({ modeKey, data }) {
           )}
         </div>
       );
+    }
 
-    case 'guide':
+    case 'guide': {
+      // Contract mirrors backend guideSchema; older keys kept as a safety net.
+      const heading = data.workflowName || data.goal;
+      const steps = data.steps || [];
+
       return (
         <div className="space-y-5">
-          {data.goal && (
-            <h3 className="text-[17px] font-bold text-[var(--color-text)]">{data.goal}</h3>
+          {heading && (
+            <div className="flex flex-wrap items-center gap-2.5">
+              <h3 className="text-[17px] font-bold text-[var(--color-text)]">{heading}</h3>
+              <span className="tag tag-neutral">
+                {data.totalSteps || steps.length} step{(data.totalSteps || steps.length) === 1 ? '' : 's'}
+              </span>
+            </div>
           )}
 
-          {data.steps?.length > 0 && (
+          {steps.length > 0 && (
             <div className="space-y-3">
-              {data.steps.map((st, idx) => (
+              {steps.map((st, idx) => (
                 <div
                   key={idx}
                   className="p-4 bg-[var(--color-surface)] rounded-[var(--radius-md)] border border-[var(--color-divider)] space-y-2"
                 >
-                  <div className="flex items-center gap-2">
-                    <span className="grid h-6 w-6 place-items-center rounded-full bg-[var(--color-text)] text-[var(--color-bg)] font-bold text-[12px]">
+                  <div className="flex items-center gap-2.5">
+                    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--color-text)] text-[var(--color-bg)] font-bold text-[12px]">
                       {st.stepNumber || idx + 1}
                     </span>
                     <span className="font-bold text-[15px] text-[var(--color-text)]">
-                      Step {st.stepNumber || idx + 1}
+                      {st.title || `Step ${st.stepNumber || idx + 1}`}
                     </span>
                   </div>
-                  <p className="text-[14px] text-[var(--color-text)] pl-8">{st.action}</p>
-                  {st.successSignal && (
-                    <div className="ml-8 p-2 rounded bg-[var(--color-bg)] border border-[var(--color-divider)] text-[12.5px] text-[var(--color-accent-700)]">
-                      <strong>Signal it worked:</strong> {st.successSignal}
+                  <p className="text-[14px] leading-relaxed text-[var(--color-text)] pl-[34px]">
+                    {st.actionRequired || st.action}
+                  </p>
+                  {(st.tip || st.successSignal) && (
+                    <div className="ml-[34px] p-2.5 rounded bg-[var(--color-bg)] border border-[var(--color-divider)] text-[12.5px] leading-snug text-[var(--color-accent-700)]">
+                      <strong>You will know it worked when:</strong> {st.tip || st.successSignal}
                     </div>
                   )}
                 </div>
@@ -745,6 +859,7 @@ function RenderModeResult({ modeKey, data }) {
           )}
         </div>
       );
+    }
 
     default:
       return (

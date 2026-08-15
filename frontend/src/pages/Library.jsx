@@ -14,6 +14,8 @@ export default function Library() {
   const [query, setQuery] = useState('');
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [loadingFiles, setLoadingFiles] = useState(false);
+  const [buildingFrom, setBuildingFrom] = useState(null);
+  const [error, setError] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -65,21 +67,36 @@ export default function Library() {
 
   const removeFile = async (e, id) => {
     e.stopPropagation();
-    try {
-      await api.deleteFile(id);
-      setFiles((prev) => prev.filter((f) => f.id !== id));
-    } catch (_) {}
+    // Optimistic: the card disappears immediately, and a failed delete simply
+    // reappears on the next load rather than blocking the interaction.
+    setFiles((prev) => prev.filter((f) => f.id !== id));
+    await api.deleteFile(id);
   };
 
+  /**
+   * Build a map from an uploaded document and open it.
+   *
+   * saveMap returns the stored record, whose id may differ from anything the
+   * engine sent back (a map generated without a database has no id at all), so
+   * the returned record is what we open.
+   */
   const handleMindMapFromFile = async (file) => {
+    if (buildingFrom) return;
+    setBuildingFrom(file.id);
+    setError(null);
+
     try {
       const freshMap = await api.mindMapFromFile(file.id);
-      saveMap(freshMap);
+      if (!freshMap?.root) throw new Error('The engine returned a map with no branches.');
+
+      const stored = saveMap(freshMap);
       setMaps(listMaps());
-      setOpenId(freshMap.id);
       setActiveTab('maps');
+      if (stored) setOpenId(stored.id);
     } catch (err) {
-      alert(`Could not build mind map: ${err.message}`);
+      setError(err.message || 'Could not build a mind map from that document.');
+    } finally {
+      setBuildingFrom(null);
     }
   };
 
@@ -106,7 +123,11 @@ export default function Library() {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => exportMindMapToPDF(openMap)}
+              onClick={() =>
+                exportMindMapToPDF(openMap).catch((err) =>
+                  setError(`PDF export failed: ${err.message || 'unknown error'}`)
+                )
+              }
               className="btn btn-secondary !min-h-[32px] text-[12px]"
             >
               <i className="ph-duotone ph-file-pdf"></i>
@@ -156,6 +177,22 @@ export default function Library() {
             Upload Source File
           </button>
         </header>
+
+        {error && (
+          <div
+            role="alert"
+            className="flex items-start justify-between gap-3 p-3 rounded-[var(--radius-md)] bg-[var(--color-accent-2-100)] border border-[var(--color-accent-2)] text-[13px] text-[var(--color-accent-2-900)]"
+          >
+            <span>{error}</span>
+            <button
+              onClick={() => setError(null)}
+              className="btn btn-quiet !min-h-[22px] !px-1.5 shrink-0"
+              aria-label="Dismiss error"
+            >
+              <i className="ph-duotone ph-x text-xs"></i>
+            </button>
+          </div>
+        )}
 
         {/* Tabs & Search Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--color-divider)] pb-3">
@@ -251,7 +288,9 @@ export default function Library() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            exportMindMapToPDF(m);
+                            exportMindMapToPDF(m).catch((err) =>
+                              setError(`PDF export failed: ${err.message || 'unknown error'}`)
+                            );
                           }}
                           className="btn btn-quiet !min-h-[26px] !px-2 text-[11px]"
                           title="Export PDF"
@@ -346,16 +385,26 @@ export default function Library() {
                       <div className="flex items-center justify-between gap-1.5 pt-1">
                         <button
                           onClick={() => handleMindMapFromFile(file)}
+                          disabled={Boolean(buildingFrom)}
                           className="btn btn-secondary !min-h-[26px] !px-2 text-[11px]"
-                          title="Generate Mind Map"
+                          title="Generate a mind map from this document"
                         >
-                          <i className="ph-duotone ph-graph"></i>
-                          Map
+                          {buildingFrom === file.id ? (
+                            <>
+                              <i className="ph-duotone ph-spinner animate-spin"></i>
+                              Mapping…
+                            </>
+                          ) : (
+                            <>
+                              <i className="ph-duotone ph-graph"></i>
+                              Map
+                            </>
+                          )}
                         </button>
                         <button
-                          onClick={() => navigate(`/mindmap?topic=Query file: ${file.originalName}`)}
+                          onClick={() => navigate(`/mindmap?doc=${encodeURIComponent(file.id)}`)}
                           className="btn btn-primary !min-h-[26px] !px-2 text-[11px]"
-                          title="Chat with Document"
+                          title="Ask questions about this document"
                         >
                           <i className="ph-duotone ph-chats-circle"></i>
                           Query
@@ -385,10 +434,14 @@ export default function Library() {
           loadFiles();
         }}
         onMindMapGenerated={(freshMap) => {
-          saveMap(freshMap);
+          const stored = saveMap(freshMap);
           setMaps(listMaps());
-          setOpenId(freshMap.id);
           setActiveTab('maps');
+          if (stored) setOpenId(stored.id);
+        }}
+        onFileAttached={() => {
+          loadFiles();
+          setActiveTab('files');
         }}
       />
     </div>

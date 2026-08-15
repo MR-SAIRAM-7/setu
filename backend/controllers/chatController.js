@@ -16,7 +16,14 @@ function toText(value, fallback = '') {
   return fallback;
 }
 
-/** Open an SSE stream and hand back a typed writer */
+/**
+ * Open an SSE stream and hand back a typed writer.
+ *
+ * Writes are no-ops once the client disconnects, so an in-flight research pass
+ * finishing after the user navigated away cannot throw on a destroyed socket.
+ * A periodic comment frame keeps proxies from closing an idle connection during
+ * the long quiet stretch while the model is thinking.
+ */
 function openStream(res) {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -27,20 +34,41 @@ function openStream(res) {
   res.flushHeaders?.();
 
   let closed = false;
-  res.on('close', () => {
+
+  const heartbeat = setInterval(() => {
+    if (!closed) {
+      try {
+        res.write(': keep-alive\n\n');
+      } catch (_) {
+        closed = true;
+      }
+    }
+  }, 15000);
+  heartbeat.unref?.();
+
+  const finish = () => {
     closed = true;
-  });
+    clearInterval(heartbeat);
+  };
+
+  res.on('close', finish);
 
   return {
     send(event, data) {
       if (closed) return;
-      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      try {
+        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      } catch (_) {
+        finish();
+      }
     },
     get closed() {
       return closed;
     },
     end() {
-      if (!closed) res.end();
+      const alreadyClosed = closed;
+      finish();
+      if (!alreadyClosed) res.end();
     }
   };
 }
@@ -115,7 +143,7 @@ async function handleChat(req, res) {
         userId
       });
       finalAssistantReply = toText(queryResult?.answer, 'I could not produce a grounded answer yet.');
-      sources = queryResult.sources;
+      sources = queryResult?.sources || [];
       stream.send('reply', {
         text: finalAssistantReply,
         intent: 'document_answer',
@@ -124,9 +152,13 @@ async function handleChat(req, res) {
       });
     } else if (routedIntent === 'research_topic') {
       const topicQuery = toText(routed?.topic, '').trim() || lastUserText;
-      const context = attachedDoc
-        ? `From uploaded document "${attachedDoc.originalName}":\n${attachedDoc.extractedText.slice(0, 10000)}`
-        : '';
+      // A document record can exist with no extracted text (e.g. an image whose
+      // OCR failed), so never assume the field is a string.
+      const docText = toText(attachedDoc?.extractedText, '');
+      const context =
+        attachedDoc && docText
+          ? `From uploaded document "${attachedDoc.originalName}":\n${docText.slice(0, 10000)}`
+          : '';
 
       generatedMap = await research.researchMindMap({
         topic: topicQuery,
@@ -159,7 +191,9 @@ async function handleChat(req, res) {
         userId,
         conversationId
       }).catch(() => {});
-    } else if (routedIntent === 'answer_question') {
+    } else if (routedIntent === 'answer_question' || routedIntent === 'query_document') {
+      // query_document lands here when the router expected an attachment that is
+      // no longer present — answering from the open map beats a dead end.
       const answer = await research.answerAboutMap({ messages, map: currentMap });
       finalAssistantReply = toText(answer, 'I could not answer that from the current map yet.');
       stream.send('reply', { text: finalAssistantReply, intent: 'answer', final: true });

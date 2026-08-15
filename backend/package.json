@@ -9,7 +9,10 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "smoke": "node scripts/smoke-test.js"
+    "smoke": "node scripts/smoke-test.js",
+    "seed": "node scripts/seed-demo-data.js",
+    "seed:reset": "node scripts/seed-demo-data.js --reset",
+    "seed:clean": "node scripts/seed-demo-data.js --clean"
   },
   "dependencies": {
     "cors": "^2.8.5",

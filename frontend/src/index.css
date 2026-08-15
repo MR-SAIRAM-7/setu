@@ -415,9 +415,14 @@
   }
 }
 
+/*
+ * Edges draw themselves in. `pathLength` is normalised to 1 on the path element,
+ * so one dash covers the whole connector no matter how long it actually is —
+ * a fixed pixel dasharray would leave long edges permanently broken up.
+ */
 @keyframes setu-draw {
   from {
-    stroke-dashoffset: 300;
+    stroke-dashoffset: 1;
   }
   to {
     stroke-dashoffset: 0;
@@ -433,7 +438,7 @@
 }
 
 .animate-setu-draw {
-  stroke-dasharray: 300;
+  stroke-dasharray: 1;
   animation: setu-draw 0.8s ease-out forwards;
 }
 

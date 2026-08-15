@@ -56,8 +56,17 @@ export function layoutTree(root, collapsed = new Set()) {
   const nodes = [];
   const edges = [];
 
+  /**
+   * Measurements live here rather than on the nodes themselves. The same tree
+   * objects get saved to storage, synced to MongoDB, and exported as JSON, so
+   * writing layout scratch onto them would leak `_own`/`_span` into user data.
+   */
+  const metrics = new Map();
+
   const visibleChildren = (node) =>
     collapsed.has(node.id) ? [] : node.children || [];
+
+  const spanOf = (node) => metrics.get(node)?.span ?? 0;
 
   /** Pass 1 — total vertical space each subtree needs. */
   function measure(node, depth) {
@@ -65,8 +74,7 @@ export function layoutTree(root, collapsed = new Set()) {
     const children = visibleChildren(node);
 
     if (!children.length) {
-      node._own = own;
-      node._span = own;
+      metrics.set(node, { own, span: own });
       return own;
     }
 
@@ -75,17 +83,24 @@ export function layoutTree(root, collapsed = new Set()) {
       0
     );
 
-    node._own = own;
     // A parent taller than all its children still needs its own room.
-    node._span = Math.max(own, childSpan);
-    return node._span;
+    const span = Math.max(own, childSpan);
+    metrics.set(node, { own, span });
+    return span;
   }
 
-  /** Pass 2 — place each node at the vertical centre of its allotted span. */
-  function place(node, depth, x, spanTop) {
+  /**
+   * Pass 2 — place each node at the vertical centre of its allotted span.
+   *
+   * `branch` is passed down rather than read back off the parent's placed
+   * record: the parent's own branch is only known to its caller, so reading it
+   * here would see `undefined` and collapse every node below depth 1 onto the
+   * first plate colour.
+   */
+  function place(node, depth, x, spanTop, branch) {
+    const { own: height, span } = metrics.get(node);
     const width = widthFor(depth);
-    const height = node._own;
-    const y = spanTop + (node._span - height) / 2;
+    const y = spanTop + (span - height) / 2;
 
     const children = visibleChildren(node);
     const hasHiddenChildren = collapsed.has(node.id) && (node.children || []).length > 0;
@@ -99,6 +114,7 @@ export function layoutTree(root, collapsed = new Set()) {
       y,
       width,
       height,
+      branch,
       childCount: (node.children || []).length,
       collapsed: hasHiddenChildren,
       raw: node
@@ -108,13 +124,15 @@ export function layoutTree(root, collapsed = new Set()) {
     if (!children.length) return placed;
 
     const childX = x + width + H_GAP;
-    let cursor = spanTop + (node._span - children.reduce((s, c, i) => s + c._span + (i ? V_GAP : 0), 0)) / 2;
+    const childrenSpan = children.reduce((s, c, i) => s + spanOf(c) + (i ? V_GAP : 0), 0);
+    let cursor = spanTop + (span - childrenSpan) / 2;
 
     for (let i = 0; i < children.length; i++) {
       const child = children[i];
-      const branchIndex = depth === 0 ? i % PLATE_COLORS.length : (placed.branch ?? 0);
-      const childPlaced = place(child, depth + 1, childX, cursor);
-      childPlaced.branch = branchIndex;
+      // Top-level branches each claim a plate; everything below inherits it, so
+      // a whole subtree reads as one colour family.
+      const branchIndex = depth === 0 ? i % PLATE_COLORS.length : branch;
+      const childPlaced = place(child, depth + 1, childX, cursor, branchIndex);
 
       edges.push({
         id: `${placed.id}-${childPlaced.id}`,
@@ -124,18 +142,20 @@ export function layoutTree(root, collapsed = new Set()) {
         branch: branchIndex
       });
 
-      cursor += child._span + V_GAP;
+      cursor += spanOf(child) + V_GAP;
     }
 
     return placed;
   }
 
   const totalHeight = measure(root, 0);
-  const rootNode = place(root, 0, 16, 16);
-  rootNode.branch = 3; // Ink plate for root
+  // 3 is the ink plate — the root is deliberately not one of the branch colours.
+  place(root, 0, 16, 16, 3);
 
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  const maxX = Math.max(...nodes.map((n) => n.x + n.width), 0) + 32;
+  // reduce, not Math.max(...spread) — an expanded map can hold enough nodes to
+  // blow the argument limit.
+  const maxX = nodes.reduce((max, n) => Math.max(max, n.x + n.width), 0) + 32;
 
   return {
     nodes,

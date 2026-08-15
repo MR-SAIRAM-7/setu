@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { savePrefs } from '../lib/storage';
+import { savePrefs, listMaps } from '../lib/storage';
+import { exportMindMapToPDF } from '../lib/exportUtils';
 
-export default function CommandPalette({ isOpen, onClose, currentMap, onStartFocus, onExportMap }) {
+export default function CommandPalette({ isOpen, onClose, onStartFocus }) {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [notice, setNotice] = useState(null);
   const inputRef = useRef(null);
   const navigate = useNavigate();
 
@@ -12,9 +14,25 @@ export default function CommandPalette({ isOpen, onClose, currentMap, onStartFoc
     if (isOpen) {
       setQuery('');
       setSelectedIndex(0);
+      setNotice(null);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [isOpen]);
+
+  /**
+   * Export the most recently updated map. The palette is global and has no map
+   * of its own, so it reads the library rather than depending on which page is
+   * currently mounted.
+   */
+  const exportLatestMap = () => {
+    const latest = listMaps()[0];
+    if (!latest) {
+      setNotice('No maps saved yet — research a topic first.');
+      return false;
+    }
+    exportMindMapToPDF(latest).catch(() => {});
+    return true;
+  };
 
   const COMMANDS = [
     // Go Group
@@ -89,16 +107,16 @@ export default function CommandPalette({ isOpen, onClose, currentMap, onStartFoc
       group: 'Do',
       icon: 'ph-file-arrow-up',
       label: 'Upload a document or source file',
-      hint: 'PDF, Word, TXT, or Notes for mind maps & Q&A',
-      run: () => navigate('/mindmap')
+      hint: 'PDF, Word, TXT, or notes for mind maps and Q&A',
+      run: () => navigate('/library')
     },
     {
       id: 'do-export',
       group: 'Do',
       icon: 'ph-export',
-      label: 'Export this map to Markdown / PDF',
-      hint: 'Download full visual outline and sources',
-      run: () => onExportMap?.()
+      label: 'Export your latest map as a PDF',
+      hint: 'Summary, key takeaways, full hierarchy, and sources',
+      run: exportLatestMap
     },
 
     // Reading Group
@@ -154,6 +172,12 @@ export default function CommandPalette({ isOpen, onClose, currentMap, onStartFoc
     );
   }).slice(0, 6);
 
+  /** A command returning false keeps the palette open to show its notice. */
+  const runCommand = (cmd) => {
+    if (!cmd) return;
+    if (cmd.run() !== false) onClose();
+  };
+
   const handleKeyDown = (e) => {
     if (e.key === 'Escape') {
       onClose();
@@ -165,10 +189,7 @@ export default function CommandPalette({ isOpen, onClose, currentMap, onStartFoc
       setSelectedIndex((prev) => (prev - 1 + filtered.length) % (filtered.length || 1));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      if (filtered[selectedIndex]) {
-        filtered[selectedIndex].run();
-        onClose();
-      }
+      runCommand(filtered[selectedIndex]);
     }
   };
 
@@ -203,6 +224,15 @@ export default function CommandPalette({ isOpen, onClose, currentMap, onStartFoc
           </kbd>
         </div>
 
+        {notice && (
+          <p
+            role="status"
+            className="px-4 py-2 bg-[var(--color-accent-100)] border-b border-[var(--color-accent-300)] text-[12.5px] text-[var(--color-accent-900)]"
+          >
+            {notice}
+          </p>
+        )}
+
         {/* Results list */}
         <div className="max-h-[340px] overflow-y-auto p-1.5 bg-[var(--color-bg)]" role="listbox">
           {filtered.length === 0 ? (
@@ -218,10 +248,7 @@ export default function CommandPalette({ isOpen, onClose, currentMap, onStartFoc
                   role="option"
                   aria-selected={isSelected}
                   onMouseEnter={() => setSelectedIndex(index)}
-                  onClick={() => {
-                    cmd.run();
-                    onClose();
-                  }}
+                  onClick={() => runCommand(cmd)}
                   className={`flex w-full items-center justify-between gap-3 rounded-[var(--radius-md)] px-3.5 py-2.5 text-left transition-colors cursor-pointer border-0 ${
                     isSelected
                       ? 'bg-[var(--color-accent-100)] text-[var(--color-accent-900)]'

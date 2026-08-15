@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { getPrefs, savePrefs, listMaps, clearAllMaps } from '../lib/storage';
+import { getPrefs, savePrefs, listMaps, clearAllMaps, restoreSeedMaps } from '../lib/storage';
+import { getUserId } from '../lib/identity';
 import { api } from '../lib/api';
 
 export default function Settings() {
@@ -7,10 +8,18 @@ export default function Settings() {
   const [health, setHealth] = useState(null);
   const [checking, setChecking] = useState(false);
   const [mapsCount, setMapsCount] = useState(0);
+  const [notice, setNotice] = useState(null);
+  const userId = getUserId();
 
   useEffect(() => {
-    api.health().then(setHealth);
+    let cancelled = false;
+    api.health().then((result) => {
+      if (!cancelled) setHealth(result);
+    });
     setMapsCount(listMaps().length);
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const update = (patch) => {
@@ -22,11 +31,10 @@ export default function Settings() {
     setChecking(true);
     try {
       const res = await api.healthAi();
-      setHealth((prev) => ({ ...(prev || {}), ai: res, database: res?.database }));
-    } catch (_) {
       setHealth((prev) => ({
         ...(prev || {}),
-        ai: { ok: false, reason: 'Engine unreachable' }
+        ai: res || { ok: false, reason: 'Engine unreachable' },
+        database: res?.database || prev?.database
       }));
     } finally {
       setChecking(false);
@@ -34,11 +42,16 @@ export default function Settings() {
   };
 
   const handleDeleteAll = () => {
-    if (confirm('Delete every saved map? This cannot be undone.')) {
-      clearAllMaps();
-      setMapsCount(0);
-      window.location.reload();
-    }
+    if (!confirm('Delete every saved map in this browser? This cannot be undone.')) return;
+    clearAllMaps();
+    setMapsCount(0);
+    setNotice('All saved maps deleted.');
+  };
+
+  const handleRestoreSeeds = () => {
+    const maps = restoreSeedMaps();
+    setMapsCount(maps.length);
+    setNotice('Reference library restored. Your own maps were left untouched.');
   };
 
   return (
@@ -256,15 +269,39 @@ export default function Settings() {
         <section className="space-y-3 pt-4 border-t border-[var(--color-divider)]">
           <span className="kicker kicker-magenta block">Your Data & Storage</span>
           <p className="text-[14.5px] leading-relaxed text-[color-mix(in_srgb,var(--color-text)_75%,transparent)]">
-            {mapsCount} mind map{mapsCount === 1 ? '' : 's'} stored. When connected to MongoDB,
-            your library automatically synchronizes across sessions with full privacy.
+            {mapsCount} mind map{mapsCount === 1 ? '' : 's'} stored in this browser. When the engine
+            is connected to MongoDB, your library also syncs there so it survives clearing site data.
           </p>
-          <button
-            onClick={handleDeleteAll}
-            className="btn btn-destructive !min-h-[36px] text-[13px] mt-2"
-          >
-            Delete all saved maps
-          </button>
+
+          <div className="flex items-center justify-between gap-3 p-2.5 bg-[var(--color-surface)] rounded-[var(--radius-sm)] text-[12.5px]">
+            <span className="text-[color-mix(in_srgb,var(--color-text)_65%,transparent)]">
+              This browser's id
+            </span>
+            <code className="font-mono text-[11.5px] text-[var(--color-text)]">{userId}</code>
+          </div>
+          <p className="text-[12.5px] leading-snug text-[color-mix(in_srgb,var(--color-text)_58%,transparent)]">
+            A random id, not an account. It is how the engine keeps your library separate from
+            anyone else's. Nothing personal is attached to it.
+          </p>
+
+          {notice && (
+            <p
+              role="status"
+              className="p-2.5 rounded-[var(--radius-sm)] bg-[var(--color-accent-100)] border border-[var(--color-accent-300)] text-[13px] text-[var(--color-accent-900)]"
+            >
+              {notice}
+            </p>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2.5 pt-1">
+            <button onClick={handleRestoreSeeds} className="btn btn-secondary !min-h-[36px] text-[13px]">
+              <i className="ph-duotone ph-arrow-counter-clockwise"></i>
+              Restore reference library
+            </button>
+            <button onClick={handleDeleteAll} className="btn btn-destructive !min-h-[36px] text-[13px]">
+              Delete all saved maps
+            </button>
+          </div>
         </section>
       </div>
     </div>

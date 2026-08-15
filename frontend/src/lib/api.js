@@ -2,12 +2,24 @@
  * SETU API client.
  *
  * In dev, Vite proxies /api to the backend, so requests stay same-origin.
- * In production, VITE_API_URL points at the deployed engine.
+ * In production, VITE_API_URL points at the deployed engine. Every call goes
+ * through `url()` so a split-origin deploy cannot silently fall back to the
+ * static host and 404.
  */
+
+import { getUserId } from './identity';
 
 const BASE = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
 
 const url = (path) => `${BASE}${path}`;
+
+/** Timeouts, in ms. Research and file processing legitimately take a while. */
+const TIMEOUTS = {
+  read: 15000,
+  write: 20000,
+  think: 120000,
+  upload: 180000
+};
 
 class ApiError extends Error {
   constructor(message, status) {
@@ -17,16 +29,33 @@ class ApiError extends Error {
   }
 }
 
-async function post(path, body, { signal, timeoutMs = 90000 } = {}) {
+const OFFLINE_MESSAGE =
+  'Cannot reach the SETU engine. Make sure the backend is running (npm start in /backend).';
+
+function headers(extra = {}) {
+  return {
+    'Content-Type': 'application/json',
+    'x-user-id': getUserId(),
+    ...extra
+  };
+}
+
+/**
+ * One fetch path for every verb, so identity, timeouts, abort handling, and
+ * error shape stay identical no matter which call site is used.
+ */
+async function request(method, path, { body, signal, timeoutMs = TIMEOUTS.read, soft = false } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  signal?.addEventListener('abort', () => controller.abort(), { once: true });
+
+  const forwardAbort = () => controller.abort();
+  signal?.addEventListener('abort', forwardAbort, { once: true });
 
   try {
     const response = await fetch(url(path), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      method,
+      headers: headers(),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal: controller.signal
     });
 
@@ -36,109 +65,111 @@ async function post(path, body, { signal, timeoutMs = 90000 } = {}) {
     }
     return data;
   } catch (error) {
+    // `soft` callers treat unavailability as "no data yet" rather than an error,
+    // which keeps the UI usable when the engine or database is down.
     if (error.name === 'AbortError') {
-      throw new ApiError('The engine took too long to answer. Try a narrower topic.', 408);
+      if (soft) return null;
+      throw new ApiError(
+        signal?.aborted
+          ? 'Request cancelled.'
+          : 'The engine took too long to answer. Try a narrower topic.',
+        408
+      );
     }
-    if (error instanceof ApiError) throw error;
-    throw new ApiError(
-      'Cannot reach the SETU engine. Make sure the backend is running (npm start in /backend).',
-      0
-    );
+    if (error instanceof ApiError) {
+      if (soft) return null;
+      throw error;
+    }
+    if (soft) return null;
+    throw new ApiError(OFFLINE_MESSAGE, 0);
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', forwardAbort);
   }
 }
 
-async function get(path, { signal, timeoutMs = 15000 } = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  signal?.addEventListener('abort', () => controller.abort(), { once: true });
+const post = (path, body, options = {}) =>
+  request('POST', path, { body, timeoutMs: TIMEOUTS.think, ...options });
+const get = (path, options = {}) => request('GET', path, { soft: true, ...options });
+const del = (path, options = {}) =>
+  request('DELETE', path, { soft: true, timeoutMs: TIMEOUTS.write, ...options });
+const put = (path, body, options = {}) =>
+  request('PUT', path, { body, soft: true, timeoutMs: TIMEOUTS.write, ...options });
 
+/**
+ * Fire-and-forget background sync. Used by local-first writes that must never
+ * block the UI or surface an error when the engine is offline.
+ */
+function syncInBackground(method, path, body) {
   try {
-    const response = await fetch(url(path), {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-      signal: controller.signal
-    });
-
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new ApiError(data.error || `Request failed (${response.status})`, response.status);
-    }
-    return data;
-  } catch (error) {
-    if (error instanceof ApiError) throw error;
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function del(path) {
-  try {
-    const response = await fetch(url(path), {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' }
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new ApiError(data.error || `Delete failed (${response.status})`, response.status);
-    }
-    return data;
-  } catch (error) {
-    if (error instanceof ApiError) throw error;
-    return { success: false, error: error.message };
-  }
-}
-
-async function put(path, body) {
-  try {
-    const response = await fetch(url(path), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new ApiError(data.error || `Update failed (${response.status})`, response.status);
-    }
-    return data;
-  } catch (error) {
-    if (error instanceof ApiError) throw error;
-    return null;
+    fetch(url(path), {
+      method,
+      headers: headers(),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      keepalive: true
+    }).catch(() => {});
+  } catch (_) {
+    /* the local write already succeeded; the server copy is a bonus */
   }
 }
 
 /**
  * Upload a document file (PDF, DOCX, TXT, MD, Image) using multipart/form-data.
+ * Content-Type is deliberately omitted so the browser sets the multipart boundary.
  */
 export async function uploadFile(file, conversationId = null) {
   const formData = new FormData();
   formData.append('file', file);
   if (conversationId) formData.append('conversationId', conversationId);
 
-  const response = await fetch(url('/api/files/upload'), {
-    method: 'POST',
-    body: formData
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUTS.upload);
 
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new ApiError(data.error || `Upload failed (${response.status})`, response.status);
+  try {
+    const response = await fetch(url('/api/files/upload'), {
+      method: 'POST',
+      headers: { 'x-user-id': getUserId() },
+      body: formData,
+      signal: controller.signal
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new ApiError(data.error || `Upload failed (${response.status})`, response.status);
+    }
+    return data.document;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    if (error.name === 'AbortError') {
+      throw new ApiError('The upload took too long. Try a smaller file.', 408);
+    }
+    throw new ApiError(OFFLINE_MESSAGE, 0);
+  } finally {
+    clearTimeout(timer);
   }
-  return data.document;
 }
 
 /**
- * Stream a chat turn using Server-Sent Events (SSE).
+ * Stream a chat turn using Server-Sent Events.
+ *
+ * The backend sends `event:` / `data:` pairs separated by a blank line. We buffer
+ * across chunk boundaries because a frame can be split mid-line, and we reset the
+ * event name per frame so a frame without an explicit `event:` cannot inherit the
+ * previous frame's type.
  */
 export async function streamChat(payload, handlers = {}, signal) {
-  const response = await fetch(url('/api/chat'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-    signal
-  });
+  let response;
+  try {
+    response = await fetch(url('/api/chat'), {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify(payload),
+      signal
+    });
+  } catch (error) {
+    if (error.name === 'AbortError') throw error;
+    throw new ApiError(OFFLINE_MESSAGE, 0);
+  }
 
   if (!response.ok || !response.body) {
     throw new ApiError('The chat engine is unavailable.', response.status);
@@ -147,59 +178,52 @@ export async function streamChat(payload, handlers = {}, signal) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  let event = 'message';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  const dispatch = (event, data) => {
+    if (event === 'status') handlers.onStatus?.(data);
+    else if (event === 'reply') handlers.onReply?.(data);
+    else if (event === 'map') handlers.onMap?.(data);
+    else if (event === 'error') handlers.onError?.(data);
+    else if (event === 'done') handlers.onDone?.(data);
+  };
 
-    buffer += decoder.decode(value, { stream: true });
+  const handleFrame = (frame) => {
+    let event = 'message';
+    const dataLines = [];
 
-    const frames = buffer.split('\n\n');
-    buffer = frames.pop() || '';
-
-    for (const frame of frames) {
-      for (const line of frame.split('\n')) {
-        if (line.startsWith('event:')) {
-          event = line.slice(6).trim();
-        } else if (line.startsWith('data:')) {
-          let data;
-          try {
-            data = JSON.parse(line.slice(5).trim());
-          } catch (_) {
-            continue;
-          }
-
-          if (event === 'status') handlers.onStatus?.(data);
-          else if (event === 'reply') handlers.onReply?.(data);
-          else if (event === 'map') handlers.onMap?.(data);
-          else if (event === 'error') handlers.onError?.(data);
-          else if (event === 'done') handlers.onDone?.(data);
-        }
-      }
+    for (const line of frame.split('\n')) {
+      if (line.startsWith('event:')) event = line.slice(6).trim();
+      else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
     }
+
+    if (!dataLines.length) return;
+    try {
+      dispatch(event, JSON.parse(dataLines.join('\n')));
+    } catch (_) {
+      /* a malformed frame must not kill the stream */
+    }
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split('\n\n');
+      buffer = frames.pop() || '';
+      for (const frame of frames) handleFrame(frame);
+    }
+    // Flush a trailing frame that arrived without its blank-line terminator.
+    if (buffer.trim()) handleFrame(buffer);
+  } finally {
+    reader.cancel().catch(() => {});
   }
 }
 
 export const api = {
-  health: async () => {
-    try {
-      const response = await fetch(url('/api/health'));
-      return response.ok ? response.json() : null;
-    } catch (_) {
-      return null;
-    }
-  },
-
-  healthAi: async () => {
-    try {
-      const response = await fetch(url('/api/health/ai'));
-      return response.ok ? response.json() : null;
-    } catch (_) {
-      return null;
-    }
-  },
-
+  health: () => get('/api/health', { timeoutMs: 8000 }),
+  healthAi: () => get('/api/health/ai', { timeoutMs: 45000 }),
   dbStatus: () => get('/api/db/status'),
 
   // Research & Mind Maps
@@ -209,38 +233,40 @@ export const api = {
   expandNode: (topic, nodeLabel, nodeDetail, path = []) =>
     post('/api/research/expand', { topic, nodeLabel, nodeDetail, path }),
 
-  // MongoDB Mind Maps persistence
+  // MongoDB mind map persistence
   listMindMaps: (search = '') => get(`/api/mindmaps?search=${encodeURIComponent(search)}`),
-  saveMindMapToDb: (map) => post('/api/mindmaps', map),
-  deleteMindMapFromDb: (id) => del(`/api/mindmaps/${id}`),
+  saveMindMapToDb: (map) => post('/api/mindmaps', map, { timeoutMs: TIMEOUTS.write }),
+  deleteMindMapFromDb: (id) => del(`/api/mindmaps/${encodeURIComponent(id)}`),
+  clearMindMapsInDb: () => del('/api/mindmaps'),
 
-  // File Upload & Document Management
+  // Files & documents
   uploadFile,
   listFiles: (conversationId = '') =>
-    get(`/api/files${conversationId ? `?conversationId=${conversationId}` : ''}`),
-  getFile: (id) => get(`/api/files/${id}`),
-  deleteFile: (id) => del(`/api/files/${id}`),
-  mindMapFromFile: (id) => post(`/api/files/${id}/mindmap`, {}),
-  queryFile: (id, query) => post(`/api/files/${id}/query`, { query }),
+    get(`/api/files${conversationId ? `?conversationId=${encodeURIComponent(conversationId)}` : ''}`),
+  getFile: (id) => get(`/api/files/${encodeURIComponent(id)}`),
+  deleteFile: (id) => del(`/api/files/${encodeURIComponent(id)}`),
+  mindMapFromFile: (id) => post(`/api/files/${encodeURIComponent(id)}/mindmap`, {}),
+  queryFile: (id, query) => post(`/api/files/${encodeURIComponent(id)}/query`, { query }),
 
-  // Conversation Threads & Chat History
+  // Conversation threads
   listConversations: (search = '') =>
     get(`/api/conversations?search=${encodeURIComponent(search)}`),
-  createConversation: (data) => post('/api/conversations', data),
-  getConversation: (id) => get(`/api/conversations/${id}`),
-  updateConversation: (id, data) => put(`/api/conversations/${id}`, data),
-  deleteConversation: (id) => del(`/api/conversations/${id}`),
-  getMessages: (conversationId) => get(`/api/conversations/${conversationId}/messages`),
+  createConversation: (data) => post('/api/conversations', data, { timeoutMs: TIMEOUTS.write }),
+  getConversation: (id) => get(`/api/conversations/${encodeURIComponent(id)}`),
+  updateConversation: (id, data) => put(`/api/conversations/${encodeURIComponent(id)}`, data),
+  deleteConversation: (id) => del(`/api/conversations/${encodeURIComponent(id)}`),
+  getMessages: (conversationId) =>
+    get(`/api/conversations/${encodeURIComponent(conversationId)}/messages`),
   saveMessage: (conversationId, msg) =>
-    post(`/api/conversations/${conversationId}/messages`, msg),
+    post(`/api/conversations/${encodeURIComponent(conversationId)}/messages`, msg, {
+      timeoutMs: TIMEOUTS.write
+    }),
 
-  // Summaries & Artifacts
+  // Summaries & settings
   listSummaries: () => get('/api/summaries'),
-  saveSummaryToDb: (summary) => post('/api/summaries', summary),
-
-  // Settings
+  saveSummaryToDb: (summary) => post('/api/summaries', summary, { timeoutMs: TIMEOUTS.write }),
   getSettingsFromDb: () => get('/api/settings'),
-  saveSettingsToDb: (settings) => post('/api/settings', settings),
+  saveSettingsToDb: (settings) => post('/api/settings', settings, { timeoutMs: TIMEOUTS.write }),
 
   // General helpers
   summarize: (text) => post('/api/summarize', { text }),
@@ -258,4 +284,4 @@ export const api = {
   exportMarkdown: (mode, data) => post('/api/export', { mode, data })
 };
 
-export { ApiError };
+export { ApiError, syncInBackground };
