@@ -210,7 +210,8 @@ html.theme-contrast {
     display: inline;
   }
   .bionic-suffix {
-    opacity: 0.92;
+    opacity: 0.97;
+    color: color-mix(in srgb, var(--color-text) 96%, black 4%);
     display: inline;
   }
 

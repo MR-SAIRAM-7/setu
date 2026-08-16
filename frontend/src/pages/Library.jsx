@@ -4,7 +4,7 @@ import MindMap from '../components/MindMap';
 import FileUploadModal from '../components/FileUploadModal';
 import DocumentViewerModal from '../components/DocumentViewerModal';
 import { BionicText } from '../lib/bionic';
-import { listMaps, deleteMap, saveMap } from '../lib/storage';
+import { listMaps, deleteMap, saveMap, getPrefs, savePrefs } from '../lib/storage';
 import { api } from '../lib/api';
 import {
   exportMindMapToJSON,
@@ -154,6 +154,7 @@ export default function Library() {
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [buildingFrom, setBuildingFrom] = useState(null);
   const [error, setError] = useState(null);
+  const [bionicEnabled, setBionicEnabled] = useState(() => getPrefs().bionicReading === true);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -216,6 +217,14 @@ export default function Library() {
     e.stopPropagation();
     setFiles((prev) => prev.filter((f) => f.id !== id));
     await api.deleteFile(id);
+  };
+
+  const toggleBionicReading = () => {
+    setBionicEnabled((prev) => {
+      const next = !prev;
+      savePrefs({ bionicReading: next });
+      return next;
+    });
   };
 
   /**
@@ -376,6 +385,20 @@ export default function Library() {
               aria-label="Search library"
             />
           </div>
+
+          <button
+            type="button"
+            onClick={toggleBionicReading}
+            className={`btn !min-h-[34px] !px-3 text-xs font-semibold ${
+              bionicEnabled
+                ? 'bg-[var(--color-accent-100)] text-[var(--color-accent-900)] border border-[var(--color-accent-300)]'
+                : 'btn-ghost'
+            }`}
+            title="Toggle Bionic Reading Fixations"
+          >
+            <i className="ph-duotone ph-eye text-sm"></i>
+            Bionic: {bionicEnabled ? 'ON' : 'OFF'}
+          </button>
         </div>
 
         {/* -------------------- Mind Maps Tab -------------------- */}
@@ -425,7 +448,7 @@ export default function Library() {
                         {m.title}
                       </h2>
                       <p className="text-[13px] text-[color-mix(in_srgb,var(--color-text)_70%,transparent)] line-clamp-3 leading-relaxed">
-                        <BionicText text={m.summary} enabled={true} />
+                        <BionicText text={m.summary} enabled={bionicEnabled} />
                       </p>
                     </div>
 
@@ -506,7 +529,10 @@ export default function Library() {
                       </h2>
 
                       <p className="text-[13px] text-[color-mix(in_srgb,var(--color-text)_70%,transparent)] line-clamp-3 leading-relaxed">
-                        <BionicText text={file.summary || 'Uploaded document stored in database.'} enabled={true} />
+                        <BionicText
+                          text={file.summary || 'Uploaded document stored in database.'}
+                          enabled={bionicEnabled}
+                        />
                       </p>
                     </div>
 

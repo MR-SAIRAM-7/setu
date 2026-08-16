@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { BionicText } from '../lib/bionic';
 import { tts } from '../lib/tts';
+import { getPrefs } from '../lib/storage';
 import FileUploadModal from '../components/FileUploadModal';
 
 const MODES_DATA = [
@@ -249,7 +250,7 @@ export default function Modes() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
-  const [bionicMode, setBionicMode] = useState(true);
+  const [bionicMode, setBionicMode] = useState(() => getPrefs().bionicReading === true);
   const [ttsPlaying, setTtsPlaying] = useState(false);
 
   const activeMode = MODES_DATA.find((m) => m.key === activeKey) || MODES_DATA[0];

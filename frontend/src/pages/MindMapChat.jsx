@@ -6,7 +6,7 @@ import DocumentViewerModal from '../components/DocumentViewerModal';
 import { BionicText } from '../lib/bionic';
 import { tts } from '../lib/tts';
 import { streamChat, api } from '../lib/api';
-import { saveMap, listMaps, DEFAULT_WORKED_MAP } from '../lib/storage';
+import { saveMap, listMaps, DEFAULT_WORKED_MAP, getPrefs } from '../lib/storage';
 import {
   exportMindMapToPDF,
   exportMindMapToPNG,
@@ -47,7 +47,7 @@ export default function MindMapChat() {
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [viewingDocId, setViewingDocId] = useState(null);
-  const [bionicEnabled, setBionicEnabled] = useState(true);
+  const [bionicEnabled, setBionicEnabled] = useState(() => getPrefs().bionicReading === true);
   const [ttsPlaying, setTtsPlaying] = useState(false);
   const [conversationId, setConversationId] = useState(() => `conv_${Date.now()}`);
 

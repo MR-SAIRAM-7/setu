@@ -229,7 +229,7 @@ export const DEFAULT_PREFS = {
   spacing: 'normal', // 'normal' | 'relaxed' | 'spacious'
   motion: 'move', // 'move' | 'still'
   readingRuler: false,
-  bionicReading: true,
+  bionicReading: false,
   onboardingDone: false
 };
 

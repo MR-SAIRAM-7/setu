@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { BionicText } from '../lib/bionic';
 import { tts } from '../lib/tts';
 import { api } from '../lib/api';
+import { getPrefs } from '../lib/storage';
 
 export default function DocumentViewerModal({
   isOpen,
@@ -16,7 +17,7 @@ export default function DocumentViewerModal({
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSectionIndex, setActiveSectionIndex] = useState(0);
-  const [bionicEnabled, setBionicEnabled] = useState(true);
+  const [bionicEnabled, setBionicEnabled] = useState(() => getPrefs().bionicReading === true);
   const [ttsPlaying, setTtsPlaying] = useState(false);
   const [ttsRate, setTtsRate] = useState(1.0);
   const [fontSize, setFontSize] = useState('base'); // 'sm' | 'base' | 'lg' | 'xl'

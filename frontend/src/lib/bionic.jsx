@@ -54,7 +54,7 @@ export function toBionicHtml(text) {
 /**
  * React Component for rendering Bionic Reading text
  */
-export function BionicText({ text, enabled = true, className = '' }) {
+export function BionicText({ text, enabled = false, className = '' }) {
   if (!text) return null;
   if (!enabled || typeof text !== 'string') {
     return <span className={className}>{text}</span>;
@@ -91,7 +91,7 @@ export function BionicText({ text, enabled = true, className = '' }) {
             <strong className="bionic-fixation font-extrabold text-[var(--color-text)] tracking-tight">
               {prefix}
             </strong>
-            <span className="bionic-suffix opacity-90">{suffix}</span>
+            <span className="bionic-suffix">{suffix}</span>
             {trailing}
           </span>
         );
