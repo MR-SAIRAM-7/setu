@@ -162,11 +162,7 @@ function AppRoot() {
 }
 
 function RootRedirect() {
-  const prefs = getPrefs();
-  if (!prefs.onboardingDone) {
-    return <Navigate to="/landing" replace />;
-  }
-  return <Navigate to="/mindmap" replace />;
+  return <Navigate to="/landing" replace />;
 }
 
 const NAV = [
