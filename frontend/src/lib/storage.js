@@ -202,7 +202,8 @@ export const FONT_STACKS = {
   serif: '"Source Serif 4", Georgia, serif',
   system: 'system-ui, -apple-system, "Segoe UI", sans-serif',
   hyper: '"Atkinson Hyperlegible", Verdana, sans-serif',
-  dyslexic: '"Atkinson Hyperlegible", Verdana, sans-serif'
+  lexend: '"Lexend", system-ui, sans-serif',
+  dyslexic: '"Lexend", "Atkinson Hyperlegible", sans-serif'
 };
 
 export const SIZE_SCALE = {
@@ -211,11 +212,24 @@ export const SIZE_SCALE = {
   large: 1.22
 };
 
+export const THEMES = {
+  broadsheet: 'Broadsheet Light',
+  cream: 'Warm Parchment (Anti-Glare)',
+  pastel: 'Calming Blue (ADHD Focus)',
+  sage: 'Muted Sage Green',
+  velvet: 'Velvet Dark',
+  contrast: 'High-Contrast Yellow/Black'
+};
+
 export const DEFAULT_PREFS = {
   profile: [],
-  font: 'serif', // 'serif' | 'system' | 'hyper' | 'dyslexic'
+  theme: 'broadsheet', // 'broadsheet' | 'cream' | 'pastel' | 'sage' | 'velvet' | 'contrast'
+  font: 'serif', // 'serif' | 'system' | 'hyper' | 'lexend' | 'dyslexic'
   textSize: 'normal', // 'normal' | 'comfortable' | 'large'
+  spacing: 'normal', // 'normal' | 'relaxed' | 'spacious'
   motion: 'move', // 'move' | 'still'
+  readingRuler: false,
+  bionicReading: true,
   onboardingDone: false
 };
 
@@ -233,15 +247,30 @@ export function savePrefs(patch) {
   return next;
 }
 
-/** Reflect reading preferences onto <html> so CSS variables and fonts act globally. */
+/** Reflect reading preferences onto <html> so CSS variables, themes, and fonts act globally. */
 export function applyPrefs(prefs = getPrefs()) {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
 
+  // Theme classes
+  root.classList.remove(
+    'theme-broadsheet',
+    'theme-cream',
+    'theme-pastel',
+    'theme-sage',
+    'theme-velvet',
+    'theme-contrast'
+  );
+  if (prefs.theme && prefs.theme !== 'broadsheet') {
+    root.classList.add(`theme-${prefs.theme}`);
+  }
+
   // Font classes
-  root.classList.remove('font-serif', 'font-system', 'font-hyper', 'font-dyslexic');
+  root.classList.remove('font-serif', 'font-system', 'font-hyper', 'font-lexend', 'font-dyslexic');
   if (prefs.font === 'system') root.classList.add('font-system');
-  else if (prefs.font === 'hyper' || prefs.font === 'dyslexic') root.classList.add('font-hyper');
+  else if (prefs.font === 'hyper') root.classList.add('font-hyper');
+  else if (prefs.font === 'lexend') root.classList.add('font-lexend');
+  else if (prefs.font === 'dyslexic') root.classList.add('font-dyslexic');
   else root.classList.add('font-serif');
 
   // Text size classes
@@ -249,6 +278,11 @@ export function applyPrefs(prefs = getPrefs()) {
   if (prefs.textSize === 'comfortable') root.classList.add('text-comfortable');
   else if (prefs.textSize === 'large') root.classList.add('text-large');
   else root.classList.add('text-normal');
+
+  // Spacing classes
+  root.classList.remove('spacing-normal', 'spacing-relaxed', 'spacing-spacious');
+  if (prefs.spacing === 'relaxed') root.classList.add('spacing-relaxed');
+  else if (prefs.spacing === 'spacious') root.classList.add('spacing-spacious');
 
   // Motion class
   try {

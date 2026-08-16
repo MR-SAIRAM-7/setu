@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import { BionicText } from '../lib/bionic';
+import { tts } from '../lib/tts';
 import FileUploadModal from '../components/FileUploadModal';
 
 const MODES_DATA = [
@@ -247,6 +249,8 @@ export default function Modes() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [bionicMode, setBionicMode] = useState(true);
+  const [ttsPlaying, setTtsPlaying] = useState(false);
 
   const activeMode = MODES_DATA.find((m) => m.key === activeKey) || MODES_DATA[0];
 
@@ -257,13 +261,19 @@ export default function Modes() {
     }
   }, [searchParams]);
 
-  /**
-   * Each mode takes a different kind of input — a meeting transcript is not a
-   * task to unfreeze — so carrying text across a switch only ever produces a
-   * nonsense run. Results are kept per mode and stay put.
-   */
+  useEffect(() => {
+    const unsubscribe = tts.subscribe((state) => {
+      setTtsPlaying(state.isPlaying && !state.isPaused);
+    });
+    return () => {
+      unsubscribe();
+      tts.stop();
+    };
+  }, []);
+
   const selectMode = (key) => {
     if (key === activeKey) return;
+    tts.stop();
     setActiveKey(key);
     setInputVal('');
     setError(null);
@@ -273,6 +283,7 @@ export default function Modes() {
     e?.preventDefault();
     if (!inputVal.trim() || loading) return;
 
+    tts.stop();
     setLoading(true);
     setError(null);
 
@@ -291,18 +302,41 @@ export default function Modes() {
     setError(null);
   };
 
-  // Show active result or fallback to rich worked example
   const currentResult = results[activeKey] || activeMode.workedExample;
   const isWorkedExample = !results[activeKey];
+
+  const handleReadAloud = () => {
+    if (ttsPlaying) {
+      tts.stop();
+    } else {
+      let text = '';
+      if (activeKey === 'start') {
+        text = `${currentResult.supportiveMessage || ''}. Start with: ${currentResult.immediateTenMinuteAction || ''}. Steps: ${(currentResult.microSteps || []).join('. ')}`;
+      } else if (activeKey === 'simplify') {
+        text = `${currentResult.plainLanguageRewrite || ''}. Key takeaways: ${(currentResult.keyTakeaways || []).join('. ')}`;
+      } else if (activeKey === 'meet') {
+        text = `${currentResult.summary || ''}. Action items: ${(currentResult.actionItems || []).map((a) => `${a.task} assigned to ${a.owner || 'team'}`).join('. ')}`;
+      } else if (activeKey === 'guide') {
+        text = `${currentResult.workflowName || ''}. Steps: ${(currentResult.steps || []).map((s) => `${s.title}: ${s.actionRequired || s.action}`).join('. ')}`;
+      } else if (activeKey === 'learn') {
+        text = `${currentResult.summary || ''}`;
+      } else if (activeKey === 'practice') {
+        text = `${currentResult.scenarioContext || ''}. Opening line: ${currentResult.openingLine || ''}`;
+      } else if (activeKey === 'write') {
+        text = `${currentResult.improvedText || currentResult.accessibleRewrite || ''}`;
+      }
+      tts.speak(text);
+    }
+  };
 
   return (
     <div className="flex h-full w-full flex-col lg:flex-row overflow-hidden bg-[var(--color-bg)] text-left">
       {/* ----------------- Left Navigation Pane (268px) ----------------- */}
       <aside className="lg:w-[268px] lg:shrink-0 flex flex-col border-r border-[var(--color-divider)] bg-[var(--color-surface)] p-4 sm:p-5 overflow-y-auto">
         <div className="mb-5">
-          <h1 className="text-2xl font-bold text-[var(--color-text)]">Modes</h1>
+          <h1 className="text-2xl font-bold text-[var(--color-text)]">Cognitive Modes</h1>
           <p className="text-[12.5px] text-[color-mix(in_srgb,var(--color-text)_60%,transparent)] mt-1">
-            Seven tools. Pick whatever is in your way right now.
+            Seven specialized tools designed for ADHD, dyslexia, and neurodivergent perception.
           </p>
         </div>
 
@@ -387,7 +421,7 @@ export default function Modes() {
               {loading ? (
                 <>
                   <i className="ph-duotone ph-spinner animate-spin"></i>
-                  Thinking…
+                  Processing…
                 </>
               ) : (
                 <>
@@ -417,35 +451,47 @@ export default function Modes() {
         <section className="space-y-6 max-w-3xl animate-setu-rise">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="kicker">Last result</span>
+              <span className="kicker">Output Result</span>
               {isWorkedExample ? (
                 <span className="tag tag-neutral text-[10.5px]">worked example</span>
-              ) : currentResult?.fallback ? (
-                <span
-                  className="tag tag-neutral text-[10.5px]"
-                  title={currentResult.fallbackReason || 'The AI engine was unreachable.'}
-                >
-                  <i className="ph-duotone ph-plugs"></i>
-                  offline engine
-                </span>
               ) : (
                 <span className="tag tag-accent text-[10.5px]">
                   <i className="ph-duotone ph-sparkle"></i>
-                  AI result
+                  AI Response
                 </span>
               )}
             </div>
+
+            {/* Accessibility Perception Controls */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleReadAloud}
+                className={`btn !min-h-[28px] !px-2.5 text-xs font-semibold ${
+                  ttsPlaying ? 'btn-primary' : 'btn-ghost'
+                }`}
+                title="Read result aloud with Text-to-Speech"
+              >
+                <i className={`ph-duotone ${ttsPlaying ? 'ph-pause-circle' : 'ph-speaker-high'}`}></i>
+                <span>{ttsPlaying ? 'Pause Audio' : 'Listen'}</span>
+              </button>
+
+              <button
+                onClick={() => setBionicMode((prev) => !prev)}
+                className={`btn !min-h-[28px] !px-2.5 text-xs font-semibold ${
+                  bionicMode
+                    ? 'bg-[var(--color-accent-100)] text-[var(--color-accent-900)] border border-[var(--color-accent-300)]'
+                    : 'btn-ghost'
+                }`}
+                title="Toggle Bionic Reading Fixations"
+              >
+                <i className="ph-duotone ph-eye text-sm"></i>
+                <span>Bionic: {bionicMode ? 'ON' : 'OFF'}</span>
+              </button>
+            </div>
           </div>
 
-          {!isWorkedExample && currentResult?.fallback && currentResult.fallbackReason && (
-            <p className="text-[12.5px] leading-snug text-[color-mix(in_srgb,var(--color-text)_62%,transparent)] -mt-3">
-              The AI engine could not be reached, so this came from SETU's built-in offline rules.
-              Reason: {currentResult.fallbackReason}
-            </p>
-          )}
-
-          {/* Render Result Content */}
-          <RenderModeResult modeKey={activeKey} data={currentResult} />
+          {/* Render Result Content with Interactive ADHD Dopamine Checklists */}
+          <RenderModeResult modeKey={activeKey} data={currentResult} bionicEnabled={bionicMode} />
         </section>
       </main>
 
@@ -455,7 +501,6 @@ export default function Modes() {
         variant="text"
         attachLabel="Load this text into the field"
         onFileAttached={(doc) => {
-          // The engine caps mode input at 64k chars; trim here so the textarea stays usable.
           const text = doc.extractedText || doc.summary || '';
           setInputVal(text.slice(0, 60000));
           setError(null);
@@ -465,94 +510,141 @@ export default function Modes() {
   );
 }
 
-/* ------------------------------ Render Helpers ------------------------------ */
+/* ------------------------------ Interactive Render Helpers ------------------------------ */
 
-function RenderModeResult({ modeKey, data }) {
+function RenderModeResult({ modeKey, data, bionicEnabled }) {
+  const [checkedSteps, setCheckedSteps] = useState(new Set());
+  const [selectedQuizAnswers, setSelectedQuizAnswers] = useState({});
+
   if (!data) return null;
 
+  const toggleStep = (stepId) => {
+    setCheckedSteps((prev) => {
+      const next = new Set(prev);
+      if (next.has(stepId)) {
+        next.delete(stepId);
+      } else {
+        next.add(stepId);
+        // Play dopamine celebration chime on task completion!
+        tts.playCelebrationChime();
+      }
+      return next;
+    });
+  };
+
   switch (modeKey) {
-    case 'start':
+    case 'start': {
+      const totalSteps = (data.microSteps || []).length;
+      const completedCount = [...checkedSteps].filter((id) => id.startsWith('start-step-')).length;
+
       return (
         <div className="space-y-5">
           {data.supportiveMessage && (
             <div className="p-4 bg-[var(--color-surface)] rounded-[var(--radius-md)] border-l-4 border-[#edbb00]">
               <p className="text-[14.5px] italic text-[var(--color-text)]">
-                “{data.supportiveMessage}”
+                <BionicText text={`“${data.supportiveMessage}”`} enabled={bionicEnabled} />
               </p>
             </div>
           )}
 
           {data.confidenceMeter && (
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 items-center">
               <span className="tag tag-accent">Effort: {data.confidenceMeter.effortLevel}</span>
               <span className="tag tag-neutral">Anxiety: {data.confidenceMeter.anxietyLevel}</span>
               <span className="tag tag-neutral">
                 {data.confidenceMeter.estimatedTimeMinutes} min
               </span>
+              {totalSteps > 0 && (
+                <span className="tag bg-[var(--color-accent-100)] text-[var(--color-accent-900)] font-bold ml-auto">
+                  {completedCount}/{totalSteps} Completed
+                </span>
+              )}
             </div>
           )}
 
           {data.immediateTenMinuteAction && (
             <div className="space-y-1.5 p-4 bg-[var(--color-surface)] rounded-[var(--radius-md)] border border-[var(--color-divider)]">
-              <span className="kicker block text-[11px]">Start with just this</span>
+              <span className="kicker block text-[11px]">Start with just this (10-minute micro-action)</span>
               <p className="text-[16px] font-bold text-[var(--color-text)]">
-                {data.immediateTenMinuteAction}
+                <BionicText text={data.immediateTenMinuteAction} enabled={bionicEnabled} />
               </p>
             </div>
           )}
 
           {data.microSteps?.length > 0 && (
             <div className="space-y-2">
-              <span className="kicker block">Then, in order</span>
-              <ol className="space-y-2 pl-0 list-none">
-                {data.microSteps.map((step, idx) => (
-                  <li
-                    key={idx}
-                    className="flex items-start gap-3 text-[14px] text-[var(--color-text)] p-2.5 bg-[var(--color-surface)] rounded-[var(--radius-sm)]"
-                  >
-                    <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[var(--color-accent-100)] text-[11px] font-bold text-[var(--color-accent-900)]">
-                      {idx + 1}
-                    </span>
-                    <span>{step}</span>
-                  </li>
-                ))}
-              </ol>
+              <div className="flex items-center justify-between">
+                <span className="kicker block">Checkable Micro-Steps (Click to complete)</span>
+                <span className="text-[11px] text-[var(--color-accent-700)] font-semibold">
+                  ADHD Momentum Tracker
+                </span>
+              </div>
+              <ul className="space-y-2 pl-0 list-none">
+                {data.microSteps.map((step, idx) => {
+                  const stepId = `start-step-${idx}`;
+                  const isChecked = checkedSteps.has(stepId);
+                  return (
+                    <li
+                      key={idx}
+                      onClick={() => toggleStep(stepId)}
+                      className={`flex items-start gap-3 text-[14px] p-3 rounded-[var(--radius-sm)] border transition-all cursor-pointer select-none ${
+                        isChecked
+                          ? 'bg-[var(--color-accent-100)] border-[var(--color-accent-300)] text-[var(--color-text)] opacity-80'
+                          : 'bg-[var(--color-surface)] border-[var(--color-divider)] hover:border-[var(--color-accent)]'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => toggleStep(stepId)}
+                        className="h-4 w-4 rounded mt-0.5 accent-[var(--color-accent)] shrink-0 cursor-pointer"
+                      />
+                      <span className={isChecked ? 'line-through opacity-75' : 'font-medium'}>
+                        <BionicText text={step} enabled={bionicEnabled} />
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           )}
 
           {data.clarifyingQuestion && (
-            <div className="space-y-1">
-              <span className="kicker block">Worth answering first</span>
+            <div className="space-y-1 p-3 bg-[var(--color-surface)] rounded-[var(--radius-sm)] border border-[var(--color-divider)]">
+              <span className="kicker block text-[10.5px]">Worth answering first</span>
               <p className="text-[14px] text-[color-mix(in_srgb,var(--color-text)_75%,transparent)] italic">
-                {data.clarifyingQuestion}
+                <BionicText text={data.clarifyingQuestion} enabled={bionicEnabled} />
               </p>
             </div>
           )}
         </div>
       );
+    }
 
     case 'simplify':
       return (
         <div className="space-y-5">
           {data.readabilityGrade && (
-            <span className="tag tag-accent">{data.readabilityGrade}</span>
+            <span className="tag tag-accent font-bold">{data.readabilityGrade}</span>
           )}
 
           {data.plainLanguageRewrite && (
             <div className="space-y-1.5">
-              <span className="kicker block">In plain words</span>
+              <span className="kicker block">In plain words (Grade 6 Reading Level)</span>
               <p className="text-[15.5px] leading-relaxed text-[var(--color-text)] p-4 bg-[var(--color-surface)] rounded-[var(--radius-md)] border border-[var(--color-divider)]">
-                {data.plainLanguageRewrite}
+                <BionicText text={data.plainLanguageRewrite} enabled={bionicEnabled} />
               </p>
             </div>
           )}
 
           {data.keyTakeaways?.length > 0 && (
             <div className="space-y-2">
-              <span className="kicker block">What matters</span>
+              <span className="kicker block">Core Takeaways</span>
               <ul className="space-y-1.5 pl-5 list-disc text-[14px] text-[var(--color-text)]">
                 {data.keyTakeaways.map((point, idx) => (
-                  <li key={idx}>{point}</li>
+                  <li key={idx}>
+                    <BionicText text={point} enabled={bionicEnabled} />
+                  </li>
                 ))}
               </ul>
             </div>
@@ -560,10 +652,12 @@ function RenderModeResult({ modeKey, data }) {
 
           {data.sensoryTips?.length > 0 && (
             <div className="space-y-2 pt-2">
-              <span className="kicker block">Reading tips</span>
+              <span className="kicker block">Cognitive Reading Tips</span>
               <ul className="space-y-1 pl-5 list-disc text-[13px] text-[color-mix(in_srgb,var(--color-text)_70%,transparent)]">
                 {data.sensoryTips.map((tip, idx) => (
-                  <li key={idx}>{tip}</li>
+                  <li key={idx}>
+                    <BionicText text={tip} enabled={bionicEnabled} />
+                  </li>
                 ))}
               </ul>
             </div>
@@ -578,14 +672,14 @@ function RenderModeResult({ modeKey, data }) {
             <div className="space-y-1.5">
               <span className="kicker block">Summary</span>
               <p className="text-[15px] leading-relaxed text-[var(--color-text)]">
-                {data.summary}
+                <BionicText text={data.summary} enabled={bionicEnabled} />
               </p>
             </div>
           )}
 
           {data.mindMap?.branches?.length > 0 && (
             <div className="space-y-3">
-              <span className="kicker block">{data.mindMap.rootNode || 'Key Branches'}</span>
+              <span className="kicker block">{data.mindMap.rootNode || 'Key Concept Branches'}</span>
               <div className="space-y-3">
                 {data.mindMap.branches.map((b, idx) => (
                   <div
@@ -593,11 +687,13 @@ function RenderModeResult({ modeKey, data }) {
                     className="p-3.5 bg-[var(--color-surface)] rounded-[var(--radius-md)] border-l-4 border-[#d6006c]"
                   >
                     <h4 className="font-bold text-[14.5px] text-[var(--color-text)] mb-1">
-                      {b.topic}
+                      <BionicText text={b.topic} enabled={bionicEnabled} />
                     </h4>
                     <ul className="space-y-1 pl-4 list-disc text-[13px] text-[color-mix(in_srgb,var(--color-text)_75%,transparent)]">
                       {(b.details || []).map((d, dIdx) => (
-                        <li key={dIdx}>{d}</li>
+                        <li key={dIdx}>
+                          <BionicText text={d} enabled={bionicEnabled} />
+                        </li>
                       ))}
                     </ul>
                   </div>
@@ -608,37 +704,56 @@ function RenderModeResult({ modeKey, data }) {
 
           {data.quiz?.length > 0 && (
             <div className="space-y-3 pt-2">
-              <span className="kicker block">Self Quiz</span>
-              {data.quiz.map((q, idx) => (
-                <div
-                  key={idx}
-                  className="p-4 bg-[var(--color-surface)] rounded-[var(--radius-md)] border border-[var(--color-divider)] space-y-2.5"
-                >
-                  <p className="font-semibold text-[14.5px] text-[var(--color-text)]">{q.question}</p>
-                  <div className="space-y-1.5 pl-2">
-                    {(q.options || []).map((opt, optIdx) => {
-                      const isAnswer = optIdx === (q.answerIndex ?? q.correctAnswerIndex);
-                      return (
-                        <div
-                          key={optIdx}
-                          className={`p-2 rounded text-[13px] ${
-                            isAnswer
-                              ? 'bg-[var(--color-accent-100)] text-[var(--color-accent-900)] font-semibold'
-                              : 'text-[color-mix(in_srgb,var(--color-text)_80%,transparent)]'
-                          }`}
-                        >
-                          {isAnswer ? '✓ ' : '• '} {opt}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {q.explanation && (
-                    <p className="text-[12px] text-[color-mix(in_srgb,var(--color-text)_60%,transparent)] italic pt-1 border-t border-[var(--color-divider)]">
-                      {q.explanation}
+              <span className="kicker block">Interactive Knowledge Check</span>
+              {data.quiz.map((q, idx) => {
+                const selectedOpt = selectedQuizAnswers[idx];
+                const correctIdx = q.answerIndex ?? q.correctAnswerIndex ?? 0;
+                const hasAnswered = selectedOpt !== undefined;
+
+                return (
+                  <div
+                    key={idx}
+                    className="p-4 bg-[var(--color-surface)] rounded-[var(--radius-md)] border border-[var(--color-divider)] space-y-2.5"
+                  >
+                    <p className="font-semibold text-[14.5px] text-[var(--color-text)]">
+                      <BionicText text={`${idx + 1}. ${q.question}`} enabled={bionicEnabled} />
                     </p>
-                  )}
-                </div>
-              ))}
+                    <div className="space-y-1.5 pl-2">
+                      {(q.options || []).map((opt, optIdx) => {
+                        const isChosen = selectedOpt === optIdx;
+                        const isCorrect = optIdx === correctIdx;
+
+                        return (
+                          <button
+                            key={optIdx}
+                            onClick={() => {
+                              setSelectedQuizAnswers((prev) => ({ ...prev, [idx]: optIdx }));
+                              if (optIdx === correctIdx) tts.playCelebrationChime();
+                            }}
+                            className={`w-full text-left p-2.5 rounded text-[13px] transition-all cursor-pointer border ${
+                              hasAnswered
+                                ? isCorrect
+                                  ? 'bg-green-100 border-green-400 text-green-900 font-bold'
+                                  : isChosen
+                                    ? 'bg-red-100 border-red-400 text-red-900'
+                                    : 'bg-[var(--color-bg)] border-[var(--color-divider)] opacity-60'
+                                : 'bg-[var(--color-bg)] border-[var(--color-divider)] hover:border-[var(--color-accent)]'
+                            }`}
+                          >
+                            {hasAnswered && isCorrect ? '✓ ' : hasAnswered && isChosen ? '✗ ' : '• '}
+                            <BionicText text={opt} enabled={bionicEnabled} />
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {hasAnswered && q.explanation && (
+                      <p className="text-[12px] text-[color-mix(in_srgb,var(--color-text)_70%,transparent)] italic pt-1 border-t border-[var(--color-divider)] animate-setu-rise">
+                        <strong>Explanation:</strong> <BionicText text={q.explanation} enabled={bionicEnabled} />
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -649,31 +764,52 @@ function RenderModeResult({ modeKey, data }) {
         <div className="space-y-5">
           {data.summary && (
             <div className="space-y-1.5">
-              <span className="kicker block">What happened</span>
+              <span className="kicker block">Meeting Summary</span>
               <p className="text-[15px] leading-relaxed text-[var(--color-text)]">
-                {data.summary}
+                <BionicText text={data.summary} enabled={bionicEnabled} />
               </p>
             </div>
           )}
 
           {data.actionItems?.length > 0 && (
             <div className="space-y-2.5">
-              <span className="kicker block">Action items</span>
+              <span className="kicker block">Action Items (Check when completed)</span>
               <div className="space-y-2">
-                {data.actionItems.map((item, idx) => (
-                  <div
-                    key={idx}
-                    className="p-3 bg-[var(--color-surface)] rounded-[var(--radius-md)] border border-[var(--color-divider)] flex flex-col sm:flex-row sm:items-center justify-between gap-2"
-                  >
-                    <span className="font-semibold text-[14px] text-[var(--color-text)]">
-                      {item.task}
-                    </span>
-                    <div className="flex flex-wrap gap-1.5 shrink-0">
-                      {item.owner && <span className="tag tag-accent">{item.owner}</span>}
-                      {item.deadline && <span className="tag tag-neutral">{item.deadline}</span>}
+                {data.actionItems.map((item, idx) => {
+                  const itemId = `meet-action-${idx}`;
+                  const isChecked = checkedSteps.has(itemId);
+                  return (
+                    <div
+                      key={idx}
+                      onClick={() => toggleStep(itemId)}
+                      className={`p-3 rounded-[var(--radius-md)] border flex flex-col sm:flex-row sm:items-center justify-between gap-2 cursor-pointer select-none transition-all ${
+                        isChecked
+                          ? 'bg-[var(--color-accent-100)] border-[var(--color-accent-300)] opacity-80'
+                          : 'bg-[var(--color-surface)] border-[var(--color-divider)] hover:border-[var(--color-accent)]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => toggleStep(itemId)}
+                          className="h-4 w-4 rounded accent-[var(--color-accent)] shrink-0 cursor-pointer"
+                        />
+                        <span
+                          className={`font-semibold text-[14px] text-[var(--color-text)] ${
+                            isChecked ? 'line-through opacity-75' : ''
+                          }`}
+                        >
+                          <BionicText text={item.task} enabled={bionicEnabled} />
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 shrink-0 pl-6 sm:pl-0">
+                        {item.owner && <span className="tag tag-accent">{item.owner}</span>}
+                        {item.deadline && <span className="tag tag-neutral">{item.deadline}</span>}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -683,7 +819,9 @@ function RenderModeResult({ modeKey, data }) {
               <span className="kicker block">Decisions made</span>
               <ul className="space-y-1 pl-5 list-disc text-[14px] text-[var(--color-text)]">
                 {data.keyDecisions.map((dec, idx) => (
-                  <li key={idx}>{dec}</li>
+                  <li key={idx}>
+                    <BionicText text={dec} enabled={bionicEnabled} />
+                  </li>
                 ))}
               </ul>
             </div>
@@ -697,7 +835,7 @@ function RenderModeResult({ modeKey, data }) {
                   <div key={idx} className="text-[13.5px]">
                     <dt className="inline font-bold text-[var(--color-text)]">{j.term}: </dt>
                     <dd className="inline text-[color-mix(in_srgb,var(--color-text)_75%,transparent)]">
-                      {j.plainMeaning}
+                      <BionicText text={j.plainMeaning} enabled={bionicEnabled} />
                     </dd>
                   </div>
                 ))}
@@ -712,7 +850,7 @@ function RenderModeResult({ modeKey, data }) {
         <div className="space-y-5">
           {data.scenarioContext && (
             <p className="text-[14px] text-[color-mix(in_srgb,var(--color-text)_75%,transparent)]">
-              {data.scenarioContext}
+              <BionicText text={data.scenarioContext} enabled={bionicEnabled} />
             </p>
           )}
 
@@ -720,7 +858,7 @@ function RenderModeResult({ modeKey, data }) {
             <div className="p-4 bg-[var(--color-surface)] rounded-[var(--radius-md)] border-l-4 border-[#d6006c]">
               <span className="kicker block mb-1">Their opening line</span>
               <p className="text-[15px] italic text-[var(--color-text)] font-serif">
-                “{data.openingLine}”
+                “<BionicText text={data.openingLine} enabled={bionicEnabled} />”
               </p>
             </div>
           )}
@@ -735,7 +873,7 @@ function RenderModeResult({ modeKey, data }) {
                 >
                   <span className="tag tag-accent text-[11px]">{res.tone}</span>
                   <p className="text-[14.5px] leading-relaxed text-[var(--color-text)]">
-                    “{res.text}”
+                    “<BionicText text={res.text} enabled={bionicEnabled} />”
                   </p>
                 </div>
               ))}
@@ -744,14 +882,13 @@ function RenderModeResult({ modeKey, data }) {
 
           {data.coachingTip && (
             <div className="p-3 bg-[var(--color-accent-100)] rounded-[var(--radius-md)] border border-[var(--color-accent-300)] text-[13.5px] text-[var(--color-accent-900)]">
-              <strong>Tip:</strong> {data.coachingTip}
+              <strong>Tip:</strong> <BionicText text={data.coachingTip} enabled={bionicEnabled} />
             </div>
           )}
         </div>
       );
 
     case 'write': {
-      // Contract mirrors backend writeSchema; older keys kept as a safety net.
       const grade = data.originalGradeLevel || data.readingGrade;
       const rewrite = data.improvedText || data.accessibleRewrite;
       const fixes = data.clarityFixes || [];
@@ -762,9 +899,9 @@ function RenderModeResult({ modeKey, data }) {
 
           {rewrite && (
             <div className="space-y-1.5">
-              <span className="kicker block">Clear rewrite</span>
+              <span className="kicker block">Clear Accessible Rewrite</span>
               <p className="text-[15px] leading-relaxed text-[var(--color-text)] p-4 bg-[var(--color-surface)] rounded-[var(--radius-md)] border border-[var(--color-divider)]">
-                {rewrite}
+                <BionicText text={rewrite} enabled={bionicEnabled} />
               </p>
             </div>
           )}
@@ -778,7 +915,7 @@ function RenderModeResult({ modeKey, data }) {
                     key={idx}
                     className="p-2.5 bg-[var(--color-surface)] rounded-[var(--radius-sm)] border-l-[3px] border-[#edbb00] text-[13.5px] text-[var(--color-text)] italic"
                   >
-                    “{instance}”
+                    “<BionicText text={instance} enabled={bionicEnabled} />”
                   </li>
                 ))}
               </ul>
@@ -787,7 +924,7 @@ function RenderModeResult({ modeKey, data }) {
 
           {fixes.length > 0 && (
             <div className="space-y-2.5">
-              <span className="kicker block">Line edits</span>
+              <span className="kicker block">Line-by-Line Clarity Edits</span>
               {fixes.map((fix, idx) => (
                 <div
                   key={idx}
@@ -797,7 +934,7 @@ function RenderModeResult({ modeKey, data }) {
                     {fix.originalSnippet}
                   </p>
                   <p className="text-[14.5px] leading-relaxed font-semibold text-[var(--color-text)]">
-                    {fix.suggestedSnippet}
+                    <BionicText text={fix.suggestedSnippet} enabled={bionicEnabled} />
                   </p>
                   {fix.reason && (
                     <p className="text-[12.5px] text-[var(--color-accent-700)] pt-1.5 border-t border-[var(--color-divider)]">
@@ -808,24 +945,11 @@ function RenderModeResult({ modeKey, data }) {
               ))}
             </div>
           )}
-
-          {/* Older shape, kept so cached results still render */}
-          {!fixes.length && data.improvements?.length > 0 && (
-            <div className="space-y-2">
-              <span className="kicker block">What was changed</span>
-              <ul className="space-y-1 pl-5 list-disc text-[13.5px] text-[var(--color-text)]">
-                {data.improvements.map((imp, idx) => (
-                  <li key={idx}>{imp}</li>
-                ))}
-              </ul>
-            </div>
-          )}
         </div>
       );
     }
 
     case 'guide': {
-      // Contract mirrors backend guideSchema; older keys kept as a safety net.
       const heading = data.workflowName || data.goal;
       const steps = data.steps || [];
 
@@ -833,38 +957,59 @@ function RenderModeResult({ modeKey, data }) {
         <div className="space-y-5">
           {heading && (
             <div className="flex flex-wrap items-center gap-2.5">
-              <h3 className="text-[17px] font-bold text-[var(--color-text)]">{heading}</h3>
+              <h3 className="text-[17px] font-bold text-[var(--color-text)]">
+                <BionicText text={heading} enabled={bionicEnabled} />
+              </h3>
               <span className="tag tag-neutral">
-                {data.totalSteps || steps.length} step{(data.totalSteps || steps.length) === 1 ? '' : 's'}
+                {data.totalSteps || steps.length} steps
               </span>
             </div>
           )}
 
           {steps.length > 0 && (
             <div className="space-y-3">
-              {steps.map((st, idx) => (
-                <div
-                  key={idx}
-                  className="p-4 bg-[var(--color-surface)] rounded-[var(--radius-md)] border border-[var(--color-divider)] space-y-2"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--color-text)] text-[var(--color-bg)] font-bold text-[12px]">
-                      {st.stepNumber || idx + 1}
-                    </span>
-                    <span className="font-bold text-[15px] text-[var(--color-text)]">
-                      {st.title || `Step ${st.stepNumber || idx + 1}`}
-                    </span>
-                  </div>
-                  <p className="text-[14px] leading-relaxed text-[var(--color-text)] pl-[34px]">
-                    {st.actionRequired || st.action}
-                  </p>
-                  {(st.tip || st.successSignal) && (
-                    <div className="ml-[34px] p-2.5 rounded bg-[var(--color-bg)] border border-[var(--color-divider)] text-[12.5px] leading-snug text-[var(--color-accent-700)]">
-                      <strong>You will know it worked when:</strong> {st.tip || st.successSignal}
+              {steps.map((st, idx) => {
+                const stepId = `guide-step-${idx}`;
+                const isDone = checkedSteps.has(stepId);
+
+                return (
+                  <div
+                    key={idx}
+                    onClick={() => toggleStep(stepId)}
+                    className={`p-4 rounded-[var(--radius-md)] border space-y-2 cursor-pointer transition-all ${
+                      isDone
+                        ? 'bg-[var(--color-accent-100)] border-[var(--color-accent-300)] opacity-85'
+                        : 'bg-[var(--color-surface)] border-[var(--color-divider)] hover:border-[var(--color-accent)]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2.5">
+                      <div className="flex items-center gap-2.5">
+                        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--color-text)] text-[var(--color-bg)] font-bold text-[12px]">
+                          {st.stepNumber || idx + 1}
+                        </span>
+                        <span className={`font-bold text-[15px] text-[var(--color-text)] ${isDone ? 'line-through' : ''}`}>
+                          <BionicText text={st.title || `Step ${st.stepNumber || idx + 1}`} enabled={bionicEnabled} />
+                        </span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={isDone}
+                        onChange={() => toggleStep(stepId)}
+                        className="h-4 w-4 rounded accent-[var(--color-accent)] shrink-0 cursor-pointer"
+                      />
                     </div>
-                  )}
-                </div>
-              ))}
+                    <p className={`text-[14px] leading-relaxed text-[var(--color-text)] pl-[34px] ${isDone ? 'line-through opacity-75' : ''}`}>
+                      <BionicText text={st.actionRequired || st.action} enabled={bionicEnabled} />
+                    </p>
+                    {(st.tip || st.successSignal) && (
+                      <div className="ml-[34px] p-2.5 rounded bg-[var(--color-bg)] border border-[var(--color-divider)] text-[12.5px] leading-snug text-[var(--color-accent-700)]">
+                        <strong>You will know it worked when:</strong>{' '}
+                        <BionicText text={st.tip || st.successSignal} enabled={bionicEnabled} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

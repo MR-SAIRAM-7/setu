@@ -15,11 +15,40 @@
  *  - SSE Streaming & Strict Structured Schema extraction with loose JSON recovery.
  */
 
+const crypto = require('crypto');
 const config = require('../config');
 
 const OPENROUTER_BASE = config.openRouterBaseUrl || 'https://openrouter.ai/api/v1';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const OPENAI_BASE = 'https://api.openai.com/v1';
+
+/** In-Memory High Speed AI Response Cache (TTL 1 hour, max 500 entries) */
+const aiCache = new Map();
+const MAX_CACHE_SIZE = 500;
+const CACHE_TTL_MS = 60 * 60 * 1000;
+
+function getCacheKey(prefix, payload) {
+  const hash = crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex').slice(0, 24);
+  return `${prefix}:${hash}`;
+}
+
+function getFromCache(key) {
+  const entry = aiCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    aiCache.delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
+function setToCache(key, value, ttl = CACHE_TTL_MS) {
+  if (aiCache.size >= MAX_CACHE_SIZE) {
+    const oldestKey = aiCache.keys().next().value;
+    aiCache.delete(oldestKey);
+  }
+  aiCache.set(key, { value, expiresAt: Date.now() + ttl });
+}
 
 /** Remembers the last working OpenRouter and Gemini models so we try them first */
 let resolvedOpenRouterModel = null;
@@ -706,8 +735,11 @@ function findContractViolation(value, schema) {
 /** Structured JSON generation against a schema. */
 async function requestStructuredAI({ name, schema, instructions, input, messages, temperature = 0.3 }) {
   const chat = normalizeMessages(input, messages);
+  const cacheKey = getCacheKey('struct', { name, schema, instructions, chat, temperature });
+  const cached = getFromCache(cacheKey);
+  if (cached) return cached;
 
-  return withProviders(async (provider) => {
+  const result = await withProviders(async (provider) => {
     let raw;
     if (provider === 'openrouter') {
       raw = await callOpenRouter({ system: instructions, messages: chat, schema, name, temperature });
@@ -730,13 +762,19 @@ async function requestStructuredAI({ name, schema, instructions, input, messages
 
     return parsed;
   });
+
+  setToCache(cacheKey, result);
+  return result;
 }
 
 /** Free-form prose generation. */
 async function requestText({ instructions, input, messages, temperature = 0.7 }) {
   const chat = normalizeMessages(input, messages);
+  const cacheKey = getCacheKey('text', { instructions, chat, temperature });
+  const cached = getFromCache(cacheKey);
+  if (cached) return cached;
 
-  return withProviders(async (provider) => {
+  const result = await withProviders(async (provider) => {
     if (provider === 'openrouter') {
       return callOpenRouter({ system: instructions, messages: chat, temperature });
     } else if (provider === 'gemini') {
@@ -745,6 +783,9 @@ async function requestText({ instructions, input, messages, temperature = 0.7 })
       return callOpenAI({ system: instructions, messages: chat, temperature });
     }
   });
+
+  setToCache(cacheKey, result);
+  return result;
 }
 
 /**
@@ -752,6 +793,9 @@ async function requestText({ instructions, input, messages, temperature = 0.7 })
  */
 async function requestResearch({ instructions, input, messages, temperature = 0.4 }) {
   const chat = normalizeMessages(input, messages);
+  const cacheKey = getCacheKey('research', { instructions, chat, temperature });
+  const cached = getFromCache(cacheKey);
+  if (cached) return cached;
 
   // If Gemini direct is configured and has search grounding:
   if (config.geminiApiKey) {
@@ -763,14 +807,18 @@ async function requestResearch({ instructions, input, messages, temperature = 0.
         grounded: true,
         withSources: true
       });
-      return { text, sources, grounded: true };
+      const res = { text, sources, grounded: true };
+      setToCache(cacheKey, res);
+      return res;
     } catch (error) {
       console.warn('[SETU AI] Gemini grounded research unavailable, falling back to OpenRouter/Model knowledge:', error.message);
     }
   }
 
   const text = await requestText({ instructions, messages: chat, temperature });
-  return { text, sources: [], grounded: false };
+  const res = { text, sources: [], grounded: false };
+  setToCache(cacheKey, res);
+  return res;
 }
 
 /** Streaming prose generation — yields text chunks. */
@@ -807,6 +855,10 @@ async function* streamText({ instructions, input, messages, temperature = 0.7 })
  * Describe an image (chart, document screenshot, visual graphic) in plain language.
  */
 async function describeImage({ imageBase64, mimeType = 'image/jpeg', instructions, prompt }) {
+  const cacheKey = getCacheKey('img', { mimeType, prompt, instructions, len: imageBase64?.length, slice: imageBase64?.slice(0, 100) });
+  const cached = getFromCache(cacheKey);
+  if (cached) return cached;
+
   if (config.openRouterApiKey) {
     const chain = openRouterChain();
     for (const model of chain) {
@@ -841,6 +893,7 @@ async function describeImage({ imageBase64, mimeType = 'image/jpeg', instruction
         const text = (await response.json())?.choices?.[0]?.message?.content;
         if (text) {
           resolvedOpenRouterModel = model;
+          setToCache(cacheKey, text);
           return text;
         }
       } catch (error) {
@@ -874,6 +927,7 @@ async function describeImage({ imageBase64, mimeType = 'image/jpeg', instruction
         const text = readGeminiText(await response.json());
         if (text) {
           resolvedGeminiModel = model;
+          setToCache(cacheKey, text);
           return text;
         }
       } catch (error) {
@@ -907,7 +961,10 @@ async function describeImage({ imageBase64, mimeType = 'image/jpeg', instruction
     );
 
     const text = (await response.json())?.choices?.[0]?.message?.content;
-    if (text) return text;
+    if (text) {
+      setToCache(cacheKey, text);
+      return text;
+    }
   }
 
   throw new AIError('No provider could describe this image.');

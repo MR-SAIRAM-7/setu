@@ -8,8 +8,9 @@ import Landing from './pages/Landing';
 import Onboarding from './pages/Onboarding';
 import CommandPalette from './components/CommandPalette';
 import BreakDialog from './components/BreakDialog';
+import ReadingRuler from './components/ReadingRuler';
 import { api } from './lib/api';
-import { applyPrefs, getPrefs } from './lib/storage';
+import { applyPrefs, getPrefs, savePrefs } from './lib/storage';
 
 export default function App() {
   useEffect(() => {
@@ -31,18 +32,26 @@ function AppRoot() {
   // Global Command Palette & Focus Session States
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [breakOpen, setBreakOpen] = useState(false);
+  const [readingRulerActive, setReadingRulerActive] = useState(() => Boolean(getPrefs().readingRuler));
 
   // 25-minute focus session timer state (1500 seconds)
   const [focusSeconds, setFocusSeconds] = useState(25 * 60);
   const [focusRunning, setFocusRunning] = useState(false);
   const timerRef = useRef(null);
 
-  // Global Ctrl+K / Cmd+K listener
+  // Global Keyboard Shortcuts (Ctrl+K / Cmd+K for palette, Alt+H for Reading Ruler)
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
         setPaletteOpen((prev) => !prev);
+      } else if (e.altKey && (e.key === 'h' || e.key === 'H')) {
+        e.preventDefault();
+        setReadingRulerActive((prev) => {
+          const next = !prev;
+          savePrefs({ readingRuler: next });
+          return next;
+        });
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -87,6 +96,14 @@ function AppRoot() {
     setFocusRunning(true);
   };
 
+  const toggleRuler = () => {
+    setReadingRulerActive((prev) => {
+      const next = !prev;
+      savePrefs({ readingRuler: next });
+      return next;
+    });
+  };
+
   return (
     <>
       <Routes>
@@ -101,6 +118,8 @@ function AppRoot() {
               focusRunning={focusRunning}
               onToggleFocus={toggleFocus}
               onResetFocus={resetFocus}
+              readingRulerActive={readingRulerActive}
+              onToggleRuler={toggleRuler}
             >
               <Routes>
                 <Route path="/" element={<RootRedirect />} />
@@ -114,6 +133,15 @@ function AppRoot() {
           }
         />
       </Routes>
+
+      {/* Global ADHD Reading Ruler */}
+      <ReadingRuler
+        enabled={readingRulerActive}
+        onClose={() => {
+          setReadingRulerActive(false);
+          savePrefs({ readingRuler: false });
+        }}
+      />
 
       <CommandPalette
         isOpen={paletteOpen}
@@ -143,9 +171,9 @@ function RootRedirect() {
 
 const NAV = [
   { to: '/mindmap', label: 'Mind Map', icon: 'ph-graph', hint: 'Ask anything, get a map' },
-  { to: '/library', label: 'Library', icon: 'ph-books', hint: 'Your saved maps' },
+  { to: '/library', label: 'Library', icon: 'ph-books', hint: 'Saved maps & documents' },
   { to: '/modes', label: 'Modes', icon: 'ph-squares-four', hint: 'Seven cognitive tools' },
-  { to: '/settings', label: 'Settings', icon: 'ph-gear', hint: 'Reading preferences' }
+  { to: '/settings', label: 'Settings', icon: 'ph-gear', hint: 'Dyslexia & ADHD controls' }
 ];
 
 function Shell({
@@ -154,7 +182,9 @@ function Shell({
   focusSeconds,
   focusRunning,
   onToggleFocus,
-  onResetFocus
+  onResetFocus,
+  readingRulerActive,
+  onToggleRuler
 }) {
   const [engine, setEngine] = useState('checking');
   const [dbState, setDbState] = useState(null);
@@ -194,21 +224,21 @@ function Shell({
         Skip to content
       </a>
 
-      {/* ----------------- Broadsheet Sidebar (236px fixed) ----------------- */}
+      {/* ----------------- Broadsheet Sidebar (244px fixed) ----------------- */}
       <nav
-        className={`fixed inset-y-0 left-0 z-40 flex w-[236px] flex-col bg-[var(--color-surface)] transition-transform duration-200 lg:static lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 flex w-[244px] flex-col bg-[var(--color-surface)] transition-transform duration-200 lg:static lg:translate-x-0 ${
           navOpen ? 'translate-x-0 shadow-lg' : '-translate-x-full'
         }`}
         aria-label="Main navigation"
       >
         {/* Brand Header */}
-        <div className="px-5 py-5 border-b border-[var(--color-divider)] flex items-center justify-between">
+        <div className="px-5 py-4 border-b border-[var(--color-divider)] flex items-center justify-between">
           <div>
             <span className="font-[var(--font-heading)] text-[20px] font-bold text-[var(--color-text)] tracking-tight block">
               SETU
             </span>
             <span className="kicker block text-[10px] text-[color-mix(in_srgb,var(--color-text)_55%,transparent)] mt-0.5">
-              Sanctuary
+              Cognitive Sanctuary
             </span>
           </div>
           <button
@@ -221,7 +251,7 @@ function Shell({
         </div>
 
         {/* Navigation Items */}
-        <div className="flex-1 space-y-1 py-4 pr-3 pl-0">
+        <div className="flex-1 space-y-1 py-3 pr-3 pl-0 overflow-y-auto">
           {NAV.map((item) => (
             <NavLink
               key={item.to}
@@ -246,10 +276,32 @@ function Shell({
               </div>
             </NavLink>
           ))}
+
+          {/* Quick Sensory / Focus Tools in Sidebar */}
+          <div className="pt-2 px-3 space-y-1">
+            <span className="kicker text-[9.5px] px-1">ADHD Focus Guide</span>
+            <button
+              onClick={onToggleRuler}
+              className={`w-full flex items-center justify-between p-2 rounded-[var(--radius-md)] border text-xs font-semibold transition-colors ${
+                readingRulerActive
+                  ? 'bg-[var(--color-accent-100)] border-[var(--color-accent)] text-[var(--color-accent-900)]'
+                  : 'bg-[var(--color-bg)] border-[var(--color-divider)] text-[var(--color-text)] hover:border-[var(--color-accent)]'
+              }`}
+              title="Toggle reading ruler (Alt+H)"
+            >
+              <div className="flex items-center gap-2">
+                <i className="ph-duotone ph-line-segments text-base text-[var(--color-accent)]"></i>
+                <span>Reading Ruler</span>
+              </div>
+              <kbd className="px-1 py-0.5 rounded border border-[var(--color-divider)] bg-[var(--color-surface)] font-mono text-[9.5px]">
+                Alt+H
+              </kbd>
+            </button>
+          </div>
         </div>
 
         {/* Command Palette Trigger */}
-        <div className="px-3 pb-3">
+        <div className="px-3 pb-2">
           <button
             onClick={onOpenPalette}
             className="w-full flex items-center justify-between gap-2 p-2 rounded-[var(--radius-md)] border border-[var(--color-divider)] bg-[var(--color-bg)] text-[12.5px] text-[var(--color-text)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent-700)] transition-colors cursor-pointer"
@@ -257,7 +309,7 @@ function Shell({
           >
             <div className="flex items-center gap-2">
               <i className="ph-duotone ph-magnifying-glass text-base text-[var(--color-accent)]"></i>
-              <span className="font-semibold">Do anything</span>
+              <span className="font-semibold">Quick Actions</span>
             </div>
             <kbd className="px-1.5 py-0.5 rounded border border-[var(--color-divider)] bg-[var(--color-surface)] font-mono text-[10px] text-[color-mix(in_srgb,var(--color-text)_60%,transparent)]">
               ⌘K
@@ -279,14 +331,6 @@ function Shell({
               {formatTime(focusSeconds)}
             </span>
           </div>
-
-          <p className="text-[11px] text-[color-mix(in_srgb,var(--color-text)_60%,transparent)] leading-tight">
-            {focusRunning
-              ? 'Active · 25 min timer'
-              : focusSeconds < 25 * 60
-                ? 'Session paused'
-                : '25 min focus interval'}
-          </p>
 
           <div className="flex items-center gap-1.5 pt-0.5">
             <button
@@ -382,10 +426,10 @@ function EngineBadge({ state, dbState }) {
         state === 'down'
           ? 'Start the backend: npm start in /backend'
           : state === 'nokey'
-            ? 'Set GEMINI_API_KEY in your .env file'
+            ? 'Set OPENROUTER_API_KEY in your .env file'
             : dbState?.connected
-              ? 'Connected to Gemini and MongoDB'
-              : 'Connected to Gemini with local storage fallback'
+              ? 'Connected to OpenRouter fast AI and MongoDB database'
+              : 'Connected to OpenRouter with local storage fallback'
       }
     >
       <span

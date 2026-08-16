@@ -42,6 +42,7 @@
   --font-body: "Source Serif 4", Georgia, serif;
   --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-hyper: "Atkinson Hyperlegible", Verdana, sans-serif;
+  --font-lexend: "Lexend", system-ui, sans-serif;
 
   /* Spacing Scale (Density 1.25x) */
   --space-1: 5px;
@@ -64,6 +65,70 @@
   --shadow-lg: 0 8px 24px rgba(32, 30, 29, 0.10);
 
   color-scheme: light;
+}
+
+/* Sensory Friendly Overlays & Themes for Neurodivergent Readers */
+html.theme-cream {
+  --color-bg: #faf7ee;
+  --color-surface: #f3eed9;
+  --color-text: #26231e;
+  --color-divider: rgba(38, 35, 30, 0.15);
+  --color-accent: #00779c;
+  --color-accent-100: #e3f2f7;
+  --color-accent-300: #9ad4e6;
+  --color-accent-700: #005672;
+}
+
+html.theme-pastel {
+  --color-bg: #f0f4f8;
+  --color-surface: #e2e8f0;
+  --color-text: #1e293b;
+  --color-divider: rgba(30, 41, 59, 0.14);
+  --color-accent: #0284c7;
+  --color-accent-100: #e0f2fe;
+  --color-accent-300: #7dd3fc;
+  --color-accent-700: #0369a1;
+}
+
+html.theme-sage {
+  --color-bg: #f2f6f1;
+  --color-surface: #e2efe0;
+  --color-text: #1c2b1d;
+  --color-divider: rgba(28, 43, 29, 0.15);
+  --color-accent: #15803d;
+  --color-accent-100: #dcfce7;
+  --color-accent-300: #86efac;
+  --color-accent-700: #166534;
+}
+
+html.theme-velvet {
+  --color-bg: #18181a;
+  --color-surface: #222226;
+  --color-text: #f3f2f2;
+  --color-divider: rgba(243, 242, 242, 0.15);
+  --color-accent: #38bdf8;
+  --color-accent-100: rgba(56, 189, 248, 0.15);
+  --color-accent-300: #0284c7;
+  --color-accent-700: #7dd3fc;
+  --color-accent-2: #f43f5e;
+  --color-accent-2-100: rgba(244, 63, 94, 0.15);
+  --color-accent-2-700: #fb7185;
+  color-scheme: dark;
+}
+
+html.theme-contrast {
+  --color-bg: #0d0d0d;
+  --color-surface: #1a1a1a;
+  --color-text: #ffffff;
+  --color-divider: rgba(255, 255, 255, 0.25);
+  --color-accent: #facc15;
+  --color-accent-100: rgba(250, 204, 21, 0.15);
+  --color-accent-300: #eab308;
+  --color-accent-700: #fef08a;
+  --color-accent-2: #fb7185;
+  --color-accent-2-100: rgba(251, 113, 133, 0.15);
+  --color-accent-2-700: #fda4af;
+  color-scheme: dark;
 }
 
 @layer base {
@@ -92,20 +157,29 @@
     overflow-x: hidden;
   }
 
-  /* Accessibility Preferences (applied from Settings / Onboarding) */
+  /* Accessibility Font Stacks */
   html.font-serif {
     font-family: var(--font-heading);
   }
   html.font-system {
     font-family: var(--font-sans);
   }
-  html.font-hyper,
-  html.font-dyslexic {
+  html.font-hyper {
     font-family: var(--font-hyper);
     letter-spacing: 0.015em;
-    word-spacing: 0.04em;
+  }
+  html.font-lexend {
+    font-family: var(--font-lexend);
+    letter-spacing: 0.02em;
+  }
+  html.font-dyslexic {
+    font-family: var(--font-lexend), "Atkinson Hyperlegible", sans-serif;
+    letter-spacing: 0.035em;
+    word-spacing: 0.07em;
+    line-height: 1.75;
   }
 
+  /* Text Sizing */
   html.text-normal {
     font-size: 16px;
   }
@@ -114,6 +188,30 @@
   }
   html.text-large {
     font-size: 19.5px;
+  }
+
+  /* Spacing Classes */
+  html.spacing-relaxed {
+    letter-spacing: 0.035em;
+    word-spacing: 0.08em;
+    line-height: 1.75;
+  }
+  html.spacing-spacious {
+    letter-spacing: 0.06em;
+    word-spacing: 0.14em;
+    line-height: 2.0;
+  }
+
+  /* Bionic Reading Fixation Styling */
+  .bionic-fixation,
+  .bionic-anchor {
+    font-weight: 800 !important;
+    color: var(--color-text);
+    display: inline;
+  }
+  .bionic-suffix {
+    opacity: 0.92;
+    display: inline;
   }
 
   /* Focus is always visible, never removed */

@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import MindMap from '../components/MindMap';
 import FileUploadModal from '../components/FileUploadModal';
+import DocumentViewerModal from '../components/DocumentViewerModal';
+import { BionicText } from '../lib/bionic';
+import { tts } from '../lib/tts';
 import { streamChat, api } from '../lib/api';
 import { saveMap, listMaps, DEFAULT_WORKED_MAP } from '../lib/storage';
 import {
@@ -43,6 +46,9 @@ export default function MindMapChat() {
   const [attachedDoc, setAttachedDoc] = useState(null);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [viewingDocId, setViewingDocId] = useState(null);
+  const [bionicEnabled, setBionicEnabled] = useState(true);
+  const [ttsPlaying, setTtsPlaying] = useState(false);
   const [conversationId, setConversationId] = useState(() => `conv_${Date.now()}`);
 
   const abortRef = useRef(null);
@@ -58,12 +64,18 @@ export default function MindMapChat() {
     setMap(stored[0] || DEFAULT_WORKED_MAP);
   }, []);
 
+  useEffect(() => {
+    const unsubscribe = tts.subscribe((state) => {
+      setTtsPlaying(state.isPlaying && !state.isPaused);
+    });
+    return () => {
+      unsubscribe();
+      tts.stop();
+    };
+  }, []);
+
   /**
    * Handle the three deep links the app supports, exactly once each.
-   *
-   * `pendingRef` holds the parsed intent so the work happens in a second effect
-   * that can safely depend on `send`. Consuming the param immediately (before
-   * any await) is what stops a re-render from replaying the same deep link.
    */
   useEffect(() => {
     const topicParam = params.get('topic');
@@ -129,7 +141,7 @@ export default function MindMapChat() {
       setInput('');
       setError(null);
       setBusy(true);
-      setStatus(attachedDoc ? `Analyzing "${attachedDoc.originalName}"…` : 'Reading around the topic…');
+      setStatus(attachedDoc ? `Analyzing "${attachedDoc.originalName}"…` : 'Researching around topic…');
 
       const history = [...messages, { role: 'user', content: text }];
       setMessages(history);
@@ -155,7 +167,6 @@ export default function MindMapChat() {
                 if (!replyText) return current;
 
                 if (reply.final) {
-                  // Replace the latest assistant placeholder, or append when none exists.
                   const last = current[current.length - 1];
                   if (last?.role === 'assistant') {
                     const next = [...current];
@@ -166,13 +177,12 @@ export default function MindMapChat() {
                 return [...current, { role: 'assistant', content: replyText }];
               }),
             onMap: (fresh) => {
-              // Use the stored record: saveMap mints an id when the engine sent none.
               const stored = saveMap(fresh);
               setMap(stored || fresh);
               setDetail(null);
               setMessages((current) => [
                 ...current,
-                { role: 'assistant', content: `Here's your map of **${fresh.title}**.` }
+                { role: 'assistant', content: `Here's your structured map of **${fresh.title}**.` }
               ]);
             },
             onError: (payload) => setError(payload.message),
@@ -198,12 +208,6 @@ export default function MindMapChat() {
     [input, busy, messages, map, attachedDoc, conversationId]
   );
 
-  /**
-   * Execute whatever the deep link asked for.
-   *
-   * Declared after `send` because it depends on it — referencing `send` in a
-   * dependency array above its own declaration would hit the temporal dead zone.
-   */
   useEffect(() => {
     const pending = pendingRef.current;
     if (!pending || busy) return;
@@ -267,6 +271,7 @@ export default function MindMapChat() {
 
   const startNewMap = () => {
     stop();
+    tts.stop();
     setMessages([]);
     setMap(null);
     setDetail(null);
@@ -293,10 +298,6 @@ export default function MindMapChat() {
     ]);
   };
 
-  /**
-   * All exports run through here so a failure surfaces in the UI instead of
-   * silently doing nothing, and the menu always closes.
-   */
   const runExport = useCallback(
     async (label, exporter) => {
       if (!map) return;
@@ -310,6 +311,15 @@ export default function MindMapChat() {
     },
     [map]
   );
+
+  const handleReadDetail = () => {
+    if (!detail) return;
+    if (ttsPlaying) {
+      tts.stop();
+    } else {
+      tts.speak(`${detail.label}. ${detail.detail || ''}`);
+    }
+  };
 
   return (
     <div className="flex h-full w-full flex-col lg:flex-row overflow-hidden bg-[var(--color-bg)]">
@@ -327,10 +337,22 @@ export default function MindMapChat() {
               <div>
                 <h1 className="text-[20px] font-bold text-[var(--color-text)]">Ask anything</h1>
                 <p className="text-[12px] text-[color-mix(in_srgb,var(--color-text)_58%,transparent)]">
-                  Research topics or upload your own files
+                  Research topics or query uploaded documents
                 </p>
               </div>
               <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setBionicEnabled((prev) => !prev)}
+                  className={`btn !min-h-[30px] !px-2 text-xs font-semibold ${
+                    bionicEnabled
+                      ? 'bg-[var(--color-accent-100)] text-[var(--color-accent-900)] border border-[var(--color-accent-300)]'
+                      : 'btn-ghost'
+                  }`}
+                  title="Toggle Bionic Reading Fixations"
+                >
+                  <i className="ph-duotone ph-eye text-sm"></i>
+                  Bionic
+                </button>
                 <button
                   onClick={() => setUploadModalOpen(true)}
                   className="btn btn-secondary !min-h-[30px] !px-2.5 text-[12px]"
@@ -407,13 +429,22 @@ export default function MindMapChat() {
                     </span>
                   </div>
                 </div>
-                <button
-                  onClick={() => setAttachedDoc(null)}
-                  className="btn btn-quiet !min-h-[24px] !px-1.5 text-[11px]"
-                  title="Detach file"
-                >
-                  <i className="ph-duotone ph-x"></i>
-                </button>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={() => setViewingDocId(attachedDoc.id)}
+                    className="btn btn-ghost !min-h-[24px] !px-2 text-[11px]"
+                    title="View full document"
+                  >
+                    View
+                  </button>
+                  <button
+                    onClick={() => setAttachedDoc(null)}
+                    className="btn btn-quiet !min-h-[24px] !px-1.5 text-[11px]"
+                    title="Detach file"
+                  >
+                    <i className="ph-duotone ph-x"></i>
+                  </button>
+                </div>
               </div>
             )}
 
@@ -461,6 +492,7 @@ export default function MindMapChat() {
                   key={index}
                   role={message?.role || 'assistant'}
                   content={normalizeMessageContent(message?.content)}
+                  bionicEnabled={bionicEnabled}
                 />
               ))}
 
@@ -561,7 +593,7 @@ export default function MindMapChat() {
                   {map.title}
                 </h2>
                 <p className="text-[13px] text-[color-mix(in_srgb,var(--color-text)_60%,transparent)] truncate mt-0.5">
-                  {map.summary}
+                  <BionicText text={map.summary} enabled={bionicEnabled} />
                 </p>
               </div>
 
@@ -570,7 +602,7 @@ export default function MindMapChat() {
                 {map.grounded ? (
                   <span className="tag tag-accent">
                     <i className="ph-duotone ph-globe"></i>
-                    {map.sources?.length || 0} web sources
+                    {map.sources?.length || 0} sources
                   </span>
                 ) : (
                   <span className="tag tag-neutral" title="Verified knowledge synthesis">
@@ -658,11 +690,11 @@ export default function MindMapChat() {
                   <div className="min-w-0 max-w-[76ch]">
                     <span className="kicker block mb-1">Selected topic</span>
                     <h3 className="text-[19px] font-bold text-[var(--color-text)] leading-tight">
-                      {detail.label}
+                      <BionicText text={detail.label} enabled={bionicEnabled} />
                     </h3>
                     {detail.detail && (
                       <p className="mt-1.5 text-[14px] leading-relaxed text-[color-mix(in_srgb,var(--color-text)_78%,transparent)]">
-                        {detail.detail}
+                        <BionicText text={detail.detail} enabled={bionicEnabled} />
                       </p>
                     )}
                   </div>
@@ -676,6 +708,14 @@ export default function MindMapChat() {
                 </div>
 
                 <div className="flex items-center gap-2.5 mt-3 pt-3 border-t border-[var(--color-divider)]">
+                  <button
+                    onClick={handleReadDetail}
+                    className={`btn !min-h-[32px] text-[12px] ${ttsPlaying ? 'btn-primary' : 'btn-ghost'}`}
+                    title="Listen aloud"
+                  >
+                    <i className={`ph-duotone ${ttsPlaying ? 'ph-pause-circle' : 'ph-speaker-high'}`}></i>
+                    {ttsPlaying ? 'Pause Audio' : 'Listen'}
+                  </button>
                   <button
                     onClick={() => send(`Tell me more about "${detail.label}"`)}
                     className="btn btn-secondary !min-h-[32px] text-[12px]"
@@ -715,27 +755,25 @@ export default function MindMapChat() {
           inputRef.current?.focus();
         }}
       />
+
+      {/* Document Reader & Cognitive Viewer Modal */}
+      <DocumentViewerModal
+        isOpen={Boolean(viewingDocId)}
+        documentId={viewingDocId}
+        onClose={() => setViewingDocId(null)}
+        onMindMapGenerated={handleMindMapFromFile}
+      />
     </div>
   );
 }
 
 /* ------------------------------ Transcript Items ------------------------------ */
 
-function MessageItem({ role, content }) {
+function MessageItem({ role, content, bionicEnabled }) {
   const isUser = role === 'user';
   const safeContent = normalizeMessageContent(content);
 
   if (!safeContent) return null;
-
-  const parts = safeContent.split(/(\*\*[^*]+\*\*)/g).map((part, index) =>
-    part.startsWith('**') && part.endsWith('**') ? (
-      <strong key={index} className="font-semibold text-[var(--color-text)]">
-        {part.slice(2, -2)}
-      </strong>
-    ) : (
-      <span key={index}>{part}</span>
-    )
-  );
 
   if (isUser) {
     return (
@@ -748,7 +786,7 @@ function MessageItem({ role, content }) {
             borderRadius: 'var(--radius-lg) var(--radius-lg) 2px var(--radius-lg)'
           }}
         >
-          {safeContent}
+          <BionicText text={safeContent} enabled={bionicEnabled} />
         </div>
       </div>
     );
@@ -757,7 +795,7 @@ function MessageItem({ role, content }) {
   return (
     <div className="flex justify-start animate-setu-rise">
       <div className="text-[15px] leading-relaxed text-[color-mix(in_srgb,var(--color-text)_84%,transparent)] max-w-[95%]">
-        {parts}
+        <BionicText text={safeContent} enabled={bionicEnabled} />
       </div>
     </div>
   );
