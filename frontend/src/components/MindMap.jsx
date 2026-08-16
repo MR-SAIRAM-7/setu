@@ -79,16 +79,20 @@ export default function MindMap({ map, onMapChange, onNodeFocus }) {
   };
 
   const onPointerMove = (event) => {
-    if (!dragRef.current) return;
+    const dragState = dragRef.current;
+    if (!dragState) return;
+
     setView((current) => ({
       ...current,
-      x: dragRef.current.originX + (event.clientX - dragRef.current.startX),
-      y: dragRef.current.originY + (event.clientY - dragRef.current.startY)
+      x: dragState.originX + (event.clientX - dragState.startX),
+      y: dragState.originY + (event.clientY - dragState.startY)
     }));
   };
 
   const endDrag = () => {
-    dragRef.current = null;
+    if (dragRef.current) {
+      dragRef.current = null;
+    }
     setDragging(false);
   };
 

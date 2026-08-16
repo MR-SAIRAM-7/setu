@@ -5,11 +5,25 @@
  * auto-summarization, document Q&A/RAG queries, and mind map generation from user files.
  */
 
-const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 const { requestStructuredAI, requestText, describeImage } = require('./aiService');
 const { researchMindMap } = require('./researchService');
 const mongoService = require('./mongodbService');
+
+let PDFParseClass = null;
+
+async function getPdfParserClass() {
+  if (PDFParseClass) return PDFParseClass;
+
+  const imported = await import('pdf-parse');
+  PDFParseClass = imported.PDFParse || imported.default?.PDFParse || imported.default;
+
+  if (!PDFParseClass || typeof PDFParseClass !== 'function') {
+    throw new Error('pdf-parse did not expose the PDFParse class in this runtime.');
+  }
+
+  return PDFParseClass;
+}
 
 /**
  * Extract clean text and metadata from uploaded file buffer.
@@ -25,9 +39,12 @@ async function extractTextFromFile({ buffer, originalName, mimeType }) {
 
   try {
     if (type === 'application/pdf' || ext === 'pdf') {
-      const pdfData = await pdfParse(buffer);
+      const PDFParse = await getPdfParserClass();
+      const parser = new PDFParse({ data: buffer });
+      const pdfData = await parser.getText();
       extractedText = (pdfData.text || '').trim();
-      pageCount = pdfData.numpages || 1;
+      pageCount = pdfData.pages?.length || 1;
+      await parser.destroy?.();
     } else if (
       type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
       ext === 'docx'
