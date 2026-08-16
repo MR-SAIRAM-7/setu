@@ -257,6 +257,18 @@ export default function Modes() {
     }
   }, [searchParams]);
 
+  /**
+   * Each mode takes a different kind of input — a meeting transcript is not a
+   * task to unfreeze — so carrying text across a switch only ever produces a
+   * nonsense run. Results are kept per mode and stay put.
+   */
+  const selectMode = (key) => {
+    if (key === activeKey) return;
+    setActiveKey(key);
+    setInputVal('');
+    setError(null);
+  };
+
   const handleRun = async (e) => {
     e?.preventDefault();
     if (!inputVal.trim() || loading) return;
@@ -300,10 +312,8 @@ export default function Modes() {
             return (
               <button
                 key={mode.key}
-                onClick={() => {
-                  setActiveKey(mode.key);
-                  setError(null);
-                }}
+                onClick={() => selectMode(mode.key)}
+                aria-current={isActive ? 'page' : undefined}
                 className={`w-full flex items-start gap-3 p-2.5 rounded-[var(--radius-md)] text-left transition-all duration-150 cursor-pointer border-0 ${
                   isActive
                     ? 'bg-[var(--color-bg)] shadow-[var(--shadow-sm)]'

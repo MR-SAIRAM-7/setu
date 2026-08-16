@@ -135,14 +135,40 @@ function generateLocalWriteMode(text) {
   };
 }
 
+/**
+ * Each `tip` is written as a clause completing "You will know it worked when …",
+ * matching both the AI contract and how the web app labels it.
+ */
 function generateLocalGuideMode(goal) {
+  const cleanGoal = String(goal || 'this task').trim();
   return {
-    workflowName: goal,
-    totalSteps: 3,
+    workflowName: cleanGoal,
+    totalSteps: 4,
     steps: [
-      { stepNumber: 1, title: 'Locate the Start Button', actionRequired: 'Click the primary action button at the top of the interface.', tip: 'It is highlighted with a high-contrast accent.' },
-      { stepNumber: 2, title: 'Fill Essential Fields', actionRequired: 'Enter your name and details into the short form.', tip: 'Optional fields can be skipped to save cognitive effort.' },
-      { stepNumber: 3, title: 'Confirm & Save', actionRequired: 'Click Save to lock in your changes.', tip: 'A green check icon will confirm success.' }
+      {
+        stepNumber: 1,
+        title: 'Write down the finish line',
+        actionRequired: `In one sentence, write what "${cleanGoal}" looks like when it is done.`,
+        tip: 'you can read the sentence back and it names something you could point at.'
+      },
+      {
+        stepNumber: 2,
+        title: 'Gather what you need first',
+        actionRequired: 'List every document, number, or login this will ask you for, and find them before starting.',
+        tip: 'nothing on the list is still marked "need to find".'
+      },
+      {
+        stepNumber: 3,
+        title: 'Do the first concrete action',
+        actionRequired: 'Open the form, page, or file and complete only the parts you can answer without looking anything up.',
+        tip: 'the easy fields are filled and only the ones needing research are blank.'
+      },
+      {
+        stepNumber: 4,
+        title: 'Close the gaps, then submit',
+        actionRequired: 'Go back to the blanks one at a time, then review once and submit.',
+        tip: 'you see a confirmation message or reference number.'
+      }
     ]
   };
 }

@@ -16,6 +16,36 @@ function isDbActive() {
   return mongoose.connection.readyState === 1;
 }
 
+/* -------------------------------------------------------------------------- */
+/* In-memory document fallback                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Uploaded documents held in process memory when MongoDB is unavailable.
+ *
+ * Everything else in SETU degrades cleanly without a database because the client
+ * keeps its own copy — but an uploaded file is different. The extracted text
+ * lives only on the server, and "build a mind map from this file" and "ask about
+ * this file" both look the document up again by id moments later. Without this,
+ * every upload would summarise correctly and then 404 on the next click.
+ *
+ * Bounded and non-durable by design: it survives a click, not a restart.
+ */
+const MAX_MEMORY_DOCUMENTS = 50;
+const memoryDocuments = new Map();
+
+function rememberDocument(doc) {
+  // Re-insert to move it to the end; Map preserves insertion order.
+  memoryDocuments.delete(doc.id);
+  memoryDocuments.set(doc.id, doc);
+
+  while (memoryDocuments.size > MAX_MEMORY_DOCUMENTS) {
+    const oldest = memoryDocuments.keys().next().value;
+    memoryDocuments.delete(oldest);
+  }
+  return doc;
+}
+
 /* ----------------------------- Conversations ----------------------------- */
 
 async function createConversation({
@@ -185,69 +215,96 @@ async function saveDocumentFile({
   structuredSections = [],
   metadata = {}
 }) {
-  if (!isDbActive() || !originalName || !extractedText) return null;
+  if (!originalName || !extractedText) return null;
+
+  const fileId = id || `doc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const record = {
+    id: fileId,
+    userId,
+    conversationId,
+    originalName,
+    mimeType,
+    size,
+    extractedText,
+    summary,
+    keyPoints,
+    pageCount,
+    charCount: charCount || extractedText.length,
+    tokenCount: tokenCount || Math.ceil(extractedText.length / 4),
+    structuredSections,
+    metadata
+  };
+
+  if (!isDbActive()) {
+    return rememberDocument({ ...record, createdAt: new Date(), persistedToDb: false });
+  }
+
   try {
-    const fileId = id || `doc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const doc = await DocumentFile.findOneAndUpdate(
       { id: fileId },
-      {
-        id: fileId,
-        userId,
-        conversationId,
-        originalName,
-        mimeType,
-        size,
-        extractedText,
-        summary,
-        keyPoints,
-        pageCount,
-        charCount: charCount || extractedText.length,
-        tokenCount: tokenCount || Math.ceil(extractedText.length / 4),
-        structuredSections,
-        metadata
-      },
+      record,
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
     return doc;
   } catch (err) {
     console.warn('[MongoDB Service] Error saving document:', err.message);
-    return null;
+    // Keep it in memory so the follow-up actions on this upload still work.
+    return rememberDocument({ ...record, createdAt: new Date(), persistedToDb: false });
   }
 }
 
 async function listDocumentFiles({ userId = 'anonymous_user', conversationId = null, limit = 50 }) {
-  if (!isDbActive()) return [];
+  const fromMemory = [...memoryDocuments.values()]
+    .filter((doc) => doc.userId === userId && (!conversationId || doc.conversationId === conversationId))
+    .map(({ extractedText, ...rest }) => rest)
+    .reverse();
+
+  if (!isDbActive()) return fromMemory.slice(0, limit);
+
   try {
     const query = { userId };
     if (conversationId) query.conversationId = conversationId;
-    return await DocumentFile.find(query, { extractedText: 0 })
+    const stored = await DocumentFile.find(query, { extractedText: 0 })
       .sort({ createdAt: -1 })
       .limit(limit)
       .lean();
+
+    // Memory can hold uploads from a window where the database was unreachable.
+    const seen = new Set(stored.map((doc) => doc.id));
+    return [...stored, ...fromMemory.filter((doc) => !seen.has(doc.id))].slice(0, limit);
   } catch (err) {
     console.warn('[MongoDB Service] Error listing documents:', err.message);
-    return [];
+    return fromMemory.slice(0, limit);
   }
 }
 
 async function getDocumentFileById(id) {
-  if (!isDbActive() || !id) return null;
-  try {
-    return await DocumentFile.findOne({ id }).lean();
-  } catch (err) {
-    console.warn('[MongoDB Service] Error fetching document:', err.message);
-    return null;
+  if (!id) return null;
+
+  if (isDbActive()) {
+    try {
+      const doc = await DocumentFile.findOne({ id }).lean();
+      if (doc) return doc;
+    } catch (err) {
+      console.warn('[MongoDB Service] Error fetching document:', err.message);
+    }
   }
+
+  return memoryDocuments.get(id) || null;
 }
 
 async function deleteDocumentFile(id) {
-  if (!isDbActive() || !id) return false;
+  if (!id) return false;
+
+  const removedFromMemory = memoryDocuments.delete(id);
+  if (!isDbActive()) return removedFromMemory;
+
   try {
     const res = await DocumentFile.deleteOne({ id });
-    return res.deletedCount > 0;
+    return res.deletedCount > 0 || removedFromMemory;
   } catch (err) {
     console.warn('[MongoDB Service] Error deleting document:', err.message);
-    return false;
+    return removedFromMemory;
   }
 }
 

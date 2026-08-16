@@ -96,7 +96,13 @@ passive voice when it is not.`,
     name: 'setu_guide',
     schema: schemas.guideSchema,
     instructions: `Break a workflow into clear numbered steps. Each step is one action with a
-concrete success signal, so the user always knows it worked before moving on.`,
+concrete success signal, so the user always knows it worked before moving on.
+
+"title" is a short label for the step, 2-6 words.
+"actionRequired" is the single thing to do, phrased as an instruction.
+"tip" is the observable signal that the step succeeded, written as a clause that
+completes the sentence "You will know it worked when …" — so write
+"the terminal prints Done", not "It worked when the terminal prints Done".`,
     input: (b) => `GOAL: "${b.goal}"`,
     fallback: (b) => fallbacks.generateLocalGuideMode(b.goal)
   }
