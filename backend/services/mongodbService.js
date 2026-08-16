@@ -74,7 +74,7 @@ async function createConversation({
         metadata,
         lastMessageAt: new Date()
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
     );
     return conversation;
   } catch (err) {
@@ -114,7 +114,7 @@ async function updateConversation(id, updates = {}) {
     return await Conversation.findOneAndUpdate(
       { id },
       { ...updates, updatedAt: new Date() },
-      { new: true }
+      { returnDocument: 'after' }
     ).lean();
   } catch (err) {
     console.warn('[MongoDB Service] Error updating conversation:', err.message);
@@ -171,7 +171,7 @@ async function saveMessage({
         provider,
         metadata
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
     );
 
     // Update parent conversation timestamp
@@ -243,7 +243,7 @@ async function saveDocumentFile({
     const doc = await DocumentFile.findOneAndUpdate(
       { id: fileId },
       record,
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
     );
     return doc;
   } catch (err) {
@@ -360,7 +360,7 @@ async function saveMindMap({
         metadata,
         updatedAt: new Date()
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
     );
     return updated;
   } catch (err) {
@@ -443,7 +443,7 @@ async function saveSummary({
         resultData,
         metadata
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
     );
     return doc;
   } catch (err) {
@@ -480,7 +480,7 @@ async function saveUserSettings(userId = 'anonymous_user', settings = {}) {
     return await UserSettings.findOneAndUpdate(
       { userId },
       { ...settings, userId, updatedAt: new Date() },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
     ).lean();
   } catch (err) {
     console.warn('[MongoDB Service] Error saving settings:', err.message);

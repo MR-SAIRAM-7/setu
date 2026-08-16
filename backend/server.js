@@ -14,7 +14,7 @@ const fs = require('fs');
 const express = require('express');
 const cors = require('cors');
 const config = require('./config');
-const { connectDB, closeDB } = require('./config/db');
+const { connectDB, whenReady, closeDB } = require('./config/db');
 const apiRoutes = require('./routes/apiRoutes');
 const errorHandler = require('./middleware/errorHandler');
 const { securityHeaders, createRateLimiter } = require('./middleware/security');
@@ -89,6 +89,15 @@ app.use(AI_ROUTES, aiLimiter);
 // Mind maps built from a document also run the full research pipeline.
 app.use('/api/files/:id/mindmap', aiLimiter);
 app.use('/api/files/:id/query', aiLimiter);
+
+// Hold API requests until the startup connection attempt has settled, so a
+// client loading during those first seconds reads the database rather than an
+// empty result set. No-op once connected, and never waits when there is no
+// database to wait for.
+app.use('/api', (req, _res, next) => {
+  if (req.path === '/health') return next();
+  whenReady().then(() => next(), () => next());
+});
 
 app.use('/api', apiRoutes);
 
@@ -169,7 +178,10 @@ if (require.main === module) {
   const server = app.listen(config.port, () => {
     console.log('\n  ======================================================');
     console.log(`  SETU API Server → http://localhost:${config.port}`);
-    console.log(`  Database        : MongoDB (${config.safeMongoUri})`);
+    const dbInfo = process.env.MONGODB_DISABLED === 'true'
+      ? 'disabled by MONGODB_DISABLED — using local fallback storage'
+      : config.safeMongoUri || 'not configured — using local fallback storage';
+    console.log(`  Database        : MongoDB (${dbInfo})`);
     console.log(`  AI Engine       : ${aiProviderInfo}`);
     console.log(`  Web app         : ${hasBuiltFrontend ? 'served from /frontend/dist' : 'run separately (npm run dev)'}`);
     console.log(`  Health Check    : http://localhost:${config.port}/api/health`);

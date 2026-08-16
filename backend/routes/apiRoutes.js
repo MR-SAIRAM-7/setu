@@ -36,7 +36,8 @@ router.get('/health', (_req, res) => {
     database: {
       provider: 'MongoDB',
       connected: dbStatus.connected,
-      state: dbStatus.state
+      state: dbStatus.state,
+      name: dbStatus.database
     },
     modes: ['start', 'simplify', 'learn', 'meet', 'practice', 'write', 'guide'],
     timestamp: new Date().toISOString()

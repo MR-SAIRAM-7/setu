@@ -14,6 +14,50 @@ const clean = (value) => {
   return trimmed.length ? trimmed : null;
 };
 
+/** Database used when the connection string carries no path of its own. */
+const MONGO_DB_NAME = clean(process.env.MONGODB_DB) || 'setu';
+
+/**
+ * Normalise a MongoDB connection string.
+ *
+ * Atlas hands out URIs with no database path (`.../?appName=Cluster0`), and the
+ * driver silently falls back to `test` for those — so seeded data lands in one
+ * database while the app reads from another. Appending the database name here
+ * means both surfaces agree regardless of which form the URI was pasted in.
+ *
+ * Returns null for anything that is not a usable mongodb URI, which puts the
+ * process into fallback mode rather than failing at connect time.
+ */
+function normalizeMongoUri(raw) {
+  const uri = clean(raw);
+  if (!uri) return null;
+
+  if (!/^mongodb(\+srv)?:\/\//i.test(uri)) {
+    console.warn(
+      `  [config] MONGODB_URI must start with mongodb:// or mongodb+srv:// — got "${uri.slice(0, 24)}…". Ignoring it.`
+    );
+    return null;
+  }
+
+  const queryAt = uri.indexOf('?');
+  const base = queryAt === -1 ? uri : uri.slice(0, queryAt);
+  const query = queryAt === -1 ? '' : uri.slice(queryAt);
+
+  const schemeEnd = base.indexOf('://') + 3;
+  const authority = base.slice(schemeEnd);
+
+  // Look for the path separator only after the credentials, so an escaped slash
+  // inside a password is not mistaken for the start of the database name.
+  const credentialsEnd = authority.lastIndexOf('@') + 1;
+  const pathStart = authority.indexOf('/', credentialsEnd);
+
+  const hasDbName = pathStart !== -1 && authority.slice(pathStart + 1).length > 0;
+  if (hasDbName) return uri;
+
+  const hostPart = pathStart === -1 ? authority : authority.slice(0, pathStart);
+  return `${base.slice(0, schemeEnd)}${hostPart}/${MONGO_DB_NAME}${query}`;
+}
+
 /**
  * OpenRouter model fallback chain.
  * Primary model is first, followed by resilient multi-vendor alternatives.
@@ -88,7 +132,27 @@ module.exports = {
   maxRetryWaitMs: Number(process.env.AI_MAX_RETRY_WAIT_MS || 15000),
 
   // MongoDB Database Configuration
-  mongoUri: clean(process.env.MONGODB_URI) || 'mongodb://127.0.0.1:27017/setu',
+  // Keep MongoDB opt-in so the API can run in degraded mode when no local DB or
+  // reachable Atlas cluster is configured. This avoids failing startup on a
+  // broken or unreachable connection string.
+  mongoUri: normalizeMongoUri(process.env.MONGODB_URI),
+  mongoDbName: MONGO_DB_NAME,
+
+  /**
+   * Resolvers used for the SRV/TXT lookup that `mongodb+srv://` requires.
+   *
+   * Many home routers and corporate resolvers answer A records but refuse SRV
+   * queries, which surfaces as `querySrv ECONNREFUSED` and looks like a bad
+   * password or a paused cluster. These are tried only when the system resolver
+   * fails; set DNS_SERVERS to override or to an empty value to disable.
+   */
+  dnsFallbackServers: (process.env.DNS_SERVERS === undefined
+    ? '8.8.8.8,1.1.1.1'
+    : process.env.DNS_SERVERS
+  )
+    .split(',')
+    .map((server) => server.trim())
+    .filter(Boolean),
 
   /** Credentials stripped — safe to print in logs and health payloads. */
   get safeMongoUri() {

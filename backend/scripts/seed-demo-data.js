@@ -23,7 +23,7 @@
 const path = require('path');
 const { pathToFileURL } = require('url');
 
-const { connectDB, closeDB, mongoose } = require('../config/db');
+const { connectDB, closeDB, getStatus, mongoose } = require('../config/db');
 const config = require('../config');
 
 const Conversation = require('../models/Conversation');
@@ -621,7 +621,7 @@ async function seedDocuments() {
         createdAt,
         updatedAt: createdAt
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
     );
   }
   console.log(`  [seed] ${DOCUMENTS.length} document(s) ready.`);
@@ -650,7 +650,7 @@ async function seedMindMaps(maps) {
         createdAt: new Date(map.createdAt || Date.now()),
         updatedAt: new Date(map.updatedAt || Date.now())
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
     );
   }
   console.log(`  [seed] ${maps.length} mind map(s) ready.`);
@@ -678,7 +678,7 @@ async function seedConversations() {
         createdAt: startedAt,
         updatedAt: lastMessageAt
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
     );
 
     for (const [index, message] of conversation.messages.entries()) {
@@ -702,7 +702,7 @@ async function seedConversations() {
           createdAt: sentAt,
           updatedAt: sentAt
         },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
+        { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
       );
       messageCount += 1;
     }
@@ -728,7 +728,7 @@ async function seedSummaries() {
         createdAt,
         updatedAt: createdAt
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
     );
   }
   console.log(`  [seed] ${SUMMARIES.length} saved mode output(s) ready.`);
@@ -748,7 +748,7 @@ async function seedSettings() {
       onboardingDone: true,
       updatedAt: new Date()
     },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
   );
   console.log('  [seed] Accessibility preferences ready.');
 }
@@ -767,9 +767,11 @@ async function main() {
   await connectDB();
 
   if (mongoose.connection.readyState !== 1) {
+    const { lastError } = getStatus();
     console.error(
-      '  [seed] No MongoDB connection. Start MongoDB locally or set MONGODB_URI to an Atlas cluster,\n' +
-        '         then run this again. The web app still seeds its own library in the browser.\n'
+      `  [seed] No MongoDB connection${lastError ? ` — ${lastError}` : ''}.\n` +
+        '         Start MongoDB locally or set MONGODB_URI to an Atlas cluster, then run this\n' +
+        '         again. The web app still seeds its own library in the browser.\n'
     );
     process.exitCode = 1;
     return;
