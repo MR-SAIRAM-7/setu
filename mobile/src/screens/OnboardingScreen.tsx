@@ -1,0 +1,557 @@
+/**
+ * SETU Mobile — 3-Step Onboarding Walkthrough
+ * -------------------------------------------
+ * Faithfully follows the Broadsheet Design Guidelines:
+ * Step 1: Cognitive barrier selection (ADHD, Dyslexia, Autistic, Overwhelmed, Rather not say)
+ * Step 2: Live readable typography preview (Typeface, Size scale, Bionic toggle)
+ * Step 3: Motion sensitivity preference (Let things move vs Keep it still)
+ */
+
+import React, { useState } from 'react';
+import {
+  View,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  SafeAreaView,
+} from 'react-native';
+import {
+  Zap,
+  BookOpen,
+  Boxes,
+  Waves,
+  MoreHorizontal,
+  Wind,
+  PauseCircle,
+  ArrowRight,
+  ArrowLeft,
+  Sparkles,
+} from 'lucide-react-native';
+import { COLORS, RADIUS, SPACING } from '../constants/theme';
+import { Text, Heading, Kicker } from '../components/Typography';
+import { Button } from '../components/Button';
+import { Card } from '../components/Card';
+import { BionicText } from '../components/BionicText';
+import { useAccessibility } from '../context/AccessibilityContext';
+import { ReadingProfile, FontStyleOption, TextSizeOption, MotionOption } from '../types';
+
+export interface OnboardingScreenProps {
+  onComplete: () => void;
+}
+
+const PROFILE_OPTIONS: {
+  id: ReadingProfile;
+  label: string;
+  hint: string;
+  icon: any;
+}[] = [
+  {
+    id: 'adhd',
+    label: 'ADHD',
+    hint: 'Attention slides off dense pages',
+    icon: Zap,
+  },
+  {
+    id: 'dyslexia',
+    label: 'Dyslexia',
+    hint: 'Letters move or swap',
+    icon: BookOpen,
+  },
+  {
+    id: 'autistic',
+    label: 'Autistic',
+    hint: 'Ambiguity and clutter cost energy',
+    icon: Boxes,
+  },
+  {
+    id: 'overwhelmed',
+    label: 'Just overwhelmed',
+    hint: 'Too much, too fast, too often',
+    icon: Waves,
+  },
+  {
+    id: 'general',
+    label: 'Rather not say',
+    hint: 'Show me everything',
+    icon: MoreHorizontal,
+  },
+];
+
+const FONT_OPTIONS: { id: FontStyleOption; label: string; hint: string }[] = [
+  { id: 'serif', label: 'Source Serif', hint: 'The Broadsheet newsprint default' },
+  { id: 'hyper', label: 'Atkinson Hyperlegible', hint: 'Drawn for distinct letterforms' },
+  { id: 'system', label: 'System sans', hint: 'Clean modern sans-serif' },
+];
+
+const SIZE_OPTIONS: { id: TextSizeOption; label: string; hint: string }[] = [
+  { id: 'normal', label: 'Normal (1.0×)', hint: 'Standard density' },
+  { id: 'comfortable', label: 'Comfortable (1.1×)', hint: 'Room to breathe' },
+  { id: 'large', label: 'Large (1.22×)', hint: 'Maximum legibility' },
+];
+
+export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
+  const {
+    profile,
+    font,
+    size,
+    motion,
+    bionic,
+    setProfile,
+    setFont,
+    setSize,
+    setMotion,
+    toggleBionic,
+    completeOnboarding,
+  } = useAccessibility();
+
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+
+  const handleToggleProfile = (id: ReadingProfile) => {
+    if (id === 'general') {
+      setProfile(['general']);
+      return;
+    }
+    const current = profile.filter((p) => p !== 'general');
+    if (current.includes(id)) {
+      const next = current.filter((p) => p !== id);
+      setProfile(next.length ? next : ['general']);
+    } else {
+      setProfile([...current, id]);
+    }
+  };
+
+  const handleFinish = async () => {
+    await completeOnboarding();
+    onComplete();
+  };
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.container}>
+        {/* Header with Step Indicator */}
+        <View style={styles.header}>
+          <Text variant="title" weight="bold" color={COLORS.text}>
+            SETU
+          </Text>
+
+          <View style={styles.stepProgressContainer}>
+            <Text variant="caption" color={COLORS.textMuted} style={styles.stepCounter}>
+              Step {step} of 3
+            </Text>
+            <View style={styles.pipsRow}>
+              <View style={[styles.pip, step >= 1 ? styles.pipActive : styles.pipInactive]} />
+              <View style={[styles.pip, step >= 2 ? styles.pipActive : styles.pipInactive]} />
+              <View style={[styles.pip, step >= 3 ? styles.pipActive : styles.pipInactive]} />
+            </View>
+          </View>
+        </View>
+
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* STEP 1 */}
+          {step === 1 && (
+            <View style={styles.stepContainer}>
+              <Kicker color={COLORS.cyan}>Profile Selection</Kicker>
+              <Heading variant="titleLg" style={styles.stepHeading}>
+                What tends to get in your way?
+              </Heading>
+              <Text variant="body" color={COLORS.textMuted} style={styles.stepSub}>
+                Pick anything that fits — or none of it. It only changes which tools SETU
+                puts in front of you first, and you can change it whenever you like.
+              </Text>
+
+              <View style={styles.optionsStack}>
+                {PROFILE_OPTIONS.map((item) => {
+                  const isSelected = profile.includes(item.id);
+                  const IconComp = item.icon;
+                  return (
+                    <TouchableOpacity
+                      key={item.id}
+                      activeOpacity={0.8}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: isSelected }}
+                      style={[
+                        styles.profileOption,
+                        isSelected ? styles.optionSelected : styles.optionUnselected,
+                      ]}
+                      onPress={() => handleToggleProfile(item.id)}
+                    >
+                      <View
+                        style={[
+                          styles.iconBox,
+                          isSelected ? styles.iconBoxSelected : styles.iconBoxUnselected,
+                        ]}
+                      >
+                        <IconComp
+                          size={20}
+                          color={isSelected ? COLORS.cyanDark : COLORS.textMuted}
+                        />
+                      </View>
+                      <View style={styles.optionTextCol}>
+                        <Text
+                          variant="body"
+                          weight="semibold"
+                          color={isSelected ? COLORS.cyanDark : COLORS.text}
+                        >
+                          {item.label}
+                        </Text>
+                        <Text variant="caption" color={COLORS.textMuted}>
+                          {item.hint}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <View style={styles.footerActions}>
+                <Button
+                  title="Continue"
+                  variant="primary"
+                  size="lg"
+                  fullWidth
+                  icon={<ArrowRight size={18} color={COLORS.textInverse} />}
+                  iconPosition="right"
+                  onPress={() => setStep(2)}
+                />
+                <Button
+                  title="Skip all this"
+                  variant="ghost"
+                  size="md"
+                  fullWidth
+                  style={styles.skipBtn}
+                  onPress={handleFinish}
+                />
+              </View>
+            </View>
+          )}
+
+          {/* STEP 2 */}
+          {step === 2 && (
+            <View style={styles.stepContainer}>
+              <Kicker color={COLORS.cyan}>Reading Comfort</Kicker>
+              <Heading variant="titleLg" style={styles.stepHeading}>
+                Make this paragraph easy to read.
+              </Heading>
+              <Text variant="body" color={COLORS.textMuted} style={styles.stepSub}>
+                Change the settings until the sample below feels comfortable. Whatever you
+                land on is what the whole app uses.
+              </Text>
+
+              {/* Live Sample Card */}
+              <Card elevated style={styles.sampleCard}>
+                <Kicker color={COLORS.cyan} style={{ marginBottom: 6 }}>
+                  Live Reading Sample
+                </Kicker>
+                <BionicText
+                  text="Attention is the part that changed everything. Instead of reading a sentence word by word and hoping to remember the start by the time it reaches the end, the model looks at every word at once and decides, for each one, which of the others actually matter to it."
+                  variant="body"
+                  color={COLORS.text}
+                />
+              </Card>
+
+              {/* Bionic Reading Toggle */}
+              <TouchableOpacity
+                activeOpacity={0.8}
+                style={[
+                  styles.bionicToggleCard,
+                  bionic ? styles.optionSelected : styles.optionUnselected,
+                ]}
+                onPress={toggleBionic}
+              >
+                <Sparkles size={18} color={bionic ? COLORS.cyanDark : COLORS.textMuted} />
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <Text
+                    variant="bodySm"
+                    weight="semibold"
+                    color={bionic ? COLORS.cyanDark : COLORS.text}
+                  >
+                    Bionic Anchor Reading ({bionic ? 'Enabled' : 'Disabled'})
+                  </Text>
+                  <Text variant="caption" color={COLORS.textMuted}>
+                    Bolds initial word anchors to accelerate reading speed
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Typeface Selection */}
+              <Text variant="bodySm" weight="semibold" style={styles.sectionLabel}>
+                Typeface
+              </Text>
+              <View style={styles.optionsStack}>
+                {FONT_OPTIONS.map((f) => (
+                  <Button
+                    key={f.id}
+                    variant="option"
+                    selected={font === f.id}
+                    title={f.label}
+                    subtitle={f.hint}
+                    fullWidth
+                    style={{ marginBottom: SPACING.xs }}
+                    onPress={() => setFont(f.id)}
+                  />
+                ))}
+              </View>
+
+              {/* Text Size Selection */}
+              <Text variant="bodySm" weight="semibold" style={styles.sectionLabel}>
+                Text Size
+              </Text>
+              <View style={styles.optionsStack}>
+                {SIZE_OPTIONS.map((s) => (
+                  <Button
+                    key={s.id}
+                    variant="option"
+                    selected={size === s.id}
+                    title={s.label}
+                    subtitle={s.hint}
+                    fullWidth
+                    style={{ marginBottom: SPACING.xs }}
+                    onPress={() => setSize(s.id)}
+                  />
+                ))}
+              </View>
+
+              <View style={styles.footerActionsRow}>
+                <Button
+                  title="Back"
+                  variant="secondary"
+                  size="lg"
+                  icon={<ArrowLeft size={18} color={COLORS.text} />}
+                  onPress={() => setStep(1)}
+                  style={{ flex: 1 }}
+                />
+                <Button
+                  title="Continue"
+                  variant="primary"
+                  size="lg"
+                  icon={<ArrowRight size={18} color={COLORS.textInverse} />}
+                  iconPosition="right"
+                  onPress={() => setStep(3)}
+                  style={{ flex: 1 }}
+                />
+              </View>
+            </View>
+          )}
+
+          {/* STEP 3 */}
+          {step === 3 && (
+            <View style={styles.stepContainer}>
+              <Kicker color={COLORS.cyan}>Motion & Animations</Kicker>
+              <Heading variant="titleLg" style={styles.stepHeading}>
+                Should things move?
+              </Heading>
+              <Text variant="body" color={COLORS.textMuted} style={styles.stepSub}>
+                Maps can grow into place, or simply appear. If motion makes you queasy or
+                pulls your attention away, turn it off — nothing is lost either way.
+              </Text>
+
+              <View style={styles.optionsStack}>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  style={[
+                    styles.motionCard,
+                    motion === 'movement' ? styles.optionSelected : styles.optionUnselected,
+                  ]}
+                  onPress={() => setMotion('movement')}
+                >
+                  <Wind
+                    size={22}
+                    color={motion === 'movement' ? COLORS.cyanDark : COLORS.textMuted}
+                  />
+                  <View style={styles.optionTextCol}>
+                    <Text
+                      variant="body"
+                      weight="semibold"
+                      color={motion === 'movement' ? COLORS.cyanDark : COLORS.text}
+                    >
+                      Let things move
+                    </Text>
+                    <Text variant="caption" color={COLORS.textMuted}>
+                      Branches smoothly grow and transition into place as they arrive
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  style={[
+                    styles.motionCard,
+                    motion === 'reduced' ? styles.optionSelected : styles.optionUnselected,
+                  ]}
+                  onPress={() => setMotion('reduced')}
+                >
+                  <PauseCircle
+                    size={22}
+                    color={motion === 'reduced' ? COLORS.cyanDark : COLORS.textMuted}
+                  />
+                  <View style={styles.optionTextCol}>
+                    <Text
+                      variant="body"
+                      weight="semibold"
+                      color={motion === 'reduced' ? COLORS.cyanDark : COLORS.text}
+                    >
+                      Keep it still
+                    </Text>
+                    <Text variant="caption" color={COLORS.textMuted}>
+                      Everything appears at once without motion or animations
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.footerActionsRow}>
+                <Button
+                  title="Back"
+                  variant="secondary"
+                  size="lg"
+                  icon={<ArrowLeft size={18} color={COLORS.text} />}
+                  onPress={() => setStep(2)}
+                  style={{ flex: 1 }}
+                />
+                <Button
+                  title="Draw my first map"
+                  variant="primary"
+                  size="lg"
+                  icon={<Sparkles size={18} color={COLORS.textInverse} />}
+                  iconPosition="right"
+                  onPress={handleFinish}
+                  style={{ flex: 1.5 }}
+                />
+              </View>
+            </View>
+          )}
+        </ScrollView>
+      </View>
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: COLORS.bg,
+  },
+  container: {
+    flex: 1,
+    paddingHorizontal: SPACING.lg,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: SPACING.md,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.dividerSubtle,
+  },
+  stepProgressContainer: {
+    alignItems: 'flex-end',
+  },
+  stepCounter: {
+    marginBottom: 4,
+  },
+  pipsRow: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  pip: {
+    width: 28,
+    height: 4,
+    borderRadius: 2,
+  },
+  pipActive: {
+    backgroundColor: COLORS.cyan,
+  },
+  pipInactive: {
+    backgroundColor: COLORS.divider,
+  },
+  scrollContent: {
+    paddingVertical: SPACING.lg,
+    paddingBottom: SPACING.huge,
+  },
+  stepContainer: {
+    flex: 1,
+  },
+  stepHeading: {
+    marginTop: SPACING.xs,
+    marginBottom: SPACING.xs,
+  },
+  stepSub: {
+    marginBottom: SPACING.lg,
+    lineHeight: 22,
+  },
+  optionsStack: {
+    marginBottom: SPACING.lg,
+  },
+  profileOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: SPACING.md,
+    borderRadius: RADIUS.sm,
+    marginBottom: SPACING.sm,
+    minHeight: 64,
+  },
+  motionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: SPACING.md,
+    borderRadius: RADIUS.sm,
+    marginBottom: SPACING.md,
+    minHeight: 70,
+  },
+  bionicToggleCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: SPACING.md,
+    borderRadius: RADIUS.sm,
+    marginBottom: SPACING.md,
+  },
+  optionSelected: {
+    backgroundColor: COLORS.cyanLight,
+    borderWidth: 1.5,
+    borderColor: COLORS.cyan,
+  },
+  optionUnselected: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+  },
+  iconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: RADIUS.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: SPACING.md,
+  },
+  iconBoxSelected: {
+    backgroundColor: 'transparent',
+  },
+  iconBoxUnselected: {
+    backgroundColor: COLORS.surface,
+  },
+  optionTextCol: {
+    flex: 1,
+  },
+  sampleCard: {
+    marginBottom: SPACING.md,
+    padding: SPACING.lg,
+  },
+  sectionLabel: {
+    marginBottom: SPACING.xs,
+    marginTop: SPACING.xs,
+  },
+  footerActions: {
+    marginTop: SPACING.md,
+  },
+  footerActionsRow: {
+    flexDirection: 'row',
+    gap: SPACING.md,
+    marginTop: SPACING.md,
+  },
+  skipBtn: {
+    marginTop: SPACING.xs,
+  },
+});

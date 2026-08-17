@@ -1,0 +1,50 @@
+{
+  "expo": {
+    "name": "SETU Sanctuary",
+    "slug": "setu-sanctuary",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#f3f2f2"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.setu.sanctuary"
+    },
+    "android": {
+      "package": "com.setu.sanctuary",
+      "adaptiveIcon": {
+        "backgroundColor": "#f3f2f2",
+        "foregroundImage": "./assets/android-icon-foreground.png"
+      },
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "plugins": [
+      "expo-font",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "SETU requires camera access to scan physical documents, book pages, and notes for OCR text simplification and mind mapping."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "SETU requires photo library access to import documents and screenshots for OCR and cognitive analysis."
+        }
+      ]
+    ],
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
