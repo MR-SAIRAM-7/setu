@@ -16,11 +16,13 @@ import {
 } from '../types';
 import { SEED_MIND_MAPS } from './seedData';
 import { syncInBackground } from './api';
+import { DEFAULT_LANGUAGE } from '../constants/languages';
+
+export { getUserId, resetUserId, initIdentity, peekUserId } from './identity';
 
 const MAX_MAPS = 40;
 
 const KEYS = {
-  USER_ID: 'setu.mobile.user_id.v1',
   PREFERENCES: 'setu.mobile.preferences.v1',
   MIND_MAPS: 'setu.mobile.mind_maps.v1',
   CONVERSATIONS: 'setu.mobile.conversations.v1',
@@ -33,14 +35,46 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   profile: ['adhd', 'dyslexia'],
   font: 'serif',
   size: 'normal',
+  theme: 'broadsheet',
+  spacing: 'normal',
   motion: 'movement',
   bionic: false,
   readingRuler: false,
   speechRate: 1.0,
   speechPitch: 1.0,
   hasCompletedOnboarding: false,
-  customApiUrl: 'http://10.0.2.2:3000', // Android Emulator localhost bridge, or custom IP
+
+  /** Empty means "follow the build" — see constants/config.ts for why. */
+  customApiUrl: '',
+
+  language: DEFAULT_LANGUAGE,
+  voice: null,
+  speakOnTap: true,
+  rewards: true,
+
+  colorOverlay: 'none',
+  colorOverlayOpacity: 0.12,
+
+  mapEdgeStyle: 'bezier',
+  mapNodeStyle: 'comfortable',
+  mapTextScale: 1.0,
 };
+
+/**
+ * Repair preferences saved by older builds.
+ *
+ * Early versions shipped the Android emulator bridge as the stored default, so
+ * an upgraded install would keep pointing a real phone at 10.0.2.2 forever and
+ * show "engine offline" with no obvious cause. An empty value now means "follow
+ * the build", which is the right answer for almost everyone.
+ */
+function migratePreferences(stored: Partial<UserPreferences>): Partial<UserPreferences> {
+  const next = { ...stored };
+  if (typeof next.customApiUrl === 'string' && /10\.0\.2\.2|localhost|127\.0\.0\.1/.test(next.customApiUrl)) {
+    next.customApiUrl = '';
+  }
+  return next;
+}
 
 export const DEFAULT_FOCUS_STATE: FocusSessionState = {
   isActive: false,
@@ -51,47 +85,6 @@ export const DEFAULT_FOCUS_STATE: FocusSessionState = {
 };
 
 /* -------------------------------------------------------------------------- */
-/* Device Identity & Token                                                    */
-/* -------------------------------------------------------------------------- */
-
-let cachedUserId: string | null = null;
-
-function generateRandomId(): string {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  let rand = '';
-  for (let i = 0; i < 16; i++) {
-    rand += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return `u_mob_${Date.now().toString(36)}_${rand}`;
-}
-
-export async function getUserId(): Promise<string> {
-  if (cachedUserId) return cachedUserId;
-  try {
-    const stored = await AsyncStorage.getItem(KEYS.USER_ID);
-    if (stored) {
-      cachedUserId = stored;
-      return stored;
-    }
-  } catch (_) {}
-
-  const newId = generateRandomId();
-  cachedUserId = newId;
-  try {
-    await AsyncStorage.setItem(KEYS.USER_ID, newId);
-  } catch (_) {}
-  return newId;
-}
-
-export async function resetUserId(): Promise<string> {
-  cachedUserId = null;
-  const newId = generateRandomId();
-  cachedUserId = newId;
-  await AsyncStorage.setItem(KEYS.USER_ID, newId);
-  return newId;
-}
-
-/* -------------------------------------------------------------------------- */
 /* Accessibility Preferences                                                  */
 /* -------------------------------------------------------------------------- */
 
@@ -99,7 +92,7 @@ export async function getStoredPreferences(): Promise<UserPreferences> {
   try {
     const raw = await AsyncStorage.getItem(KEYS.PREFERENCES);
     if (!raw) return DEFAULT_PREFERENCES;
-    return { ...DEFAULT_PREFERENCES, ...JSON.parse(raw) };
+    return { ...DEFAULT_PREFERENCES, ...migratePreferences(JSON.parse(raw)) };
   } catch (_) {
     return DEFAULT_PREFERENCES;
   }
@@ -278,7 +271,13 @@ export async function saveFocusSession(
 /* Wipe All Data                                                              */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Wipe everything this install has stored, including the anonymous device id.
+ *
+ * Offered in Settings because for this audience "delete it all" has to be one
+ * button, not a support request — several of the people this is built for will
+ * not risk using a tool they cannot fully erase.
+ */
 export async function clearAllLocalData(): Promise<void> {
   await AsyncStorage.clear();
-  cachedUserId = null;
 }

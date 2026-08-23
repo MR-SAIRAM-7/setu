@@ -74,6 +74,22 @@ async function handleSaveSettings(req, res) {
   });
 }
 
+async function handleGetProgress(req, res) {
+  const userId = req.headers['x-user-id'] || req.query.userId || 'anonymous_user';
+  const progress = await mongoService.getUserProgress(userId);
+  res.json({ progress: progress || null, dbConnected: mongoService.isDbActive() });
+}
+
+async function handleSaveProgress(req, res) {
+  const userId = req.headers['x-user-id'] || req.body.userId || 'anonymous_user';
+  const saved = await mongoService.saveUserProgress(userId, req.body);
+  res.json({
+    success: Boolean(saved),
+    progress: saved || req.body,
+    persistedToDb: Boolean(saved)
+  });
+}
+
 async function handleDbStatus(req, res) {
   res.json(getStatus());
 }
@@ -88,5 +104,7 @@ module.exports = {
   handleSaveSummary,
   handleGetSettings,
   handleSaveSettings,
+  handleGetProgress,
+  handleSaveProgress,
   handleDbStatus
 };

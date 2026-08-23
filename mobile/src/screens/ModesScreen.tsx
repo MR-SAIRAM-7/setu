@@ -1,13 +1,22 @@
 /**
- * SETU Mobile — Seven Cognitive Accessibility Modes Screen
- * --------------------------------------------------------
- * 1. Start (Break task freeze & executive paralysis)
- * 2. Simplify (Plain language rewrite at Grade 6)
- * 3. Learn (Study notes, mind map & interactive self-quiz)
- * 4. Meet (Meeting rescue: actions, deadlines, decoded jargon)
- * 5. Practice (Rehearse difficult conversations across tones)
- * 6. Write (Accessible writing check & clarity fixes)
- * 7. Guide (Step-by-step workflow breakdown)
+ * SETU Mobile — the cognitive modes.
+ *
+ *  1. Start     break task freeze and executive paralysis
+ *  2. Simplify  plain-language rewrite at roughly Grade 6
+ *  3. Learn     study notes, outline, and a self-quiz
+ *  4. Meet      meeting rescue: actions, owners, deadlines, decoded jargon
+ *  5. Practice  rehearse a hard conversation in several tones
+ *  6. Write     accessible writing check and clarity fixes
+ *  7. Guide     any process, broken into numbered steps
+ *  8. Numbers   arithmetic explained with countable objects, for dyscalculia
+ *
+ * Every mode opens on a worked example rather than an empty field. A blank
+ * screen with a prompt is its own small executive barrier, and the example
+ * doubles as the explanation of what the mode actually does.
+ *
+ * Mode tints are resolved from the live palette at render rather than baked
+ * into the config, because process yellow on newsprint and process yellow on a
+ * near-black ground are not the same colour.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -31,21 +40,26 @@ import {
   Volume2,
   VolumeX,
   CheckCircle2,
-  HelpCircle,
-  Clock,
-  ArrowRight,
-  RotateCcw,
+  Calculator,
+  Copy,
+  Share2,
+  Info,
 } from 'lucide-react-native';
 import { COLORS, RADIUS, SPACING } from '../constants/theme';
+import { Palette } from '../constants/themes';
+import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
 import { Text, Heading, Subheading, Kicker } from '../components/Typography';
 import { Input } from '../components/Input';
 import { Button } from '../components/Button';
 import { Card, Tag } from '../components/Card';
 import { BionicText } from '../components/BionicText';
 import { VoiceInputButton } from '../components/VoiceInputButton';
+import { NumberStory } from '../components/NumberStory';
 import { api } from '../services/api';
 import { tts } from '../services/tts';
 import { saveSummaryAndSync } from '../services/storage';
+import { award } from '../services/progress';
+import { copyToClipboard, modeResultToMarkdown, shareText } from '../services/exportUtils';
 import {
   CognitiveModeKey,
   StartModeResult,
@@ -55,15 +69,19 @@ import {
   PracticeModeResult,
   WriteModeResult,
   GuideModeResult,
+  NumbersModeResult,
 } from '../types';
 import { WORKED_EXAMPLES } from '../constants/seedExamples';
+
+/** Which plate a mode is inked in. Resolved against the live palette at render. */
+export type PlateKey = 'cyan' | 'magenta' | 'yellow' | 'ink';
 
 export const MODES_CONFIG = [
   {
     key: 'start' as CognitiveModeKey,
     name: 'Start',
     icon: PlayCircle,
-    tint: COLORS.yellow,
+    tintKey: 'yellow' as PlateKey,
     tagline: 'Break task freeze',
     blurb: 'Turns something you have been avoiding into one ten-minute action small enough to actually begin.',
     fieldLabel: 'What are you stuck on or putting off?',
@@ -75,7 +93,7 @@ export const MODES_CONFIG = [
     key: 'simplify' as CognitiveModeKey,
     name: 'Simplify',
     icon: Waves,
-    tint: COLORS.cyan,
+    tintKey: 'cyan' as PlateKey,
     tagline: 'Plain language rewrite',
     blurb: 'Rewrites dense or legal text at a Grade 6 reading level without dropping a single fact.',
     fieldLabel: 'Paste the dense text, notice, or clause',
@@ -87,7 +105,7 @@ export const MODES_CONFIG = [
     key: 'learn' as CognitiveModeKey,
     name: 'Learn',
     icon: GraduationCap,
-    tint: COLORS.magenta,
+    tintKey: 'magenta' as PlateKey,
     tagline: 'Study notes & self-quiz',
     blurb: 'A summary, a branching outline, and a self-quiz, built from whatever you paste in.',
     fieldLabel: 'Paste study notes, lecture content, or articles',
@@ -99,7 +117,7 @@ export const MODES_CONFIG = [
     key: 'meet' as CognitiveModeKey,
     name: 'Meet',
     icon: Users,
-    tint: COLORS.cyan,
+    tintKey: 'cyan' as PlateKey,
     tagline: 'Meeting rescue',
     blurb: 'Pulls the decisions, owners and deadlines out of a transcript, and decodes the jargon.',
     fieldLabel: 'Paste meeting transcript or raw notes',
@@ -111,7 +129,7 @@ export const MODES_CONFIG = [
     key: 'practice' as CognitiveModeKey,
     name: 'Practice',
     icon: MessageCircle,
-    tint: COLORS.magenta,
+    tintKey: 'magenta' as PlateKey,
     tagline: 'Rehearse it first',
     blurb: 'Scripts for a hard conversation in a few different tones before you have it for real.',
     fieldLabel: 'What conversation do you need to prepare for?',
@@ -123,7 +141,7 @@ export const MODES_CONFIG = [
     key: 'write' as CognitiveModeKey,
     name: 'Write',
     icon: PenTool,
-    tint: COLORS.yellow,
+    tintKey: 'yellow' as PlateKey,
     tagline: 'Accessible writing check',
     blurb: 'Checks your draft for reading level, passive voice, and sentences that lose people.',
     fieldLabel: 'Paste your draft text or message',
@@ -135,7 +153,7 @@ export const MODES_CONFIG = [
     key: 'guide' as CognitiveModeKey,
     name: 'Guide',
     icon: Route,
-    tint: COLORS.ink,
+    tintKey: 'ink' as PlateKey,
     tagline: 'Step-by-step workflow',
     blurb: 'Turns any workflow into numbered steps, each with a clear signal that it worked.',
     fieldLabel: 'What process or goal do you need broken down?',
@@ -143,12 +161,27 @@ export const MODES_CONFIG = [
     rows: 3,
     workedExample: WORKED_EXAMPLES.guide,
   },
+  {
+    key: 'numbers' as CognitiveModeKey,
+    name: 'Numbers',
+    icon: Calculator,
+    tintKey: 'magenta' as PlateKey,
+    tagline: 'Sums with objects',
+    blurb:
+      'Works a sum through as a short story with countable things on a table, one step at a time, instead of notation.',
+    fieldLabel: 'What sum or number problem is in the way?',
+    placeholder: 'e.g. splitting a 2,400 rupee bill four ways, or 15% off 899…',
+    rows: 3,
+    workedExample: WORKED_EXAMPLES.numbers,
+  },
 ];
 
 export const ModesScreen: React.FC<{ route?: any; navigation?: any }> = ({
   route,
   navigation,
 }) => {
+  const COLORS = useThemeColors();
+  const styles = useThemedStyles(makeStyles);
   const [selectedModeKey, setSelectedModeKey] = useState<CognitiveModeKey>(
     route?.params?.initialMode || 'start'
   );
@@ -157,8 +190,11 @@ export const ModesScreen: React.FC<{ route?: any; navigation?: any }> = ({
   const [result, setResult] = useState<any>(null);
   const [selectedQuizAnswers, setSelectedQuizAnswers] = useState<Record<number, number>>({});
   const [isSpeakingResult, setIsSpeakingResult] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isUserResult, setIsUserResult] = useState(false);
 
   const activeMode = MODES_CONFIG.find((m) => m.key === selectedModeKey) || MODES_CONFIG[0];
+  const tint = COLORS[activeMode.tintKey];
 
   useEffect(() => {
     if (route?.params?.initialMode) {
@@ -170,13 +206,25 @@ export const ModesScreen: React.FC<{ route?: any; navigation?: any }> = ({
   }, [route?.params]);
 
   useEffect(() => {
-    // When switching mode, display worked example by default if no user result
+    // Switching mode opens on the worked example. An empty result panel is its
+    // own small barrier, and the example doubles as the explanation.
+    tts.stop();
+    setIsSpeakingResult(false);
     setResult(activeMode.workedExample);
+    setIsUserResult(false);
     setSelectedQuizAnswers({});
+    setError(null);
     if (!route?.params?.initialInput) {
       setInputText('');
     }
   }, [selectedModeKey]);
+
+  useEffect(
+    () => () => {
+      tts.stop();
+    },
+    []
+  );
 
   const handleRunMode = async () => {
     const text = inputText.trim();
@@ -186,6 +234,7 @@ export const ModesScreen: React.FC<{ route?: any; navigation?: any }> = ({
     }
 
     setIsLoading(true);
+    setError(null);
     try {
       let res: any;
       switch (selectedModeKey) {
@@ -210,26 +259,48 @@ export const ModesScreen: React.FC<{ route?: any; navigation?: any }> = ({
         case 'guide':
           res = await api.guide(text);
           break;
+        case 'numbers':
+          res = await api.numbers(text);
+          break;
       }
-      const finalResult = res || activeMode.workedExample;
-      setResult(finalResult);
 
-      // Persist to local storage and sync to MongoDB
-      try {
-        saveSummaryAndSync({
-          id: `sum_${Date.now()}`,
-          modeKey: selectedModeKey,
-          modeName: activeMode.name,
-          input: text,
-          result: finalResult,
-          createdAt: new Date().toISOString(),
-        });
-      } catch (_) {}
-    } catch (err) {
-      setResult(activeMode.workedExample);
+      if (!res) throw new Error('The engine returned nothing for that.');
+
+      setResult(res);
+      setIsUserResult(true);
+      setSelectedQuizAnswers({});
+      award('modeRun');
+
+      saveSummaryAndSync({
+        id: `sum_${Date.now()}`,
+        modeKey: selectedModeKey,
+        modeName: activeMode.name,
+        input: text,
+        result: res,
+        createdAt: new Date().toISOString(),
+      }).catch(() => {});
+    } catch (err: any) {
+      // Falling back to the worked example silently was the old behaviour, and
+      // it is worse than useless here: the user reads somebody else's answer as
+      // if it were theirs. Say what happened and keep what they typed.
+      setError(
+        err?.message ||
+          'Could not reach the engine. What you typed is still here — try again in a moment.'
+      );
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const resultMarkdown = () => modeResultToMarkdown(selectedModeKey, result, inputText);
+
+  const handleCopy = async () => {
+    const ok = await copyToClipboard(resultMarkdown());
+    if (!ok) setError('Could not copy that to the clipboard.');
+  };
+
+  const handleShare = async () => {
+    await shareText(resultMarkdown(), `SETU ${activeMode.name}`, 'md');
   };
 
   const handleToggleSpeakResult = () => {
@@ -254,6 +325,8 @@ export const ModesScreen: React.FC<{ route?: any; navigation?: any }> = ({
       speechText = `${result.improvedText}`;
     } else if (selectedModeKey === 'guide') {
       speechText = `Workflow: ${result.workflowName}. Step 1: ${result.steps?.[0]?.title}. ${result.steps?.[0]?.actionRequired}`;
+    } else if (selectedModeKey === 'numbers') {
+      speechText = `${result.plainQuestion}. ${result.story}. The answer is ${result.answer}.`;
     }
 
     if (speechText) {
@@ -266,7 +339,15 @@ export const ModesScreen: React.FC<{ route?: any; navigation?: any }> = ({
   };
 
   const handleSelectQuizOption = (qIdx: number, oIdx: number) => {
+    // Only the first answer to a question counts, and only a correct one pays —
+    // otherwise tapping every option in turn farms points and the number stops
+    // meaning anything.
+    const alreadyAnswered = selectedQuizAnswers[qIdx] !== undefined;
     setSelectedQuizAnswers((prev) => ({ ...prev, [qIdx]: oIdx }));
+
+    if (!alreadyAnswered && result?.quiz?.[qIdx]?.answerIndex === oIdx) {
+      award('quizCorrect');
+    }
   };
 
   return (
@@ -285,6 +366,9 @@ export const ModesScreen: React.FC<{ route?: any; navigation?: any }> = ({
               <TouchableOpacity
                 key={mode.key}
                 activeOpacity={0.8}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: isSelected }}
+                accessibilityLabel={`${mode.name} — ${mode.tagline}`}
                 style={[
                   styles.modeTabButton,
                   isSelected ? styles.modeTabButtonActive : {},
@@ -293,7 +377,7 @@ export const ModesScreen: React.FC<{ route?: any; navigation?: any }> = ({
               >
                 <IconComp
                   size={16}
-                  color={isSelected ? mode.tint : COLORS.textMuted}
+                  color={isSelected ? COLORS[mode.tintKey] : COLORS.textMuted}
                 />
                 <Text
                   variant="bodySm"
@@ -377,18 +461,63 @@ export const ModesScreen: React.FC<{ route?: any; navigation?: any }> = ({
                 size="md"
                 onPress={() => {
                   setInputText('');
+                  setError(null);
                   setResult(activeMode.workedExample);
+                  setIsUserResult(false);
+                  setSelectedQuizAnswers({});
                 }}
               />
             </View>
+
+            {error ? (
+              <Text variant="bodySm" color={COLORS.magenta} style={{ marginTop: SPACING.sm }}>
+                {error}
+              </Text>
+            ) : null}
           </Card>
 
           {/* RESULT CONTAINER */}
           {result && (
             <View style={styles.resultSection}>
-              <Kicker color={activeMode.tint} style={{ marginBottom: 4 }}>
-                Last Result · {activeMode.name} Mode
-              </Kicker>
+              {isUserResult && result?.fallback ? (
+                <View style={styles.fallbackNotice}>
+                  <Info size={14} color={COLORS.yellowDark} />
+                  <Text
+                    variant="caption"
+                    color={COLORS.text}
+                    style={{ flex: 1, marginLeft: SPACING.sm }}
+                  >
+                    {result.languageFallback
+                      ? 'The AI engine was unavailable, so this came from the built-in offline engine — which only writes English. It is rougher than usual, and not in the language you chose.'
+                      : 'The AI engine was unavailable, so this came from the built-in offline engine. It is rougher than usual — worth running again in a few minutes.'}
+                  </Text>
+                </View>
+              ) : null}
+
+              <View style={styles.resultHeader}>
+                <Kicker color={tint}>
+                  {isUserResult ? `Your ${activeMode.name} result` : `${activeMode.name} — worked example`}
+                </Kicker>
+
+                <View style={styles.exportRow}>
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel="Copy this result"
+                    onPress={handleCopy}
+                    style={styles.exportButton}
+                  >
+                    <Copy size={14} color={COLORS.cyan} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel="Share this result"
+                    onPress={handleShare}
+                    style={styles.exportButton}
+                  >
+                    <Share2 size={14} color={COLORS.cyan} />
+                  </TouchableOpacity>
+                </View>
+              </View>
 
               {/* 1. START RESULT */}
               {selectedModeKey === 'start' && (
@@ -619,6 +748,14 @@ export const ModesScreen: React.FC<{ route?: any; navigation?: any }> = ({
                   ))}
                 </Card>
               )}
+
+              {/* 8. NUMBERS RESULT — the objects are the explanation */}
+              {selectedModeKey === 'numbers' && (
+                <NumberStory
+                  data={result as NumbersModeResult}
+                  onSolved={() => award('numbersSolved')}
+                />
+              )}
             </View>
           )}
         </ScrollView>
@@ -627,10 +764,11 @@ export const ModesScreen: React.FC<{ route?: any; navigation?: any }> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: COLORS.bg,
+    backgroundColor: t.bg,
   },
   container: {
     flex: 1,
@@ -640,7 +778,7 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.sm,
     gap: SPACING.xs,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.dividerSubtle,
+    borderBottomColor: t.dividerSubtle,
   },
   modeTabButton: {
     flexDirection: 'row',
@@ -648,13 +786,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.md,
     paddingVertical: 8,
     borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.surface,
+    backgroundColor: t.surface,
     borderWidth: 1,
-    borderColor: COLORS.dividerSubtle,
+    borderColor: t.dividerSubtle,
   },
   modeTabButtonActive: {
-    backgroundColor: COLORS.bg,
-    borderColor: COLORS.cyan,
+    backgroundColor: t.bg,
+    borderColor: t.cyan,
   },
   scrollBody: {
     padding: SPACING.md,
@@ -674,7 +812,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.sm,
     paddingVertical: 4,
     borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.surface,
+    backgroundColor: t.surface,
   },
   inputCard: {
     padding: SPACING.md,
@@ -687,15 +825,45 @@ const styles = StyleSheet.create({
   resultSection: {
     marginTop: SPACING.xs,
   },
+  fallbackNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: SPACING.md,
+    marginBottom: SPACING.sm,
+    borderRadius: RADIUS.md,
+    backgroundColor: t.yellowLight,
+    borderWidth: 1,
+    borderColor: t.yellow,
+  },
+  resultHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  exportRow: {
+    flexDirection: 'row',
+    gap: SPACING.xs,
+  },
+  exportButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: RADIUS.md,
+    backgroundColor: t.surface,
+    borderWidth: 1,
+    borderColor: t.divider,
+  },
   resultCard: {
     padding: SPACING.lg,
   },
   actionHighlightBox: {
-    backgroundColor: COLORS.yellowLight,
+    backgroundColor: t.yellowLight,
     padding: SPACING.md,
     borderRadius: RADIUS.sm,
     borderWidth: 1,
-    borderColor: COLORS.yellow,
+    borderColor: t.yellow,
   },
   microStepRow: {
     flexDirection: 'row',
@@ -703,12 +871,12 @@ const styles = StyleSheet.create({
     marginVertical: 4,
   },
   plainRewriteBox: {
-    backgroundColor: COLORS.bg,
+    backgroundColor: t.bg,
     padding: SPACING.md,
     borderRadius: RADIUS.sm,
     marginVertical: SPACING.sm,
     borderWidth: 1,
-    borderColor: COLORS.dividerSubtle,
+    borderColor: t.dividerSubtle,
   },
   bulletRow: {
     flexDirection: 'row',
@@ -719,76 +887,76 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: COLORS.cyan,
+    backgroundColor: t.cyan,
     marginTop: 6,
     marginRight: 8,
   },
   quizBlock: {
-    backgroundColor: COLORS.bg,
+    backgroundColor: t.bg,
     padding: SPACING.md,
     borderRadius: RADIUS.sm,
     marginBottom: SPACING.sm,
     borderWidth: 1,
-    borderColor: COLORS.dividerSubtle,
+    borderColor: t.dividerSubtle,
   },
   quizOption: {
     padding: SPACING.sm,
-    backgroundColor: COLORS.surface,
+    backgroundColor: t.surface,
     borderRadius: RADIUS.sm,
     marginTop: 6,
     borderWidth: 1,
-    borderColor: COLORS.dividerSubtle,
+    borderColor: t.dividerSubtle,
   },
   quizCorrect: {
-    backgroundColor: COLORS.successLight,
-    borderColor: COLORS.success,
+    backgroundColor: t.successLight,
+    borderColor: t.success,
   },
   quizIncorrect: {
-    backgroundColor: COLORS.magentaLight,
-    borderColor: COLORS.magenta,
+    backgroundColor: t.magentaLight,
+    borderColor: t.magenta,
   },
   actionItemCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: SPACING.sm,
-    backgroundColor: COLORS.bg,
+    backgroundColor: t.bg,
     borderRadius: RADIUS.sm,
     marginBottom: 6,
     borderWidth: 1,
-    borderColor: COLORS.dividerSubtle,
+    borderColor: t.dividerSubtle,
   },
   scriptBox: {
-    backgroundColor: COLORS.bg,
+    backgroundColor: t.bg,
     padding: SPACING.md,
     borderRadius: RADIUS.sm,
     marginBottom: SPACING.sm,
     borderWidth: 1,
-    borderColor: COLORS.dividerSubtle,
+    borderColor: t.dividerSubtle,
   },
   clarityBox: {
-    backgroundColor: COLORS.bg,
+    backgroundColor: t.bg,
     padding: SPACING.md,
     borderRadius: RADIUS.sm,
     marginBottom: SPACING.sm,
     borderWidth: 1,
-    borderColor: COLORS.dividerSubtle,
+    borderColor: t.dividerSubtle,
   },
   guideStepBox: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: COLORS.bg,
+    backgroundColor: t.bg,
     padding: SPACING.md,
     borderRadius: RADIUS.sm,
     marginBottom: SPACING.sm,
     borderWidth: 1,
-    borderColor: COLORS.dividerSubtle,
+    borderColor: t.dividerSubtle,
   },
   stepNumCircle: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: COLORS.ink,
+    backgroundColor: t.ink,
     alignItems: 'center',
     justifyContent: 'center',
   },

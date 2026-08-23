@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import MindMap from '../components/MindMap';
 import FileUploadModal from '../components/FileUploadModal';
 import DocumentViewerModal from '../components/DocumentViewerModal';
+import VoiceInputButton from '../components/VoiceInputButton';
 import { BionicText } from '../lib/bionic';
 import { listMaps, deleteMap, saveMap, getPrefs, savePrefs } from '../lib/storage';
 import { api } from '../lib/api';
@@ -375,14 +376,25 @@ export default function Library() {
             )}
           </div>
 
-          <div className="w-full sm:w-72">
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={activeTab === 'maps' ? 'Search mind maps…' : 'Search documents…'}
-              className="input text-[13.5px] !min-h-[36px]"
-              aria-label="Search library"
+          <div className="w-full sm:w-80 flex items-center gap-1.5">
+            <div className="relative flex-1">
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={
+                  activeTab === 'maps'
+                    ? 'Search mind maps (or speak)…'
+                    : 'Search documents (or speak)…'
+                }
+                className="input text-[13.5px] !min-h-[36px] w-full"
+                aria-label="Search library"
+              />
+            </div>
+            <VoiceInputButton
+              onTranscript={(txt) => setQuery(txt)}
+              size="sm"
+              title="Voice search library"
             />
           </div>
 

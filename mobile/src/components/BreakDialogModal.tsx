@@ -9,11 +9,15 @@ import React from 'react';
 import { Modal, View, StyleSheet, TouchableWithoutFeedback } from 'react-native';
 import { Coffee } from 'lucide-react-native';
 import { COLORS, RADIUS, SPACING, SHADOWS } from '../constants/theme';
+import { Palette } from '../constants/themes';
+import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
 import { Text, Heading, Kicker } from './Typography';
 import { Button } from './Button';
 import { useFocus } from '../context/FocusContext';
 
 export const BreakDialogModal: React.FC = () => {
+  const COLORS = useThemeColors();
+  const styles = useThemedStyles(makeStyles);
   const { isBreakDialogOpen, dismissBreakDialog } = useFocus();
 
   return (
@@ -68,7 +72,8 @@ export const BreakDialogModal: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(32, 30, 29, 0.55)',
@@ -79,18 +84,18 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     maxWidth: 400,
-    backgroundColor: COLORS.bg,
+    backgroundColor: t.bg,
     borderRadius: RADIUS.md,
     padding: SPACING.xl,
     borderWidth: 1,
-    borderColor: COLORS.divider,
+    borderColor: t.divider,
     ...SHADOWS.lg,
   },
   iconCircle: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: COLORS.cyanLight,
+    backgroundColor: t.cyanLight,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: SPACING.sm,

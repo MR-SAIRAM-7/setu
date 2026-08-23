@@ -4,7 +4,10 @@ import { api } from '../lib/api';
 import { BionicText } from '../lib/bionic';
 import { tts } from '../lib/tts';
 import { getPrefs } from '../lib/storage';
+import { award } from '../lib/progress';
 import FileUploadModal from '../components/FileUploadModal';
+import NumberStory from '../components/NumberStory';
+import VoiceInputButton from '../components/VoiceInputButton';
 
 const MODES_DATA = [
   {
@@ -201,6 +204,52 @@ const MODES_DATA = [
     }
   },
   {
+    key: 'numbers',
+    name: 'Numbers',
+    icon: 'ph-math-operations',
+    tint: '#0088b0', // Cyan plate
+    tagline: 'Maths with objects',
+    blurb:
+      'Turns a sum into things you can count on a table, one step at a time, read aloud as you go. Built for dyscalculia.',
+    fieldLabel: 'What number problem is in your way?',
+    placeholder: 'e.g. 12 × 4, splitting a ₹840 bill between 6 people, or 15% off 2400…',
+    rows: 3,
+    run: (val) => api.numbers(val),
+    workedExample: {
+      plainQuestion: 'What is 12 lots of 4?',
+      objectName: 'apple',
+      objectNamePlural: 'apples',
+      objectEmoji: '🍎',
+      story: 'You have 12 baskets on the table, and every basket holds 4 apples.',
+      steps: [
+        {
+          narration: 'Make 12 separate piles on the table.',
+          operation: 'group',
+          count: 12,
+          runningTotal: 0,
+          groupSize: 4
+        },
+        {
+          narration: 'Now put 4 apples into every single pile.',
+          operation: 'add',
+          count: 48,
+          runningTotal: 48,
+          groupSize: 4
+        },
+        {
+          narration: 'Count every apple across all the piles. There are 48.',
+          operation: 'result',
+          count: 48,
+          runningTotal: 48
+        }
+      ],
+      answer: '48',
+      answerNumber: 48,
+      checkIt: 'Count the piles one at a time, adding 4 each time. You should land on 48.',
+      realLife: 'This is what you do when you buy 12 packs of something that costs 4 each.'
+    }
+  },
+  {
     key: 'guide',
     name: 'Guide',
     icon: 'ph-path',
@@ -291,6 +340,7 @@ export default function Modes() {
     try {
       const data = await activeMode.run(inputVal.trim());
       setResults((prev) => ({ ...prev, [activeKey]: data }));
+      award('modeRun');
     } catch (err) {
       setError(err.message || 'Could not process mode request. Make sure backend is running.');
     } finally {
@@ -325,6 +375,15 @@ export default function Modes() {
         text = `${currentResult.scenarioContext || ''}. Opening line: ${currentResult.openingLine || ''}`;
       } else if (activeKey === 'write') {
         text = `${currentResult.improvedText || currentResult.accessibleRewrite || ''}`;
+      } else if (activeKey === 'numbers') {
+        // Read the story and every step, so the whole method is available by ear
+        // alone — the step-by-step narration inside the canvas is for working
+        // through it, this is for hearing it end to end.
+        text = `${currentResult.plainQuestion || ''}. ${currentResult.story || ''}. ${(
+          currentResult.steps || []
+        )
+          .map((step) => step.narration)
+          .join('. ')}. The answer is ${currentResult.answer || ''}.`;
       }
       tts.speak(text);
     }
@@ -337,7 +396,8 @@ export default function Modes() {
         <div className="mb-5">
           <h1 className="text-2xl font-bold text-[var(--color-text)]">Cognitive Modes</h1>
           <p className="text-[12.5px] text-[color-mix(in_srgb,var(--color-text)_60%,transparent)] mt-1">
-            Seven specialized tools designed for ADHD, dyslexia, and neurodivergent perception.
+            Eight tools covering reading, writing, numbers, and getting started — built for
+            dyslexia, dyscalculia, dysgraphia, and ADHD.
           </p>
         </div>
 
@@ -394,20 +454,30 @@ export default function Modes() {
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="kicker block">{activeMode.fieldLabel}</label>
-              <button
-                type="button"
-                onClick={() => setUploadModalOpen(true)}
-                className="btn btn-ghost !min-h-[26px] !px-2 text-xs flex items-center gap-1.5 text-[var(--color-accent)]"
-              >
-                <i className="ph-duotone ph-file-arrow-up text-sm"></i>
-                Upload file instead
-              </button>
+              <div className="flex items-center gap-2">
+                <VoiceInputButton
+                  onTranscript={(txt) =>
+                    setInputVal((prev) => (prev ? `${prev} ${txt}` : txt))
+                  }
+                  showLabel={true}
+                  label="Voice query"
+                  size="sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => setUploadModalOpen(true)}
+                  className="btn btn-ghost !min-h-[26px] !px-2 text-xs flex items-center gap-1.5 text-[var(--color-accent)]"
+                >
+                  <i className="ph-duotone ph-file-arrow-up text-sm"></i>
+                  Upload file
+                </button>
+              </div>
             </div>
             <textarea
               rows={activeMode.rows}
               value={inputVal}
               onChange={(e) => setInputVal(e.target.value)}
-              placeholder={activeMode.placeholder}
+              placeholder={`${activeMode.placeholder} (Type or speak into microphone)`}
               className="textarea text-[14.5px]"
               aria-label={activeMode.fieldLabel}
             />
@@ -431,6 +501,15 @@ export default function Modes() {
                 </>
               )}
             </button>
+
+            <VoiceInputButton
+              onTranscript={(txt) =>
+                setInputVal((prev) => (prev ? `${prev} ${txt}` : txt))
+              }
+              size="lg"
+              title="Voice query (Speak into microphone)"
+            />
+
             {inputVal && (
               <button type="button" onClick={handleClear} className="btn btn-ghost text-sm">
                 Clear
@@ -526,14 +605,19 @@ function RenderModeResult({ modeKey, data, bionicEnabled }) {
         next.delete(stepId);
       } else {
         next.add(stepId);
-        // Play dopamine celebration chime on task completion!
+        // The chime fires here rather than through the reward toast because a
+        // ticked step should feel immediate even when points are switched off.
         tts.playCelebrationChime();
+        award('stepChecked');
       }
       return next;
     });
   };
 
   switch (modeKey) {
+    case 'numbers':
+      return <NumberStory data={data} onSolved={() => award('numbersSolved')} />;
+
     case 'start': {
       const totalSteps = (data.microSteps || []).length;
       const completedCount = [...checkedSteps].filter((id) => id.startsWith('start-step-')).length;
@@ -728,8 +812,14 @@ function RenderModeResult({ modeKey, data, bionicEnabled }) {
                           <button
                             key={optIdx}
                             onClick={() => {
+                              // Only the first answer to a question scores, so
+                              // clicking through the options cannot farm points.
+                              if (hasAnswered) return;
                               setSelectedQuizAnswers((prev) => ({ ...prev, [idx]: optIdx }));
-                              if (optIdx === correctIdx) tts.playCelebrationChime();
+                              if (optIdx === correctIdx) {
+                                tts.playCelebrationChime();
+                                award('quizCorrect');
+                              }
                             }}
                             className={`w-full text-left p-2.5 rounded text-[13px] transition-all cursor-pointer border ${
                               hasAnswered
@@ -856,8 +946,19 @@ function RenderModeResult({ modeKey, data, bionicEnabled }) {
           )}
 
           {data.openingLine && (
-            <div className="p-4 bg-[var(--color-surface)] rounded-[var(--radius-md)] border-l-4 border-[#d6006c]">
-              <span className="kicker block mb-1">Their opening line</span>
+            <div className="p-4 bg-[var(--color-surface)] rounded-[var(--radius-md)] border-l-4 border-[#d6006c] space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="kicker block">Their opening line</span>
+                <button
+                  type="button"
+                  onClick={() => tts.speak(data.openingLine)}
+                  className="btn btn-ghost !min-h-[24px] !px-2 text-[11px] text-[var(--color-accent)]"
+                  title="Listen to opening line"
+                >
+                  <i className="ph-duotone ph-speaker-high"></i>
+                  Listen
+                </button>
+              </div>
               <p className="text-[15px] italic text-[var(--color-text)] font-serif">
                 “<BionicText text={data.openingLine} enabled={bionicEnabled} />”
               </p>
@@ -872,7 +973,18 @@ function RenderModeResult({ modeKey, data, bionicEnabled }) {
                   key={idx}
                   className="p-3.5 bg-[var(--color-surface)] rounded-[var(--radius-md)] border border-[var(--color-divider)] space-y-1.5"
                 >
-                  <span className="tag tag-accent text-[11px]">{res.tone}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="tag tag-accent text-[11px]">{res.tone}</span>
+                    <button
+                      type="button"
+                      onClick={() => tts.speak(res.text)}
+                      className="btn btn-ghost !min-h-[22px] !px-1.5 text-[11px]"
+                      title="Listen to this response"
+                    >
+                      <i className="ph-duotone ph-speaker-high"></i>
+                      Listen
+                    </button>
+                  </div>
                   <p className="text-[14.5px] leading-relaxed text-[var(--color-text)]">
                     “<BionicText text={res.text} enabled={bionicEnabled} />”
                   </p>

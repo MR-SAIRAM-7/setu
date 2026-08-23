@@ -44,10 +44,20 @@ export default function Onboarding() {
     navigate('/mindmap');
   };
 
+  /**
+   * Dyslexia, dyscalculia, and dysgraphia are listed separately because they are
+   * genuinely three different conditions — reading, numbers, and writing — and a
+   * person may have one, two, or all three. Collapsing them into a single
+   * "dyslexia" tile, as most tools do, hides the two that this app now supports
+   * with dedicated modes.
+   */
   const PROFILE_OPTIONS = [
     { id: 'adhd', icon: 'ph-lightning', label: 'ADHD', hint: 'Attention slides off dense pages' },
-    { id: 'dyslexia', icon: 'ph-text-aa', label: 'Dyslexia', hint: 'Letters move or swap' },
+    { id: 'dyslexia', icon: 'ph-text-aa', label: 'Dyslexia', hint: 'Reading and understanding text' },
+    { id: 'dyscalculia', icon: 'ph-math-operations', label: 'Dyscalculia', hint: 'Numbers and arithmetic' },
+    { id: 'dysgraphia', icon: 'ph-pencil-simple-slash', label: 'Dysgraphia', hint: 'Writing and spelling' },
     { id: 'autistic', icon: 'ph-circles-three', label: 'Autistic', hint: 'Ambiguity and clutter cost energy' },
+    { id: 'anxiety', icon: 'ph-heart', label: 'Anxiety alongside it', hint: 'Performance or social pressure' },
     { id: 'overwhelmed', icon: 'ph-waves', label: 'Just overwhelmed', hint: 'Too much, too fast, too often' },
     { id: 'rather-not-say', icon: 'ph-dots-three', label: 'Rather not say', hint: 'Show me everything' }
   ];

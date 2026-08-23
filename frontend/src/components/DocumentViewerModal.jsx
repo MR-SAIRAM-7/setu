@@ -4,6 +4,7 @@ import { BionicText } from '../lib/bionic';
 import { tts } from '../lib/tts';
 import { api } from '../lib/api';
 import { getPrefs } from '../lib/storage';
+import VoiceInputButton from './VoiceInputButton';
 
 export default function DocumentViewerModal({
   isOpen,
@@ -304,15 +305,22 @@ export default function DocumentViewerModal({
             </div>
 
             {/* Search in document */}
-            <div className="relative">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Find in file…"
-                className="input text-[12px] !min-h-[28px] !py-0.5 !pl-7 !pr-2 w-32 sm:w-44"
+            <div className="flex items-center gap-1">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Find in file (or speak)…"
+                  className="input text-[12px] !min-h-[28px] !py-0.5 !pl-7 !pr-2 w-32 sm:w-44"
+                />
+                <i className="ph-duotone ph-magnifying-glass absolute left-2 top-1/2 -translate-y-1/2 text-xs text-[color-mix(in_srgb,var(--color-text)_50%,transparent)]"></i>
+              </div>
+              <VoiceInputButton
+                onTranscript={(txt) => setSearchQuery(txt)}
+                size="sm"
+                title="Voice search in document"
               />
-              <i className="ph-duotone ph-magnifying-glass absolute left-2 top-1/2 -translate-y-1/2 text-xs text-[color-mix(in_srgb,var(--color-text)_50%,transparent)]"></i>
             </div>
 
             {/* Copy / Export */}

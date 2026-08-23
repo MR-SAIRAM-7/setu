@@ -31,6 +31,8 @@ import {
   FileText,
 } from 'lucide-react-native';
 import { COLORS, RADIUS, SPACING } from '../constants/theme';
+import { Palette } from '../constants/themes';
+import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
 import { Text, Heading, Subheading, Kicker } from '../components/Typography';
 import { Button } from '../components/Button';
 import { Card, Tag } from '../components/Card';
@@ -44,9 +46,12 @@ export interface CameraOcrScreenProps {
 }
 
 export const CameraOcrScreen: React.FC<CameraOcrScreenProps> = ({ navigation }) => {
+  const COLORS = useThemeColors();
+  const styles = useThemedStyles(makeStyles);
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [extractedText, setExtractedText] = useState<string>('');
   const [summaryText, setSummaryText] = useState<string>('');
+  const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
 
@@ -106,6 +111,7 @@ export const CameraOcrScreen: React.FC<CameraOcrScreenProps> = ({ navigation }) 
     setIsProcessing(true);
     setExtractedText('');
     setSummaryText('');
+    setError(null);
 
     try {
       try {
@@ -125,17 +131,25 @@ export const CameraOcrScreen: React.FC<CameraOcrScreenProps> = ({ navigation }) 
         extracted = doc.extractedText || doc.summary;
       }
 
-      setExtractedText(
-        extracted ||
-          'Attention is the core mathematical mechanism in transformer neural networks. Rather than processing text sequentially word-by-word with recurrent hidden states, self-attention allows all token positions to compute relational relevance scores simultaneously.'
+      // Never invent a document. An earlier build filled this in with a canned
+      // paragraph when OCR failed, which is the single worst thing this screen
+      // could do: somebody scans a hospital letter or a tenancy notice, cannot
+      // read it themselves, and is shown confident text that came from nowhere.
+      // An honest failure is recoverable; a fabricated one is not.
+      if (!extracted || !extracted.trim()) {
+        setError(
+          'No text could be read from that image. Try again with more light, holding the page flat and filling the frame.'
+        );
+        return;
+      }
+
+      setExtractedText(extracted.trim());
+      setSummaryText('Here is what was on the page. Pick what you want done with it.');
+    } catch (err: any) {
+      setError(
+        err?.message ||
+          'Could not reach the engine to read that page. Your photo is still here — try again in a moment.'
       );
-      setSummaryText('Document successfully extracted. Choose a cognitive tool below.');
-    } catch (_) {
-      // Offline fallback document OCR simulation for live demo
-      setExtractedText(
-        'Attention is the core mathematical mechanism in transformer neural networks. Rather than processing text sequentially word-by-word with recurrent hidden states, self-attention allows all token positions to compute relational relevance scores simultaneously.'
-      );
-      setSummaryText('Document OCR completed using local image vision engine.');
     } finally {
       setIsProcessing(false);
     }
@@ -242,6 +256,15 @@ export const CameraOcrScreen: React.FC<CameraOcrScreenProps> = ({ navigation }) 
           </Card>
         )}
 
+        {error ? (
+          <Card elevated style={styles.resultSection}>
+            <Kicker color={COLORS.magenta}>Nothing readable came back</Kicker>
+            <Text variant="bodySm" style={{ marginTop: 4 }}>
+              {error}
+            </Text>
+          </Card>
+        ) : null}
+
         {/* Extracted Text & Cognitive Actions */}
         {extractedText ? (
           <View style={styles.resultSection}>
@@ -308,10 +331,11 @@ export const CameraOcrScreen: React.FC<CameraOcrScreenProps> = ({ navigation }) 
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: COLORS.bg,
+    backgroundColor: t.bg,
   },
   scrollContent: {
     padding: SPACING.md,
@@ -334,7 +358,7 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 180,
     borderRadius: RADIUS.sm,
-    backgroundColor: COLORS.bg,
+    backgroundColor: t.bg,
   },
   retakeBtn: {
     flexDirection: 'row',
@@ -362,7 +386,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.sm,
     paddingVertical: 4,
     borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.surface,
+    backgroundColor: t.surface,
   },
   extractedCard: {
     padding: SPACING.md,

@@ -9,7 +9,10 @@
 
 import { getUserId } from './identity';
 
-const BASE = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+const BASE = (
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.PROD ? 'https://setu-37hl.onrender.com' : '')
+).replace(/\/+$/, '');
 
 const url = (path) => `${BASE}${path}`;
 
@@ -41,6 +44,36 @@ function headers(extra = {}) {
 }
 
 /**
+ * The language every AI request is answered in.
+ *
+ * Held here rather than read from storage on each call, because storage.js
+ * already imports this module and reaching back would close an import cycle.
+ * App.jsx sets it at boot and Settings updates it on change.
+ */
+let currentLanguage = 'en-IN';
+
+export function setApiLanguage(code) {
+  currentLanguage = code || 'en-IN';
+}
+
+export function getApiLanguage() {
+  return currentLanguage;
+}
+
+/**
+ * Stamp the chosen language onto outbound request bodies.
+ *
+ * Done centrally so adding a language-aware endpoint later cannot silently miss
+ * it — threading a `language` argument through twenty call sites is exactly the
+ * kind of change where one gets forgotten and answers come back in English for
+ * one screen only.
+ */
+function withLanguage(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return body;
+  return body.language ? body : { ...body, language: currentLanguage };
+}
+
+/**
  * One fetch path for every verb, so identity, timeouts, abort handling, and
  * error shape stay identical no matter which call site is used.
  */
@@ -55,7 +88,7 @@ async function request(method, path, { body, signal, timeoutMs = TIMEOUTS.read, 
     const response = await fetch(url(path), {
       method,
       headers: headers(),
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(body === undefined ? {} : { body: JSON.stringify(withLanguage(body)) }),
       signal: controller.signal
     });
 
@@ -163,7 +196,7 @@ export async function streamChat(payload, handlers = {}, signal) {
     response = await fetch(url('/api/chat'), {
       method: 'POST',
       headers: headers(),
-      body: JSON.stringify(payload),
+      body: JSON.stringify(withLanguage(payload)),
       signal
     });
   } catch (error) {
@@ -281,7 +314,28 @@ export const api = {
   write: (text) => post('/api/write', { text }),
   guide: (goal) => post('/api/guide', { goal }),
 
+  // Dyscalculia support & reflective listening
+  numbers: (problem) => post('/api/numbers', { problem }),
+  listen: (entry, mood = null) => post('/api/listen', { entry, mood }),
+
+  // Natural-voice read-aloud and Speech-to-Text (Sarvam AI)
+  speechVoices: () => get('/api/speech/voices', { timeoutMs: 8000 }),
+  transcribeAudio: (formData) =>
+    fetch(url('/api/speech/transcribe'), {
+      method: 'POST',
+      headers: { 'x-user-id': getUserId() },
+      body: formData
+    }).then(async (res) => {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new ApiError(data.error || 'Transcription failed', res.status);
+      return data;
+    }),
+
+  // Reward progress mirror
+  getProgress: () => get('/api/progress'),
+  saveProgress: (progress) => post('/api/progress', progress, { timeoutMs: TIMEOUTS.write }),
+
   exportMarkdown: (mode, data) => post('/api/export', { mode, data })
 };
 
-export { ApiError, syncInBackground };
+export { ApiError, syncInBackground, withLanguage };

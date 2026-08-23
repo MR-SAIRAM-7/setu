@@ -23,7 +23,7 @@
 
       if (payload.text.length < 120) {
         UI.toast("There isn't enough readable text on this page to send.", { tone: 'warn' });
-        return null;
+        return { ok: false, error: 'Not enough readable text on this page.' };
       }
 
       const response = await chrome.runtime.sendMessage({ action: 'sendToSanctuary', payload });

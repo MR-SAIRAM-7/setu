@@ -12,6 +12,8 @@ import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, ActivityIndicator } from 'react-native';
 import { BookOpen, GitBranch, PenTool } from 'lucide-react-native';
 import { COLORS, RADIUS, SPACING } from '../constants/theme';
+import { Palette } from '../constants/themes';
+import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
 import { Text } from './Typography';
 
 export interface StagedLoaderProps {
@@ -29,6 +31,8 @@ export const StagedLoader: React.FC<StagedLoaderProps> = ({
   currentStage: propStage,
   autoAdvance = true,
 }) => {
+  const COLORS = useThemeColors();
+  const styles = useThemedStyles(makeStyles);
   const [stage, setStage] = useState(propStage || 0);
 
   useEffect(() => {
@@ -88,13 +92,14 @@ export const StagedLoader: React.FC<StagedLoaderProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
   container: {
-    backgroundColor: COLORS.surface,
+    backgroundColor: t.surface,
     borderRadius: RADIUS.md,
     padding: SPACING.lg,
     borderWidth: 1,
-    borderColor: COLORS.dividerSubtle,
+    borderColor: t.dividerSubtle,
     marginVertical: SPACING.md,
   },
   stageRow: {
@@ -111,17 +116,17 @@ const styles = StyleSheet.create({
     marginRight: SPACING.md,
   },
   activeIconBox: {
-    backgroundColor: COLORS.cyanLight,
+    backgroundColor: t.cyanLight,
     borderWidth: 1,
-    borderColor: COLORS.cyanBorder,
+    borderColor: t.cyanBorder,
   },
   doneIconBox: {
-    backgroundColor: COLORS.cyanLight,
+    backgroundColor: t.cyanLight,
   },
   idleIconBox: {
-    backgroundColor: COLORS.bg,
+    backgroundColor: t.bg,
     borderWidth: 1,
-    borderColor: COLORS.dividerSubtle,
+    borderColor: t.dividerSubtle,
   },
   stageLabel: {
     flex: 1,

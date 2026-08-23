@@ -11,7 +11,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
-import { getUserId, resetUserId } from '../services/storage';
+import { getUserId, resetUserId } from '../services/identity';
 import { api } from '../services/api';
 import { SystemHealthStatus } from '../types';
 

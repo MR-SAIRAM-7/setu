@@ -562,3 +562,54 @@ html.motion-still * {
   animation: none !important;
   transition: none !important;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Visual Overlays & Customization Utilities                                  */
+/* -------------------------------------------------------------------------- */
+
+[data-color-overlay]::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 99999;
+  opacity: var(--overlay-opacity, 0.12);
+  mix-blend-mode: multiply;
+}
+
+[data-color-overlay="peach"]::after { background-color: #ffd8b8; }
+[data-color-overlay="rose"]::after { background-color: #ffc4d6; }
+[data-color-overlay="mint"]::after { background-color: #c7f9cc; }
+[data-color-overlay="aqua"]::after { background-color: #bbf2f6; }
+[data-color-overlay="lavender"]::after { background-color: #e2d9fc; }
+[data-color-overlay="yellow"]::after { background-color: #fef08a; }
+
+/* Split Pane Resizer */
+.resizer-divider {
+  width: 6px;
+  cursor: col-resize;
+  position: relative;
+  background: var(--color-divider);
+  transition: background-color 150ms cubic-bezier(0.16, 1, 0.3, 1), transform 150ms ease;
+  z-index: 20;
+}
+
+.resizer-divider:hover,
+.resizer-divider.is-dragging {
+  background: var(--color-accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-accent) 40%, transparent);
+}
+
+/* Glass Node Styling */
+.node-glass {
+  background: color-mix(in srgb, var(--color-bg) 82%, transparent) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--color-divider);
+}
+
+/* Pill Node Styling */
+.node-pill {
+  border-radius: 9999px !important;
+}
+

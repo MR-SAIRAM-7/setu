@@ -1,156 +1,155 @@
-# SETU Sanctuary — Android Mobile Application
+# SETU Mobile
 
-**A bridge between dense digital worlds and the neurodivergent mind.**
-
-The official React Native + TypeScript Android mobile client for the SETU Cognitive Ecosystem (Capgemini Hack4Positive 2026).
+The Android/iOS client for SETU — a cognitive accessibility tool for ADHD,
+dyslexic, dyscalculic and autistic adults. React Native + TypeScript on Expo
+SDK 57, talking to the same Express engine and MongoDB as the web app and the
+Chrome extension.
 
 ---
 
-## 1. System Architecture
+## Running it
 
-```
-                                  ┌─────────────────────────────┐
-                                  │      React Native App       │
-                                  │  (Expo SDK / Android APK)   │
-                                  └──────────────┬──────────────┘
-                                                 │ HTTPS REST API
-                                                 ▼
-┌───────────────────────────┐      ┌─────────────────────────────┐      ┌───────────────────────────┐
-│     SETU Lens Extension   ├─────►│     SETU Express Engine     │◄─────┤    SETU Sanctuary Web     │
-│    (Chrome / Chromium)    │      │  (FastAPI / AI Orchestrator)│      │     (React 18 + Vite)     │
-└───────────────────────────┘      └──────────────┬──────────────┘      └───────────────────────────┘
-                                                  │
-                                                  ▼
-                                   ┌─────────────────────────────┐
-                                   │    MongoDB Atlas Cluster    │
-                                   │  + OpenRouter Multi-Model   │
-                                   └─────────────────────────────┘
+```bash
+npm install
 ```
 
-The Android app communicates purely as a client via HTTPS REST endpoints with the existing backend engine (`backend/server.js`). It never connects directly to MongoDB and never bundles private LLM API keys or secrets inside the mobile package.
-
----
-
-## 2. Broadsheet Design System & Accessibility Core
-
-The mobile interface is strictly bound to the **Broadsheet newsprint design guidelines**:
-- **Light by default**: Near-black ink (`#201e1d`) on paper ground (`#f3f2f2`).
-- **Four process plate inks**: Cyan (`#0088b0`), Magenta (`#d6006c`), Yellow (`#edbb00`), and Ink (`#201e1d`).
-- **Accessible Typography**: Supports Source Serif 4 (default), Atkinson Hyperlegible (dyslexia-friendly letterforms), and System Sans with dynamic text scaling (`Normal 1.0×`, `Comfortable 1.1×`, `Large 1.22×`).
-- **Bionic Reading Engine**: Calculates fixation anchor bolding on words to accelerate saccadic eye jumping and reduce cognitive fatigue for dyslexic readers.
-- **Reading Ruler Overlay**: A draggable, high-contrast visual focus band that darkens outer lines to eliminate paragraph crowding.
-- **ADHD Focus Session**: A 25-minute countdown timer with a warm, encouraging break dialog ("That's twenty-five minutes. Take five / Keep going").
-- **Voice Feedback & Speech Synthesis**: Full text-to-speech reading with configurable rate, pitch, and voice controls.
-- **Camera OCR & Ingestion**: Direct camera document capture with instant optical character recognition and semantic simplification.
-
----
-
-## 3. Seven Cognitive Accessibility Modes
-
-| Mode | Plate Tint | Purpose | Output Structure |
-| :--- | :--- | :--- | :--- |
-| **Start** | Yellow | Break task freeze & executive paralysis | Supportive message, Confidence meter, 10-minute physical action, Micro-steps |
-| **Simplify** | Cyan | Plain language rewriting (Grade 6) | Readability grade, Plain-language rewrite, Key takeaways, Sensory tips |
-| **Learn** | Magenta | Study material synthesis & self-quiz | Conceptual summary, Branching topic outline, Interactive 4-option quiz |
-| **Meet** | Cyan | Meeting rescue & transcript decoding | Executive summary, Action items with owners/deadlines, Jargon decoded |
-| **Practice** | Magenta | Rehearse difficult conversations | Scenario context, Opening lines, Suggested scripts across multiple tones |
-| **Write** | Yellow | Accessible writing check | Reading grade level, Active voice rewrite, Passive voice highlights, Clarity fixes |
-| **Guide** | Ink | Step-by-step workflow breakdown | Workflow name, Numbered steps, Required actions, Success signals/tips |
-
-Every mode ships with pre-populated worked examples so the screen is never blank upon first opening.
-
----
-
-## 4. How to Run the Mobile App
-
-### Prerequisites
-- Node.js 18+
-- npm 9+
-- Expo Go app on your Android device (or an Android Emulator / USB debugged device)
-
-### Step 1: Start the SETU Backend Server
-In the project root:
-```powershell
-cd D:\PROJECTS\setu\backend
-npm start
-```
-The server runs on `http://localhost:3000`.
-
-### Step 2: Start the Expo Development Server
-In another terminal:
-```powershell
-cd D:\PROJECTS\setu\mobile
+```bash
 npm start
 ```
 
-### Step 3: Run on Android
+Then press `a` for an Android emulator, or scan the QR code with Expo Go on a
+phone.
 
-#### Option A: Physical Android Phone via Expo Go
-1. Install **Expo Go** from the Google Play Store on your phone.
-2. Ensure your phone and development computer are connected to the same Wi-Fi network.
-3. Scan the QR code displayed in your terminal with the Expo Go app.
-4. In the app's **Settings** tab, configure the **Backend Server URL** to your computer's LAN IP (e.g., `http://192.168.1.50:3000`).
+### Pointing it at an engine
 
-#### Option B: Android Emulator
-```powershell
-cd D:\PROJECTS\setu\mobile
-npm run android
+You should not have to configure anything. The app resolves its backend in this
+order, and the first answer wins:
+
+1. an address typed into **Settings → Engine address**;
+2. `EXPO_PUBLIC_API_URL`, set per profile in `eas.json`;
+3. `extra.apiUrl` from `app.config.js`;
+4. in development, the host Metro served the bundle from, on port 3000 — so a
+   phone in Expo Go finds the laptop's backend by itself, and an emulator gets
+   `10.0.2.2:3000`;
+5. the deployed engine, `https://setu-37hl.onrender.com`.
+
+To run against a local backend:
+
+```bash
+cd ../backend && npm start
 ```
-*(The emulator automatically routes to the host backend via `http://10.0.2.2:3000`)*
+
+Leave **Settings → Engine address** empty and it will be found automatically.
+Cleartext HTTP is enabled for `development` and `preview` builds only, since
+LAN backends are plain `http://`; production builds block it.
 
 ---
 
-## 5. Building a Standalone Android APK
+## Building
 
-To generate a standalone APK that can be installed directly on any physical Android phone without needing Expo Go or Google Play Store:
-
-### Method 1: Cloud Build with Expo EAS (Recommended)
-```powershell
-# Install EAS CLI globally if needed
-npm install -g eas-cli
-
-# Log in to Expo account
-eas login
-
-# Build a standalone Android APK
-eas build -p android --profile preview
+```bash
+npx eas build --profile preview --platform android
 ```
-EAS will produce a shareable direct APK download link that testers and judges can install with one tap.
 
-### Method 2: Local Gradle APK Build
-```powershell
-# Generate native Android project files
-npx expo prebuild --platform android
+`preview` produces an installable APK pointed at the deployed engine.
+`production` produces an app bundle for Play. Both are configured in
+`eas.json`; `npx eas init` will add the project id on first use.
 
-# Compile debug APK
-cd android
-./gradlew assembleDebug
+### Checks
+
+```bash
+npx tsc --noEmit
 ```
-The resulting APK is located at `mobile/android/app/build/outputs/apk/debug/app-debug.apk`.
+
+```bash
+npx expo export --platform android
+```
+
+The export is the useful one before a build — it resolves every module, so it
+catches import mistakes that typechecking alone will not.
 
 ---
 
-## 6. Live Hackathon Demo Walkthrough for Judges
+## What is in here
 
-1. **First Launch & Onboarding (3-Step Flow)**:
-   - Step 1: Select cognitive barriers (e.g. *ADHD* and *Dyslexia*).
-   - Step 2: Customize live reading sample (test *Atkinson Hyperlegible* font, *Large* scaling, and *Bionic Reading*).
-   - Step 3: Choose motion sensitivity (*Let things move*).
-2. **Interactive Mind Map Exploration**:
-   - Tap on the pre-loaded *"Transformer neural networks"* reference map.
-   - Pan and zoom around the canvas.
-   - Tap on a branch node (e.g., *"Self-attention"*) to open the detail sheet.
-   - Tap **"Listen"** to hear speech synthesis.
-   - Tap **"Expand deeper"** to dynamically generate child research branches.
-3. **Cognitive Tools in Action**:
-   - Navigate to the **Modes** tab.
-   - Tap **Simplify** to view a Grade 6 plain language rewrite.
-   - Tap **Learn** and take the interactive knowledge quiz.
-   - Tap **Start** to see the 10-minute micro-action breakdown for executive freeze.
-4. **Camera OCR Document Scanning**:
-   - Open **Scan Document OCR** from the Home tab.
-   - Capture a photo of a document or pick a sample image.
-   - View the extracted text and tap **"Simplify in plain language"** or **"Generate interactive mind map"**.
-5. **ADHD Focus Session**:
-   - Start the 25-minute focus timer on the Home screen.
-   - Experience the tabular countdown and warm break dialog.
+### Screens
+
+| Screen | What it is for |
+| --- | --- |
+| **Home** | Ask a question, scan a page, pick a mode, pick up a recent map. Quick reading toggles near the top. |
+| **Mind map** | Any topic drawn as a branching map. Tap a branch to open *and hear* it, go a level deeper, or ask about it — the chat turn streams. |
+| **Modes** | Eight cognitive tools: Start, Simplify, Learn, Meet, Practice, Write, Guide, Numbers. |
+| **Listen** | Reflective support with a mood check-in and a local-only journal. |
+| **Library** | Saved maps, saved mode results, and uploaded documents. |
+| **Settings** | Typeface, size, page colour, spacing, tint, language, voice, engine, data. |
+| **Momentum** | Points, streak and milestones. Reachable from Home and Settings. |
+| **Camera OCR** | Photograph a printed page and work with the text. |
+
+### Accessibility
+
+- **Read aloud** in eleven languages via Sarvam Bulbul, falling back to the
+  phone's own synthesiser. Long passages are chunked and pipelined, so audio
+  starts in about a second rather than after the whole passage synthesises.
+- **Dictation** via Sarvam Saaras, available anywhere there is a text field.
+- **Speak-on-tap** for mind map branches, on by default.
+- **Six page colours** including two dark grounds and a high-contrast yellow.
+- **Seven colour tints** at four strengths, for visual stress.
+- **Five typefaces**, three text sizes, three line-spacing densities.
+- **Reading ruler**, **reduced motion**, and optional bolded word starts.
+- Every control has a screen-reader label; touch targets are at least 44pt.
+
+### Elsewhere in the app
+
+- **Focus sessions** run on a wall-clock deadline, so they keep counting while
+  you are in another app.
+- **The parking lot** (the pin button) is a one-tap place to put an intrusive
+  thought. Notes never leave the phone.
+- **Momentum** pays out immediately for real effort, and can be silenced
+  without stopping the count.
+
+---
+
+## How it is put together
+
+```
+src/
+  constants/    config (engine resolution), languages, theme tokens, palettes
+  context/      preferences, theme, focus timer, identity
+  services/     api, identity, tts, stt, storage, progress, localStore, export
+  components/   design system + feature components
+  screens/      one file per screen
+  navigation/   tabs, stack, and the overlays that sit above them
+```
+
+Three things are worth knowing before changing anything:
+
+**Styles are theme factories.** React Native evaluates `StyleSheet.create` once
+at module load, so a palette read there is frozen for the life of the process.
+Screens therefore declare `const makeStyles = (t: Palette) => StyleSheet.create({…})`
+and call `useThemedStyles(makeStyles)`. Inline colours in the render body come
+from `useThemeColors()`.
+
+**Preferences are pushed, not pulled.** `AccessibilityContext` writes the
+language, voice, pace, rewards switch and engine address into the service
+modules whenever they change. Those modules never read storage themselves —
+that is what keeps the API, the voice and the model in the same language.
+
+**Nothing is ever invented.** When the engine cannot be reached, screens say so
+and keep what the user typed. When the engine answers from its own offline
+engine rather than a model, the mode result says that too, including when it
+means the answer came back in English instead of the chosen language. Earlier
+builds filled these gaps with canned text, which is the worst possible failure
+for a reader who cannot easily evaluate what they are given.
+
+---
+
+## Privacy
+
+There are no accounts. Identity is one random token per install, sent as
+`x-user-id`, and it can be reset or wiped from Settings. Check-in entries and
+parked notes are stored on the device only and are never mirrored to the server.
+Documents and mind maps are mirrored so they follow you across devices.
+
+The crisis path in Listen is decided on the server before any model is called,
+and this app renders that fixed, reviewed response verbatim — with the helpline
+numbers made dialable.

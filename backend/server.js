@@ -74,17 +74,42 @@ const AI_ROUTES = [
   '/api/practice',
   '/api/write',
   '/api/guide',
+  '/api/numbers',
+  '/api/listen',
   '/api/summarize',
   '/api/explain',
   '/api/agent/plan',
   '/api/agent/navigate',
   '/api/agent/explain',
+  '/api/agent/explain/stream',
+  '/api/agent/visualize',
   '/api/agent/chunk',
   '/api/agent/describe-image',
   '/api/files/upload'
 ];
 
-app.use('/api', generalLimiter);
+/**
+ * Read-aloud gets its own, much larger bucket.
+ *
+ * Hovering across a mind map legitimately fires a request per branch, and long
+ * passages are split into several clips that are fetched back to back — traffic
+ * patterns that would trip the AI limiter within seconds even though each call
+ * is cheap and most are served from the clip cache.
+ */
+const speechLimiter = createRateLimiter({
+  windowMs: config.rateLimit.speechWindowMs,
+  max: config.rateLimit.speechMax,
+  keyPrefix: 'speech',
+  message: 'Read-aloud is being requested very fast. Give it a few seconds.'
+});
+
+// Speech is metered by its own bucket only. Leaving it under the general
+// limiter too would make that the real ceiling and throttle read-aloud long
+// before the speech budget was touched.
+app.use('/api', (req, res, next) =>
+  req.path.startsWith('/speech') ? next() : generalLimiter(req, res, next)
+);
+app.use('/api/speech', speechLimiter);
 app.use(AI_ROUTES, aiLimiter);
 // Mind maps built from a document also run the full research pipeline.
 app.use('/api/files/:id/mindmap', aiLimiter);

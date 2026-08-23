@@ -1,122 +1,95 @@
-# SETU Android Application — Master Development Task Tracker
+# SETU Mobile — status
 
-Living single source of truth for the SETU Android Mobile Application (React Native + TypeScript + Expo), connecting to the existing SETU FastAPI/Express AI Backend and MongoDB database.
+Living tracker for the Android/iOS client. See `README.md` for how to run and
+build it.
 
 ---
 
-## 1. Architecture & Repository Inspection
-- [x] Inspect existing repository structure, design guidelines, backend routes, AI models, and frontend logic.
-- [x] Document design tokens (Broadsheet design system: paper ground `#f3f2f2`, surface `#eae9e9`, ink `#201e1d`, cyan `#0088b0`, magenta `#d6006c`, yellow `#edbb00`, 4-plate mind map colors).
-- [x] Identify reusable business logic (Layout algorithm, Bionic fixation math, TTS helper, Seed data, 7 Cognitive Modes).
+## Done
 
-## 2. Project Setup & Mobile Foundation
-- [ ] Initialize React Native + TypeScript Expo application in `mobile/` with configuration for Android standalone builds.
-- [ ] Configure `package.json`, `tsconfig.json`, `app.json` (Android package name `com.setu.sanctuary`, permissions for Camera, Audio, Storage).
-- [ ] Install core dependencies: `@react-navigation/native`, `@react-navigation/bottom-tabs`, `@react-navigation/native-stack`, `expo-font`, `expo-speech`, `expo-camera`, `expo-image-picker`, `expo-haptics`, `expo-file-system`, `@react-native-async-storage/async-storage`, `react-native-svg`, `react-native-gesture-handler`, `react-native-reanimated`, `lucide-react-native` / vector icons.
-- [ ] Configure Broadsheet design system tokens, typography scales, fonts (Source Serif 4, Atkinson Hyperlegible, System Sans), and color palettes in `mobile/src/constants/theme.ts`.
+### Foundation
+- [x] Expo SDK 57 + React Native 0.86 + TypeScript project, Android package
+      `com.setu.sanctuary`.
+- [x] Broadsheet design tokens, typography scale, spacing, plate colours.
+- [x] Engine address resolution — Settings override, then `EXPO_PUBLIC_API_URL`,
+      then the Metro host in dev, then the deployed engine. Stored `10.0.2.2`
+      values from older builds are migrated away, so an upgraded install on a
+      real phone is not left pointing at a dead address.
+- [x] Error boundary above the provider tree, so a render failure shows a
+      readable screen instead of a white one.
+- [x] `app.config.js` so cleartext HTTP is enabled for development and preview
+      builds and blocked in production.
+- [x] EAS profiles for development / preview APK / production bundle.
 
-## 3. Core Types, State Management & Contexts
-- [ ] Define comprehensive TypeScript interfaces (`src/types/index.ts`) for MindMap, Node, Edge, 7 Modes, Chat Turn, Preferences, FileUpload, API contracts.
-- [ ] Implement `AccessibilityContext` managing font family, text scaling (1.0x / 1.1x / 1.22x), motion reduction, bionic reading toggle, and reading ruler.
-- [ ] Implement `FocusContext` managing the 25-minute ADHD Pomodoro timer, background interval, and break dialog state.
-- [ ] Implement `IdentityContext` managing stable per-device `x-user-id` token persistence and MongoDB synchronization status.
+### State and services
+- [x] Anonymous device identity in its own module, warmed at boot.
+- [x] API client with central language stamping, soft reads, timeouts, abort
+      forwarding, and background mirroring for local-first writes.
+- [x] SSE chat streaming over XHR, since RN `fetch` has no readable body.
+- [x] Offline-first storage for maps, summaries, conversations, preferences.
+- [x] Device-only stores for the parking lot and the check-in journal.
 
-## 4. Centralized API & Networking Layer
-- [ ] Build `src/services/api.ts` connecting to SETU engine with automatic base URL fallback, timeouts, `x-user-id` header injection, and network error handling.
-- [ ] Implement API endpoints matching backend:
-  - System: `/api/health`, `/api/health/ai`, `/api/db/status`
-  - Research & Mind Maps: `/api/research/mindmap`, `/api/research/expand`, `/api/mindmaps`
-  - Chat & Streaming: `/api/chat`, `/api/conversations`
-  - 7 Cognitive Modes: `/api/start`, `/api/simplify`, `/api/learn`, `/api/meet`, `/api/practice`, `/api/write`, `/api/guide`
-  - File/Document OCR: `/api/files/upload`, `/api/agent/describe-image`
-- [ ] Build `src/services/storage.ts` for offline-first local caching and seamless remote MongoDB synchronization.
-- [ ] Build `src/services/tts.ts` for accessible text-to-speech audio playback with rate, pitch, and voice controls.
+### Accessibility
+- [x] Sarvam Bulbul read-aloud with sentence chunking and a pipelined fetch, so
+      audio starts in about a second; falls back to the device synthesiser
+      mid-passage rather than stopping.
+- [x] Sarvam Saaras dictation with real recording, a 60-second cap, and an
+      honest message when the engine has no speech key.
+- [x] Eleven languages driving the model, the voice and the dictation together,
+      chosen during onboarding in native script.
+- [x] Six page colours, seven tints at four strengths, five typefaces, three
+      text sizes, three spacing densities, reduced motion, reading ruler.
+- [x] Speak-on-tap for mind map branches, on by default.
+- [x] Screen-reader labels and 44pt minimum targets across new surfaces.
 
-## 5. Reusable UI Design System Components
-- [ ] Create `Text` / `Heading` components respecting accessibility settings and Broadsheet serif typography.
-- [ ] Create `BionicText` component applying fixation anchor bolding on words for dyslexia/ADHD reading support.
-- [ ] Create `Button` (Primary cyan, Secondary, Ghost, Destructive magenta) with accessible touch targets (>= 48px) and haptic feedback.
-- [ ] Create `Card` and `Tag` components with Broadsheet 4-plate inks (`cyan`, `magenta`, `yellow`, `ink`).
-- [ ] Create `Input` and `Textarea` components with clear focus states and high-contrast styling.
-- [ ] Create `FocusTimerWidget` (sidebar/header floating timer widget) and `BreakDialogModal` ("That's twenty-five minutes. Take five / Keep going").
-- [ ] Create `StagedLoader` component with 3 progressive stages (`Reading around topic` -> `Finding branches` -> `Drawing map`).
-- [ ] Create `ReadingRuler` overlay component for line-by-line focus tracking.
-- [ ] Create `VoiceInputButton` component for voice dictation / Speech-to-Text.
+### Features
+- [x] Eight cognitive modes, including Numbers with countable-object rendering.
+- [x] Listen: mood check-in, local journal, and the server's fixed crisis
+      response rendered verbatim with dialable helplines.
+- [x] Momentum: points, streaks, ranks, milestones, reward toasts, and a switch
+      that silences the display without stopping the count.
+- [x] Parking lot for working-memory offload.
+- [x] Focus sessions on a wall-clock deadline, surviving backgrounding, with a
+      working "take five" break.
+- [x] Library documents tab — pick any file, upload, then simplify, map, study
+      or hear it.
+- [x] Copy and share to Markdown, plain outline, or JSON.
 
-## 6. Onboarding & First-Run Experience (3-Step Flow)
-- [ ] Build `OnboardingScreen` strictly matching design guidelines:
-  - Step 1: "What tends to get in your way?" (ADHD, Dyslexia, Autistic, Just overwhelmed, Rather not say).
-  - Step 2: "Make this paragraph easy to read" (Live sample with real-time typeface, size, and bionic reading preview).
-  - Step 3: "Should things move?" (Let things move vs. Keep it still).
-- [ ] Seamless transition into the app with seeded worked example map pre-loaded.
+### Honesty
+- [x] Removed the invented OCR paragraph that appeared when scanning failed.
+- [x] Removed the invented mind map and the placeholder "Deep Dive" branch that
+      appeared when research failed.
+- [x] Removed the silent fall back to a worked example when a mode call failed.
+- [x] Mode results now show when the engine answered from its offline rule
+      engine, including when that means English instead of the chosen language.
+- [x] Fixed the mind map research reader — it read `result.map`, which the
+      engine never returns, so every researched map had no tree.
 
-## 7. Home & Sanctuary Dashboard Screen
-- [ ] Build `HomeScreen` featuring:
-  - Engine Readiness Probe badge (breathing dot indicator).
-  - Focus session quick launcher & status.
-  - Cognitive Mode 7-card quick action grid.
-  - "Ask anything" instant research bar + Voice input + Camera OCR trigger.
-  - Recent mind maps & research history carousel.
-  - Cognitive tips & accessibility quick toggles.
+---
 
-## 8. Interactive Mind Map & Research Screen
-- [ ] Implement mobile-optimized `MindMapCanvas` using SVG + touch pan & zoom gestures:
-  - Reingold-Tilford tree layout calculation (`src/utils/layout.ts`).
-  - 4-plate branch coloring (`#0088b0`, `#d6006c`, `#edbb00`, `#201e1d`).
-  - Collapsible branches with circular child count badge.
-  - Accessible touch nodes with high contrast and selection ring.
-- [ ] Build interactive `NodeDetailSheet` (bottom sheet / modal) with:
-  - Branch details, key facts, and sources.
-  - "Go one level deeper" (calls `/api/research/expand` dynamically).
-  - "Ask about this node" conversational follow-up.
-  - TTS read aloud for the node content.
-- [ ] Staged progress indicator during research generation.
-- [ ] Mind map export actions (Markdown, JSON, Text outline).
+## Verified
 
-## 9. Seven Cognitive Accessibility Modes Screen
-- [ ] Build `ModesScreen` with tab/list navigation for all 7 modes:
-  - **Start**: Break task freeze (confidence meter, micro-steps, 10-min action).
-  - **Simplify**: Plain language rewrite Grade 6, key takeaways, sensory tips.
-  - **Learn**: Study summary, branching outline, interactive self-quiz with feedback.
-  - **Meet**: Meeting rescue (summary, action items with owners/deadlines, decoded jargon).
-  - **Practice**: Rehearse hard conversations (scenario, opening line, multiple tone options, coaching tips).
-  - **Write**: Accessible writing check (readability grade, active rewrite, passive highlights, clarity fixes).
-  - **Guide**: Step-by-step workflow (numbered steps, action required, success signals).
-- [ ] Pre-populate worked examples for every mode so no screen is ever empty.
-- [ ] Integrate live execution with backend API and fallback engine.
-- [ ] Add TTS playback, Bionic reading toggle, and copy/export options for results.
+- `npx tsc --noEmit` clean.
+- `npx expo export --platform android` bundles all 3,277 modules.
+- Against a live backend: `/api/health`, `/api/speech/voices`, `/api/speech`
+  (base64 mp3), `/api/numbers`, `/api/listen` (both the normal and the crisis
+  path), `/api/simplify`.
 
-## 10. Camera, OCR & Document Ingestion
-- [ ] Build `CameraOcrScreen` with camera capture and photo library picker.
-- [ ] Image preview with crop/focus guidance for physical documents, handouts, book pages, notices.
-- [ ] Send image to backend `/api/agent/describe-image` / `/api/files/upload` for OCR text extraction.
-- [ ] Action buttons on extracted text: "Simplify Text", "Generate Mind Map", "Study & Quiz", "Listen (TTS)".
+---
 
-## 11. Library & Conversation History Screen
-- [ ] Build `LibraryScreen` displaying saved mind maps, conversation threads, and mode summaries.
-- [ ] Search and filter by mode, date, and keyword.
-- [ ] Seed reference library restoration ("Restore reference library").
-- [ ] Delete and export options with confirmation dialogs.
+## Not done
 
-## 12. Settings & Accessibility Customization Screen
-- [ ] Build `SettingsScreen` with:
-  - Reading preferences (Typeface, Size scale, Motion reduction, Bionic reading, Reading ruler).
-  - Voice settings (Speech rate slider, pitch, voice test).
-  - Engine & Backend configuration (Backend URL input, live `/api/health/ai` probe test).
-  - Data management (Device ID display, Reset ID, Clear all local data, Restore demo library).
-  - About SETU & Hackathon Disability Inclusion statement.
-
-## 13. Navigation & App Shell
-- [ ] Configure React Navigation with Broadsheet aesthetic (paper background, cyan active tabs, muted inactive labels).
-- [ ] Navigation structure:
-  - Root Stack: Onboarding -> MainTabs -> ModeDetail / CameraOCR / NodeDetail.
-  - Main Tabs: Home, Mind Map, Modes, Library, Settings.
-- [ ] Floating Focus Session Banner and Skip-to-Content accessible shortcuts.
-
-## 14. Verification, Testing & Build Readiness
-- [ ] Test all screens with TypeScript typechecking (`tsc --noEmit`).
-- [ ] Test API integration against local/remote SETU backend.
-- [ ] Verify offline fallback behavior when backend is unreachable.
-- [ ] Verify WCAG 2.1 AA accessibility contrast, font scaling, screen reader labels, and touch targets.
-- [ ] Test standalone Android APK build configuration (Expo EAS build / Prebuild).
-- [ ] Write detailed run and demonstration guide for judges/evaluators in `mobile/README.md`.
+- [ ] **Run on a physical device.** Everything above is typechecked, bundled and
+      verified against the real backend, but no build has been installed on
+      hardware in this pass. Microphone recording, audio playback and the
+      camera all cross the native boundary and want a real device before
+      anyone relies on them.
+- [ ] **`eas init`** to attach a project id, needed before the first cloud build.
+- [ ] Bundled Atkinson Hyperlegible and Lexend font files. The typeface setting
+      currently maps them onto the platform serif/sans stacks, so the choice is
+      real but the faces are not the licensed originals.
+- [ ] Offline queue for writes made while the engine is unreachable; today they
+      are kept locally and mirrored only on the next successful call.
+- [ ] Push notifications for focus session completion when the app is closed.
+- [ ] Localised interface chrome. The eleven languages cover what the model says
+      and what the voice reads; the buttons and labels are still English.

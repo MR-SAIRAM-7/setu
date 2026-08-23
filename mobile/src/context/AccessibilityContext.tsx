@@ -1,18 +1,24 @@
 /**
- * SETU Mobile — Accessibility Context
- * -----------------------------------
- * Manages user accessibility preferences across the application:
- * Typeface, Text Scaling, Motion Reduction, Bionic Reading, Reading Ruler,
- * Speech synthesis rate, and Onboarding completion state.
+ * SETU Mobile — reading and accessibility preferences.
+ *
+ * The single place a preference is written, and the single place the rest of the
+ * app is told about it. Language, voice, speaking pace, backend address and the
+ * rewards switch all live in stateless service modules that cannot read storage
+ * themselves — the alternative, letting each of them reach into AsyncStorage,
+ * is how you end up with the API answering in Tamil while the voice still reads
+ * English.
  */
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+
 import {
   UserPreferences,
   FontStyleOption,
   TextSizeOption,
   MotionOption,
   ReadingProfile,
+  ThemeOption,
+  SpacingOption,
 } from '../types';
 import {
   getStoredPreferences,
@@ -20,30 +26,52 @@ import {
   DEFAULT_PREFERENCES,
 } from '../services/storage';
 import { SIZE_SCALE } from '../constants/theme';
+import { DEFAULT_LANGUAGE } from '../constants/languages';
 import { tts } from '../services/tts';
+import { setApiBaseUrl, setApiLanguage } from '../services/api';
+import { initIdentity } from '../services/identity';
+import { initProgress, setRewardsAnnounced } from '../services/progress';
 
 interface AccessibilityContextValue {
   preferences: UserPreferences;
+
   font: FontStyleOption;
   size: TextSizeOption;
   sizeScale: number;
+  theme: ThemeOption;
+  spacing: SpacingOption;
   motion: MotionOption;
+  reduceMotion: boolean;
   bionic: boolean;
   readingRuler: boolean;
   speechRate: number;
   speechPitch: number;
+  language: string;
+  voice: string | null;
+  speakOnTap: boolean;
+  rewards: boolean;
+  colorOverlay: string;
+  colorOverlayOpacity: number;
   profile: ReadingProfile[];
   hasCompletedOnboarding: boolean;
   customApiUrl: string;
   isLoading: boolean;
+
   updatePreferences: (updates: Partial<UserPreferences>) => Promise<void>;
   setFont: (font: FontStyleOption) => Promise<void>;
   setSize: (size: TextSizeOption) => Promise<void>;
+  setTheme: (theme: ThemeOption) => Promise<void>;
+  setSpacing: (spacing: SpacingOption) => Promise<void>;
   setMotion: (motion: MotionOption) => Promise<void>;
   toggleBionic: () => Promise<void>;
   toggleReadingRuler: () => Promise<void>;
   setSpeechRate: (rate: number) => Promise<void>;
   setSpeechPitch: (pitch: number) => Promise<void>;
+  setLanguage: (code: string) => Promise<void>;
+  setVoice: (speakerId: string | null) => Promise<void>;
+  toggleSpeakOnTap: () => Promise<void>;
+  toggleRewards: () => Promise<void>;
+  setColorOverlay: (overlay: string, opacity?: number) => Promise<void>;
   setProfile: (profile: ReadingProfile[]) => Promise<void>;
   setCustomApiUrl: (url: string) => Promise<void>;
   completeOnboarding: () => Promise<void>;
@@ -51,46 +79,134 @@ interface AccessibilityContextValue {
 
 const AccessibilityContext = createContext<AccessibilityContextValue | null>(null);
 
-export const AccessibilityProvider: React.FC<{ children: React.ReactNode }> = ({
-  children,
-}) => {
+/**
+ * Push preference values into the stateless service layer.
+ *
+ * Called once on load and again on every change, rather than having each
+ * service reach back into storage on demand — which would make every API call
+ * and every utterance await a disk read.
+ */
+function applyPreferences(prefs: UserPreferences): void {
+  setApiBaseUrl(prefs.customApiUrl);
+  setApiLanguage(prefs.language || DEFAULT_LANGUAGE);
+
+  tts.setRate(prefs.speechRate);
+  tts.setPitch(prefs.speechPitch);
+  tts.setLanguage(prefs.language || DEFAULT_LANGUAGE);
+  tts.setSpeaker(prefs.voice);
+
+  setRewardsAnnounced(prefs.rewards !== false);
+}
+
+export const AccessibilityProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function load() {
       try {
+        // Identity first: everything downstream stamps `x-user-id` on requests,
+        // and a boot-time progress sync that goes out anonymous would come back
+        // with somebody else's streak.
+        await initIdentity();
+
         const stored = await getStoredPreferences();
+        if (cancelled) return;
+
+        applyPreferences(stored);
         setPreferences(stored);
-        tts.setRate(stored.speechRate);
-        tts.setPitch(stored.speechPitch);
+
+        // Top up local rewards from the server copy, so a streak built on
+        // another device is not silently restarted here.
+        initProgress().catch(() => {});
       } catch (_) {
+        /* defaults are already applied */
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     }
+
     load();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const updatePreferences = async (updates: Partial<UserPreferences>) => {
+  const updatePreferences = useCallback(async (updates: Partial<UserPreferences>) => {
     const updated = await saveStoredPreferences(updates);
-    setPreferences(updated);
-    if (updates.speechRate !== undefined) tts.setRate(updates.speechRate);
-    if (updates.speechPitch !== undefined) tts.setPitch(updates.speechPitch);
-  };
+    applyPreferences(updated);
 
-  const setFont = (font: FontStyleOption) => updatePreferences({ font });
-  const setSize = (size: TextSizeOption) => updatePreferences({ size });
-  const setMotion = (motion: MotionOption) => updatePreferences({ motion });
-  const toggleBionic = () => updatePreferences({ bionic: !preferences.bionic });
-  const toggleReadingRuler = () =>
-    updatePreferences({ readingRuler: !preferences.readingRuler });
-  const setSpeechRate = (speechRate: number) => updatePreferences({ speechRate });
-  const setSpeechPitch = (speechPitch: number) => updatePreferences({ speechPitch });
-  const setProfile = (profile: ReadingProfile[]) => updatePreferences({ profile });
-  const setCustomApiUrl = (customApiUrl: string) => updatePreferences({ customApiUrl });
-  const completeOnboarding = () =>
-    updatePreferences({ hasCompletedOnboarding: true });
+    // A different engine may have a different speech configuration entirely, so
+    // the "is natural voice available" answer has to be re-asked, not reused.
+    if (updates.customApiUrl !== undefined) tts.resetProbe();
+
+    setPreferences(updated);
+  }, []);
+
+  const setFont = useCallback((font: FontStyleOption) => updatePreferences({ font }), [updatePreferences]);
+  const setSize = useCallback((size: TextSizeOption) => updatePreferences({ size }), [updatePreferences]);
+  const setTheme = useCallback((theme: ThemeOption) => updatePreferences({ theme }), [updatePreferences]);
+  const setSpacing = useCallback(
+    (spacing: SpacingOption) => updatePreferences({ spacing }),
+    [updatePreferences]
+  );
+  const setMotion = useCallback((motion: MotionOption) => updatePreferences({ motion }), [updatePreferences]);
+  const setSpeechRate = useCallback(
+    (speechRate: number) => updatePreferences({ speechRate }),
+    [updatePreferences]
+  );
+  const setSpeechPitch = useCallback(
+    (speechPitch: number) => updatePreferences({ speechPitch }),
+    [updatePreferences]
+  );
+  const setLanguage = useCallback(
+    (language: string) => updatePreferences({ language }),
+    [updatePreferences]
+  );
+  const setVoice = useCallback(
+    (voice: string | null) => updatePreferences({ voice }),
+    [updatePreferences]
+  );
+  const setProfile = useCallback(
+    (profile: ReadingProfile[]) => updatePreferences({ profile }),
+    [updatePreferences]
+  );
+  const setCustomApiUrl = useCallback(
+    (customApiUrl: string) => updatePreferences({ customApiUrl }),
+    [updatePreferences]
+  );
+  const setColorOverlay = useCallback(
+    (colorOverlay: string, colorOverlayOpacity?: number) =>
+      updatePreferences(
+        colorOverlayOpacity === undefined
+          ? { colorOverlay }
+          : { colorOverlay, colorOverlayOpacity }
+      ),
+    [updatePreferences]
+  );
+
+  const toggleBionic = useCallback(
+    () => updatePreferences({ bionic: !preferences.bionic }),
+    [preferences.bionic, updatePreferences]
+  );
+  const toggleReadingRuler = useCallback(
+    () => updatePreferences({ readingRuler: !preferences.readingRuler }),
+    [preferences.readingRuler, updatePreferences]
+  );
+  const toggleSpeakOnTap = useCallback(
+    () => updatePreferences({ speakOnTap: !preferences.speakOnTap }),
+    [preferences.speakOnTap, updatePreferences]
+  );
+  const toggleRewards = useCallback(
+    () => updatePreferences({ rewards: !preferences.rewards }),
+    [preferences.rewards, updatePreferences]
+  );
+  const completeOnboarding = useCallback(
+    () => updatePreferences({ hasCompletedOnboarding: true }),
+    [updatePreferences]
+  );
 
   const sizeScale = (SIZE_SCALE as Record<string, number>)[preferences.size] || 1.0;
 
@@ -101,11 +217,20 @@ export const AccessibilityProvider: React.FC<{ children: React.ReactNode }> = ({
         font: preferences.font,
         size: preferences.size,
         sizeScale,
+        theme: preferences.theme,
+        spacing: preferences.spacing,
         motion: preferences.motion,
+        reduceMotion: preferences.motion === 'reduced',
         bionic: preferences.bionic,
         readingRuler: preferences.readingRuler,
         speechRate: preferences.speechRate,
         speechPitch: preferences.speechPitch,
+        language: preferences.language,
+        voice: preferences.voice,
+        speakOnTap: preferences.speakOnTap,
+        rewards: preferences.rewards,
+        colorOverlay: preferences.colorOverlay,
+        colorOverlayOpacity: preferences.colorOverlayOpacity,
         profile: preferences.profile,
         hasCompletedOnboarding: preferences.hasCompletedOnboarding,
         customApiUrl: preferences.customApiUrl,
@@ -113,11 +238,18 @@ export const AccessibilityProvider: React.FC<{ children: React.ReactNode }> = ({
         updatePreferences,
         setFont,
         setSize,
+        setTheme,
+        setSpacing,
         setMotion,
         toggleBionic,
         toggleReadingRuler,
         setSpeechRate,
         setSpeechPitch,
+        setLanguage,
+        setVoice,
+        toggleSpeakOnTap,
+        toggleRewards,
+        setColorOverlay,
         setProfile,
         setCustomApiUrl,
         completeOnboarding,

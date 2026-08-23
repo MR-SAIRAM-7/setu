@@ -86,6 +86,36 @@ function geminiChain() {
   return available.length ? available : ordered;
 }
 
+/**
+ * A wall-clock budget for one logical request.
+ *
+ * Per-request timeouts are not a budget, and treating them as one was the
+ * single worst latency bug in this service. `timeoutMs` bounds one HTTP call —
+ * but a structured request walks a five-model OpenRouter chain, retries, and
+ * then does the same against Gemini and OpenAI. At 20 seconds each, a request
+ * nobody would describe as "slow" could legitimately run for four minutes
+ * before returning, with a human watching a panel the whole time.
+ *
+ * This is the ceiling on the whole operation. Every chain walk checks it before
+ * starting another model, and every individual call is capped at whatever is
+ * left, so the caller's stated budget is the budget.
+ */
+function makeDeadline(ms) {
+  const at = Number.isFinite(ms) && ms > 0 ? Date.now() + ms : Number.POSITIVE_INFINITY;
+  return {
+    at,
+    remaining: () => at - Date.now(),
+    expired: () => Date.now() >= at
+  };
+}
+
+/** The timeout for one call: the smaller of what was asked for and what is left. */
+function budgetFor(timeoutMs, deadline) {
+  const asked = Number(timeoutMs) || config.aiTimeoutMs;
+  if (!deadline || !Number.isFinite(deadline.at)) return asked;
+  return Math.max(1500, Math.min(asked, deadline.remaining()));
+}
+
 class AIError extends Error {
   constructor(message, { provider, status, model, retryable = false, retryAfterMs = null } = {}) {
     super(message);
@@ -138,8 +168,12 @@ function toGeminiSchema(schema) {
  * the prompt is the one approach every model in the chain honours, and it is
  * what keeps field names stable across providers.
  */
-function schemaInstruction(schema, name) {
+function schemaInstruction(schema, name, example = null) {
   const required = Array.isArray(schema?.required) ? schema.required : [];
+
+  const arrayKeys = Object.entries(schema?.properties || {})
+    .filter(([, spec]) => spec?.type === 'array')
+    .map(([key]) => key);
 
   return [
     '',
@@ -151,7 +185,19 @@ function schemaInstruction(schema, name) {
     '',
     'Use these exact key names and nesting. Do not rename, add, or omit keys.',
     required.length ? `Every one of these keys is required: ${required.join(', ')}.` : '',
-    'Where a property lists an "enum", the value must be one of those strings verbatim.'
+    'Where a property lists an "enum", the value must be one of those strings verbatim.',
+    // Smaller models reliably fill the scalar fields and then hand back `[]`
+    // for every array — a schema-valid reply carrying no content at all. Naming
+    // the arrays explicitly is what stops that, and it costs a single line.
+    arrayKeys.length
+      ? `Populate every array. Returning an empty [] for ${arrayKeys.join(', ')} is a failed reply — ` +
+        'fill each one with real entries drawn from the input.'
+      : '',
+    // And an example beats every rule above it. A model that ignores prose
+    // instructions about nesting will still copy the shape it was shown.
+    example
+      ? ['', 'A correctly shaped reply looks exactly like this:', JSON.stringify(example)].join('\n')
+      : ''
   ]
     .filter(Boolean)
     .join('\n');
@@ -196,7 +242,25 @@ function parseJsonLoose(raw) {
 /* HTTP Transport                                                             */
 /* -------------------------------------------------------------------------- */
 
-async function postJson(url, body, { headers = {}, timeoutMs = config.aiTimeoutMs, provider, model } = {}) {
+/**
+ * POST JSON with a timeout that actually covers the whole response.
+ *
+ * @param {boolean} [options.parse] resolve to the parsed body rather than the
+ *   Response. Use this for everything that is not a stream.
+ *
+ * The distinction matters more than it looks. `fetch` resolves as soon as the
+ * *headers* arrive, and an LLM sends those immediately and then takes as long
+ * as it likes to generate the body. Clearing the abort timer when `postJson`
+ * returned meant the timeout only ever bounded time-to-first-byte: a model
+ * that answered in 0.3s and then spent fourteen seconds writing was completely
+ * unbounded, and no per-call or overall budget could see it. Parsing inside
+ * the timed region is what makes `timeoutMs` mean what it says.
+ */
+async function postJson(
+  url,
+  body,
+  { headers = {}, timeoutMs = config.aiTimeoutMs, provider, model, parse = false } = {}
+) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -253,14 +317,18 @@ async function postJson(url, body, { headers = {}, timeoutMs = config.aiTimeoutM
       });
     }
 
-    return response;
+    return parse ? await response.json() : response;
   } catch (error) {
     if (error.name === 'AbortError') {
-      throw new AIError(`${provider}${model ? ` (${model})` : ''} request timed out after ${timeoutMs}ms.`, {
-        provider,
-        model,
-        retryable: true
-      });
+      const timeout = new AIError(
+        `${provider}${model ? ` (${model})` : ''} request timed out after ${timeoutMs}ms.`,
+        { provider, model, retryable: true }
+      );
+      // Flagged so the chain walk can tell "this model is too slow, try the
+      // next one" apart from "this request failed". Without it, a slow model
+      // was retried into the same timeout instead of being stepped over.
+      timeout.timedOut = true;
+      throw timeout;
     }
     throw error;
   } finally {
@@ -272,7 +340,61 @@ async function postJson(url, body, { headers = {}, timeoutMs = config.aiTimeoutM
 /* 1. OpenRouter (Primary Engine with automated model fallback chain)          */
 /* -------------------------------------------------------------------------- */
 
-async function callOpenRouter({ system, messages, schema, name, temperature }) {
+function readOpenRouterSources(payload, text) {
+  const sources = [];
+  const seen = new Set();
+
+  // 1. Annotations (e.g. url_citation)
+  const annotations = payload?.choices?.[0]?.message?.annotations || [];
+  for (const ann of annotations) {
+    const url = ann?.url_citation?.url || ann?.url || ann?.uri;
+    const title = ann?.url_citation?.title || ann?.title || url;
+    if (url && typeof url === 'string' && !seen.has(url)) {
+      seen.add(url);
+      sources.push({ title: String(title).trim(), url: String(url).trim() });
+    }
+  }
+
+  // 2. Direct citations array
+  const citations = payload?.citations || payload?.choices?.[0]?.citations || [];
+  for (const cit of citations) {
+    const url = typeof cit === 'string' ? cit : cit?.url || cit?.uri;
+    const title = typeof cit === 'object' ? cit?.title || url : url;
+    if (url && typeof url === 'string' && !seen.has(url)) {
+      seen.add(url);
+      sources.push({ title: String(title).trim(), url: String(url).trim() });
+    }
+  }
+
+  // 3. Fallback to markdown links in text
+  if (text && typeof text === 'string') {
+    const mdRegex = /\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g;
+    let match;
+    while ((match = mdRegex.exec(text)) !== null) {
+      const title = match[1].trim();
+      const url = match[2].trim();
+      if (url && !seen.has(url)) {
+        seen.add(url);
+        sources.push({ title, url });
+      }
+    }
+  }
+
+  return sources.slice(0, 12);
+}
+
+async function callOpenRouter({
+  system,
+  messages,
+  schema,
+  name,
+  example,
+  temperature,
+  timeoutMs,
+  deadline,
+  webSearch = false,
+  withSources = false
+}) {
   if (!config.openRouterApiKey) {
     throw new AIError('No OpenRouter API key configured.', { provider: 'openrouter' });
   }
@@ -281,9 +403,18 @@ async function callOpenRouter({ system, messages, schema, name, temperature }) {
   let lastError;
 
   for (const model of chain) {
+    // Starting another 20-second model call with two seconds of budget left
+    // is how a bounded request becomes an unbounded one.
+    if (deadline?.expired()) {
+      throw lastError || new AIError('Ran out of time before any model answered.', {
+        provider: 'openrouter',
+        retryable: false
+      });
+    }
+
     try {
       const systemContent = schema
-        ? `${system || ''}\n${schemaInstruction(schema, name)}`.trim()
+        ? `${system || ''}\n${schemaInstruction(schema, name, example)}`.trim()
         : system;
 
       const body = {
@@ -299,9 +430,15 @@ async function callOpenRouter({ system, messages, schema, name, temperature }) {
         body.response_format = { type: 'json_object' };
       }
 
-      const response = await postJson(`${OPENROUTER_BASE}/chat/completions`, body, {
+      if (webSearch && config.openRouterWebSearchEnabled) {
+        body.tools = [config.openRouterWebTools.search];
+      }
+
+      const payload = await postJson(`${OPENROUTER_BASE}/chat/completions`, body, {
         provider: 'openrouter',
         model,
+        timeoutMs: budgetFor(timeoutMs, deadline),
+        parse: true,
         headers: {
           Authorization: `Bearer ${config.openRouterApiKey}`,
           'HTTP-Referer': config.openRouterSiteUrl,
@@ -309,9 +446,10 @@ async function callOpenRouter({ system, messages, schema, name, temperature }) {
         }
       });
 
-      const payload = await response.json();
-      const text = payload?.choices?.[0]?.message?.content;
-      if (!text) {
+      const message = payload?.choices?.[0]?.message;
+      const text = message?.content || message?.reasoning;
+
+      if (!text && !message?.tool_calls) {
         throw new AIError(`OpenRouter model ${model} returned empty content.`, {
           provider: 'openrouter',
           model,
@@ -324,12 +462,22 @@ async function callOpenRouter({ system, messages, schema, name, temperature }) {
         console.log(`[SETU AI] OpenRouter active model locked in: ${model}`);
       }
 
-      return text;
+      if (withSources) {
+        const sources = readOpenRouterSources(payload, text || '');
+        return { text: text || '', sources };
+      }
+
+      return text || '';
     } catch (error) {
       lastError = error;
 
-      // If rate limited, credit exhausted, unavailable, or 5xx: mark cooldown and try next model
+      // Rate limited, out of credit, unavailable, 5xx, or simply too slow:
+      // mark a cooldown and try the next model. Timeouts belong in this list —
+      // a model that cannot answer inside the budget will not answer inside
+      // the budget on the next attempt either, and retrying it burns the whole
+      // deadline on one bad endpoint.
       if (
+        error.timedOut ||
         error.status === 429 ||
         error.status === 402 ||
         error.status === 404 ||
@@ -481,7 +629,16 @@ function readGeminiSources(payload) {
     .slice(0, 12);
 }
 
-async function callGemini({ system, messages, schema, temperature, grounded, withSources = false }) {
+async function callGemini({
+  system,
+  messages,
+  schema,
+  temperature,
+  timeoutMs,
+  deadline,
+  grounded,
+  withSources = false
+}) {
   if (!config.geminiApiKey) throw new AIError('No Gemini API key configured.', { provider: 'gemini' });
 
   const chain = geminiChain();
@@ -489,13 +646,19 @@ async function callGemini({ system, messages, schema, temperature, grounded, wit
   let lastError;
 
   for (const model of chain) {
+    if (deadline?.expired()) {
+      throw lastError || new AIError('Ran out of time before any model answered.', {
+        provider: 'gemini',
+        retryable: false
+      });
+    }
+
     try {
-      const response = await postJson(
+      const payload = await postJson(
         `${GEMINI_BASE}/models/${model}:generateContent?key=${config.geminiApiKey}`,
         body,
-        { provider: 'gemini', model }
+        { provider: 'gemini', model, timeoutMs: budgetFor(timeoutMs, deadline), parse: true }
       );
-      const payload = await response.json();
       const text = readGeminiText(payload);
       if (!text) throw new AIError('Gemini returned no text.', { provider: 'gemini', model, retryable: true });
 
@@ -507,7 +670,8 @@ async function callGemini({ system, messages, schema, temperature, grounded, wit
     } catch (error) {
       lastError = error;
 
-      if (error.status === 404 || error.status === 400) {
+      if (error.status === 404 || error.status === 400 || error.timedOut) {
+        if (error.timedOut) exhaustedUntil.set(model, Date.now() + 45000);
         if (resolvedGeminiModel === model) resolvedGeminiModel = null;
         continue;
       }
@@ -581,7 +745,7 @@ async function* streamGemini({ system, messages, temperature }) {
 /* 3. OpenAI Direct (Tertiary Fallback)                                       */
 /* -------------------------------------------------------------------------- */
 
-async function callOpenAI({ system, messages, schema, name, temperature }) {
+async function callOpenAI({ system, messages, schema, name, temperature, timeoutMs, deadline }) {
   if (!config.openAiApiKey) throw new AIError('No OpenAI API key configured.', { provider: 'openai' });
 
   const body = {
@@ -597,13 +761,15 @@ async function callOpenAI({ system, messages, schema, name, temperature }) {
     };
   }
 
-  const response = await postJson(`${OPENAI_BASE}/chat/completions`, body, {
+  const payload = await postJson(`${OPENAI_BASE}/chat/completions`, body, {
     provider: 'openai',
     model: config.openAiModel,
+    timeoutMs: budgetFor(timeoutMs, deadline),
+    parse: true,
     headers: { Authorization: `Bearer ${config.openAiApiKey}` }
   });
 
-  const text = (await response.json())?.choices?.[0]?.message?.content;
+  const text = payload?.choices?.[0]?.message?.content;
   if (!text) throw new AIError('OpenAI returned no content.', { provider: 'openai', retryable: true });
   return text;
 }
@@ -661,12 +827,37 @@ function normalizeMessages(input, messages) {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
+ * Per-stage timing, behind SETU_AI_TRACE=1.
+ *
+ * Latency here is almost never in the place it looks like it is: the visible
+ * symptom is one slow request, and the cause is a chain walk, a retry backoff,
+ * or a provider that fails slowly. Timing the stages is the only way to tell
+ * those apart, and guessing wasted more time than building this did.
+ */
+const TRACE = process.env.SETU_AI_TRACE === '1';
+let traceStart = 0;
+
+function trace(message) {
+  if (!TRACE) return;
+  if (!traceStart) traceStart = Date.now();
+  console.log(`[ai-trace +${((Date.now() - traceStart) / 1000).toFixed(1)}s] ${message}`);
+}
+
+/**
  * Runs `attempt` across the provider hierarchy:
  *  1. OpenRouter (Primary with multi-model fallback chain)
  *  2. Gemini (Secondary with multi-model fallback chain)
  *  3. OpenAI (Tertiary)
+ *
+ * `maxRetries` is a per-call budget rather than a global constant because the
+ * two kinds of work here want opposite things. A background research pass
+ * should keep trying — it has nobody waiting on it. An in-page explanation has
+ * a human staring at a panel, and four attempts across three providers, each
+ * walking a five-model chain, is the difference between "slow" and "the
+ * extension is broken". Interactive callers pass a small budget and fall back
+ * to the in-page engine instead.
  */
-async function withProviders(attempt) {
+async function withProviders(attempt, { maxRetries = config.aiMaxRetries, deadlineMs } = {}) {
   const providers = [];
   if (config.openRouterApiKey) providers.push('openrouter');
   if (config.geminiApiKey) providers.push('gemini');
@@ -677,19 +868,35 @@ async function withProviders(attempt) {
   }
 
   const errors = [];
+  const budget = Math.max(0, Number(maxRetries) || 0);
+  const deadline = makeDeadline(deadlineMs);
 
   for (const provider of providers) {
-    for (let tryIndex = 0; tryIndex <= config.aiMaxRetries; tryIndex += 1) {
-      try {
-        return await attempt(provider);
-      } catch (error) {
-        errors.push(error);
-        if (!error.retryable || tryIndex === config.aiMaxRetries) break;
+    for (let tryIndex = 0; tryIndex <= budget; tryIndex += 1) {
+      if (deadline.expired()) {
+        throw new AIError(
+          `The AI providers did not answer within ${Math.round(deadlineMs / 1000)}s.`,
+          { retryable: false, status: 504 }
+        );
+      }
 
-        const wait = error.retryAfterMs
-          ? Math.min(error.retryAfterMs, config.maxRetryWaitMs)
-          : 400 * 2 ** tryIndex;
-        await sleep(wait);
+      try {
+        trace(`attempt ${provider} #${tryIndex} (deadline in ${Math.round(deadline.remaining() / 1000)}s)`);
+        const value = await attempt(provider, deadline);
+        trace(`attempt ${provider} #${tryIndex} succeeded`);
+        return value;
+      } catch (error) {
+        trace(`attempt ${provider} #${tryIndex} failed: ${error.message.slice(0, 90)}`);
+        errors.push(error);
+        if (!error.retryable || tryIndex === budget) break;
+
+        const wait = Math.min(
+          error.retryAfterMs ? Math.min(error.retryAfterMs, config.maxRetryWaitMs) : 400 * 2 ** tryIndex,
+          // Never sleep past the deadline — that time belongs to the caller.
+          Math.max(0, deadline.remaining() - 500)
+        );
+        trace(`backing off ${wait}ms`);
+        if (wait > 0) await sleep(wait);
       }
     }
   }
@@ -732,57 +939,128 @@ function findContractViolation(value, schema) {
   return null;
 }
 
-/** Structured JSON generation against a schema. */
-async function requestStructuredAI({ name, schema, instructions, input, messages, temperature = 0.3 }) {
+/**
+ * Structured JSON generation against a schema.
+ *
+ * @param {(parsed: object) => (string|null)} [options.validate] caller-supplied
+ *   contract check, returning a description of what is wrong or null. This
+ *   belongs here rather than at the call site for two reasons: a rejected
+ *   response must not be written to the cache (or every later attempt is
+ *   served the same bad answer instantly), and it must count as a failure the
+ *   retry-and-fallback machinery can act on.
+ */
+async function requestStructuredAI({
+  name,
+  schema,
+  instructions,
+  input,
+  messages,
+  example,
+  validate,
+  temperature = 0.3,
+  timeoutMs,
+  maxRetries,
+  deadlineMs
+}) {
   const chat = normalizeMessages(input, messages);
   const cacheKey = getCacheKey('struct', { name, schema, instructions, chat, temperature });
   const cached = getFromCache(cacheKey);
   if (cached) return cached;
 
-  const result = await withProviders(async (provider) => {
-    let raw;
-    if (provider === 'openrouter') {
-      raw = await callOpenRouter({ system: instructions, messages: chat, schema, name, temperature });
-    } else if (provider === 'gemini') {
-      raw = await callGemini({ system: instructions, messages: chat, schema, temperature });
-    } else {
-      raw = await callOpenAI({ system: instructions, messages: chat, schema, name, temperature });
-    }
+  const result = await withProviders(
+    async (provider, deadline) => {
+      let raw;
+      if (provider === 'openrouter') {
+        raw = await callOpenRouter({
+          system: instructions, messages: chat, schema, name, example, temperature, timeoutMs, deadline
+        });
+      } else if (provider === 'gemini') {
+        raw = await callGemini({
+          system: instructions, messages: chat, schema, temperature, timeoutMs, deadline
+        });
+      } else {
+        raw = await callOpenAI({
+          system: instructions, messages: chat, schema, name, temperature, timeoutMs, deadline
+        });
+      }
 
-    const parsed = parseJsonLoose(raw);
+      const parsed = parseJsonLoose(raw);
+      const violation = findContractViolation(parsed, schema) || validate?.(parsed) || null;
 
-    const violation = findContractViolation(parsed, schema);
-    if (violation) {
-      // Retryable: the retry loop gets another sample, then the next provider.
-      throw new AIError(`${provider} returned an off-contract response — ${violation}.`, {
-        provider,
-        retryable: true
-      });
-    }
+      if (violation) {
+        // Skip whichever model produced this for a while. Without it, a model
+        // that reliably returns the right keys and empty arrays — which the
+        // small free ones do — is retried into the same failure and the rest
+        // of the chain is never reached.
+        penaliseCurrentModel(provider);
 
-    return parsed;
-  });
+        // Retryable: the retry loop gets another sample from another model,
+        // then the next provider.
+        throw new AIError(`${provider} returned an off-contract response — ${violation}.`, {
+          provider,
+          retryable: true
+        });
+      }
+
+      return parsed;
+    },
+    { maxRetries, deadlineMs }
+  );
 
   setToCache(cacheKey, result);
   return result;
 }
 
+/**
+ * Take the model that just answered out of rotation briefly.
+ *
+ * Model selection is sticky — the chain remembers whichever model last worked
+ * and tries it first — which is right for latency and wrong when that model is
+ * producing well-formed rubbish. This unsticks it.
+ */
+const OFF_CONTRACT_COOLDOWN_MS = 90000;
+
+function penaliseCurrentModel(provider) {
+  if (provider === 'openrouter' && resolvedOpenRouterModel) {
+    exhaustedUntil.set(resolvedOpenRouterModel, Date.now() + OFF_CONTRACT_COOLDOWN_MS);
+    console.warn(
+      `[SETU AI] OpenRouter model "${resolvedOpenRouterModel}" returned an unusable structure — ` +
+        'trying the next model in the chain.'
+    );
+    resolvedOpenRouterModel = null;
+  } else if (provider === 'gemini' && resolvedGeminiModel) {
+    exhaustedUntil.set(resolvedGeminiModel, Date.now() + OFF_CONTRACT_COOLDOWN_MS);
+    resolvedGeminiModel = null;
+  }
+}
+
 /** Free-form prose generation. */
-async function requestText({ instructions, input, messages, temperature = 0.7 }) {
+async function requestText({
+  instructions,
+  input,
+  messages,
+  temperature = 0.7,
+  timeoutMs,
+  maxRetries,
+  deadlineMs
+}) {
   const chat = normalizeMessages(input, messages);
   const cacheKey = getCacheKey('text', { instructions, chat, temperature });
   const cached = getFromCache(cacheKey);
   if (cached) return cached;
 
-  const result = await withProviders(async (provider) => {
-    if (provider === 'openrouter') {
-      return callOpenRouter({ system: instructions, messages: chat, temperature });
-    } else if (provider === 'gemini') {
-      return callGemini({ system: instructions, messages: chat, temperature });
-    } else {
-      return callOpenAI({ system: instructions, messages: chat, temperature });
-    }
-  });
+  const result = await withProviders(
+    async (provider, deadline) => {
+      if (provider === 'openrouter') {
+        return callOpenRouter({ system: instructions, messages: chat, temperature, timeoutMs, deadline });
+      } else if (provider === 'gemini') {
+        return callGemini({ system: instructions, messages: chat, temperature, timeoutMs, deadline });
+      } else {
+        return callOpenAI({ system: instructions, messages: chat, temperature, timeoutMs, deadline });
+      }
+    },
+    { maxRetries, deadlineMs }
+  );
 
   setToCache(cacheKey, result);
   return result;
@@ -797,7 +1075,27 @@ async function requestResearch({ instructions, input, messages, temperature = 0.
   const cached = getFromCache(cacheKey);
   if (cached) return cached;
 
-  // If Gemini direct is configured and has search grounding:
+  // 1. OpenRouter (Primary Provider with real-time web search tool)
+  if (config.openRouterApiKey && config.openRouterWebSearchEnabled) {
+    try {
+      const { text, sources } = await callOpenRouter({
+        system: instructions,
+        messages: chat,
+        temperature,
+        webSearch: true,
+        withSources: true
+      });
+      if (text) {
+        const res = { text, sources: sources || [], grounded: true };
+        setToCache(cacheKey, res);
+        return res;
+      }
+    } catch (error) {
+      console.warn('[SETU AI] OpenRouter web search research failed, falling back to next provider:', error.message);
+    }
+  }
+
+  // 2. Google Gemini Direct (Secondary Provider with search grounding)
   if (config.geminiApiKey) {
     try {
       const { text, sources } = await callGemini({
@@ -807,14 +1105,15 @@ async function requestResearch({ instructions, input, messages, temperature = 0.
         grounded: true,
         withSources: true
       });
-      const res = { text, sources, grounded: true };
+      const res = { text, sources: sources || [], grounded: true };
       setToCache(cacheKey, res);
       return res;
     } catch (error) {
-      console.warn('[SETU AI] Gemini grounded research unavailable, falling back to OpenRouter/Model knowledge:', error.message);
+      console.warn('[SETU AI] Gemini grounded research unavailable, falling back to model knowledge:', error.message);
     }
   }
 
+  // 3. Model knowledge fallback
   const text = await requestText({ instructions, messages: chat, temperature });
   const res = { text, sources: [], grounded: false };
   setToCache(cacheKey, res);
@@ -854,16 +1153,29 @@ async function* streamText({ instructions, input, messages, temperature = 0.7 })
 /**
  * Describe an image (chart, document screenshot, visual graphic) in plain language.
  */
-async function describeImage({ imageBase64, mimeType = 'image/jpeg', instructions, prompt }) {
+async function describeImage({
+  imageBase64,
+  mimeType = 'image/jpeg',
+  instructions,
+  prompt,
+  timeoutMs,
+  deadlineMs
+}) {
   const cacheKey = getCacheKey('img', { mimeType, prompt, instructions, len: imageBase64?.length, slice: imageBase64?.slice(0, 100) });
   const cached = getFromCache(cacheKey);
   if (cached) return cached;
 
+  // Vision calls are the slowest thing this service does and the most likely
+  // to be attempted against a model that cannot do them at all, so the whole
+  // walk is bounded rather than each hop.
+  const deadline = makeDeadline(deadlineMs);
+
   if (config.openRouterApiKey) {
     const chain = openRouterChain();
     for (const model of chain) {
+      if (deadline.expired()) break;
       try {
-        const response = await postJson(
+        const payload = await postJson(
           `${OPENROUTER_BASE}/chat/completions`,
           {
             model,
@@ -882,6 +1194,8 @@ async function describeImage({ imageBase64, mimeType = 'image/jpeg', instruction
           {
             provider: 'openrouter',
             model,
+            timeoutMs: budgetFor(timeoutMs, deadline),
+            parse: true,
             headers: {
               Authorization: `Bearer ${config.openRouterApiKey}`,
               'HTTP-Referer': config.openRouterSiteUrl,
@@ -890,7 +1204,7 @@ async function describeImage({ imageBase64, mimeType = 'image/jpeg', instruction
           }
         );
 
-        const text = (await response.json())?.choices?.[0]?.message?.content;
+        const text = payload?.choices?.[0]?.message?.content;
         if (text) {
           resolvedOpenRouterModel = model;
           setToCache(cacheKey, text);
@@ -908,8 +1222,9 @@ async function describeImage({ imageBase64, mimeType = 'image/jpeg', instruction
   if (config.geminiApiKey) {
     const chain = geminiChain();
     for (const model of chain) {
+      if (deadline.expired()) break;
       try {
-        const response = await postJson(
+        const payload = await postJson(
           `${GEMINI_BASE}/models/${model}:generateContent?key=${config.geminiApiKey}`,
           {
             contents: [
@@ -921,10 +1236,10 @@ async function describeImage({ imageBase64, mimeType = 'image/jpeg', instruction
             systemInstruction: { parts: [{ text: instructions }] },
             generationConfig: { temperature: 0.3 }
           },
-          { provider: 'gemini', model }
+          { provider: 'gemini', model, timeoutMs: budgetFor(timeoutMs, deadline), parse: true }
         );
 
-        const text = readGeminiText(await response.json());
+        const text = readGeminiText(payload);
         if (text) {
           resolvedGeminiModel = model;
           setToCache(cacheKey, text);
@@ -940,8 +1255,8 @@ async function describeImage({ imageBase64, mimeType = 'image/jpeg', instruction
     }
   }
 
-  if (config.openAiApiKey) {
-    const response = await postJson(
+  if (config.openAiApiKey && !deadline.expired()) {
+    const payload = await postJson(
       `${OPENAI_BASE}/chat/completions`,
       {
         model: config.openAiModel,
@@ -957,10 +1272,16 @@ async function describeImage({ imageBase64, mimeType = 'image/jpeg', instruction
         ],
         temperature: 0.3
       },
-      { provider: 'openai', model: config.openAiModel, headers: { Authorization: `Bearer ${config.openAiApiKey}` } }
+      {
+        provider: 'openai',
+        model: config.openAiModel,
+        timeoutMs: budgetFor(timeoutMs, deadline),
+        parse: true,
+        headers: { Authorization: `Bearer ${config.openAiApiKey}` }
+      }
     );
 
-    const text = (await response.json())?.choices?.[0]?.message?.content;
+    const text = payload?.choices?.[0]?.message?.content;
     if (text) {
       setToCache(cacheKey, text);
       return text;

@@ -18,6 +18,8 @@ import * as Haptics from 'expo-haptics';
 import { MindMapNode, PlacedNode } from '../types';
 import { layoutTree } from '../utils/layout';
 import { COLORS, PLATE_COLORS, RADIUS, SHADOWS, SPACING } from '../constants/theme';
+import { Palette } from '../constants/themes';
+import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
 import { Text } from './Typography';
 import { BionicText } from './BionicText';
 
@@ -37,6 +39,8 @@ export const MindMapCanvas: React.FC<MindMapCanvasProps> = ({
   onSelectNode,
   onToggleCollapse,
 }) => {
+  const COLORS = useThemeColors();
+  const styles = useThemedStyles(makeStyles);
   const { nodes, edges, width, height } = useMemo(() => {
     return layoutTree(rootNode, collapsedIds);
   }, [rootNode, collapsedIds]);
@@ -178,23 +182,24 @@ export const MindMapCanvas: React.FC<MindMapCanvasProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
   outerContainer: {
     flex: 1,
-    backgroundColor: COLORS.surface,
+    backgroundColor: t.surface,
     borderRadius: RADIUS.lg,
     borderWidth: 1,
-    borderColor: COLORS.dividerSubtle,
+    borderColor: t.dividerSubtle,
     overflow: 'hidden',
     minHeight: 360,
   },
   canvasSurface: {
     position: 'relative',
-    backgroundColor: COLORS.surface,
+    backgroundColor: t.surface,
   },
   nodeBox: {
     position: 'absolute',
-    backgroundColor: COLORS.bg,
+    backgroundColor: t.bg,
     borderRadius: RADIUS.sm,
     borderLeftWidth: 3.5,
     paddingHorizontal: SPACING.sm + 2,
@@ -204,12 +209,12 @@ const styles = StyleSheet.create({
   },
   nodeUnselected: {
     borderWidth: 1,
-    borderColor: COLORS.dividerSubtle,
+    borderColor: t.dividerSubtle,
   },
   nodeSelected: {
     borderWidth: 2,
-    borderColor: COLORS.cyan,
-    shadowColor: COLORS.cyan,
+    borderColor: t.cyan,
+    shadowColor: t.cyan,
     shadowOpacity: 0.3,
     shadowRadius: 6,
     elevation: 3,
@@ -236,11 +241,11 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   toggleBadgeCollapsed: {
-    backgroundColor: COLORS.cyan,
-    borderColor: COLORS.cyan,
+    backgroundColor: t.cyan,
+    borderColor: t.cyan,
   },
   toggleBadgeOpen: {
-    backgroundColor: COLORS.bg,
+    backgroundColor: t.bg,
   },
   toggleBadgeText: {
     fontSize: 10,

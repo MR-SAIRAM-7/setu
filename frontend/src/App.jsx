@@ -6,15 +6,42 @@ import Modes from './pages/Modes';
 import Settings from './pages/Settings';
 import Landing from './pages/Landing';
 import Onboarding from './pages/Onboarding';
+import Listen from './pages/Listen';
+import Momentum from './pages/Momentum';
 import CommandPalette from './components/CommandPalette';
 import BreakDialog from './components/BreakDialog';
 import ReadingRuler from './components/ReadingRuler';
-import { api } from './lib/api';
+import RewardToast from './components/RewardToast';
+import ParkingLot from './components/ParkingLot';
+import MomentumRail from './components/MomentumRail';
+import { api, setApiLanguage } from './lib/api';
 import { applyPrefs, getPrefs, savePrefs } from './lib/storage';
+import { award, mergeServerProgress } from './lib/progress';
+import { tts } from './lib/tts';
 
 export default function App() {
   useEffect(() => {
     applyPrefs();
+
+    // Hand the saved voice, pace, and language to the speech and API layers
+    // before anything can ask them to speak or think, so the first utterance
+    // already sounds right and the first answer comes back in the right tongue.
+    const prefs = getPrefs();
+    if (prefs.voice) tts.setSpeaker(prefs.voice);
+    tts.setRate(prefs.speechRate || 1);
+    tts.setLanguage(prefs.language || 'en-IN');
+    setApiLanguage(prefs.language || 'en-IN');
+    document.documentElement.lang = prefs.language || 'en-IN';
+
+    // Top up local progress from the server copy once at boot, so a streak
+    // built on another device is not silently restarted here.
+    let cancelled = false;
+    api.getProgress().then((result) => {
+      if (!cancelled && result?.progress) mergeServerProgress(result.progress);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (
@@ -67,6 +94,9 @@ function AppRoot() {
             clearInterval(timerRef.current);
             setFocusRunning(false);
             setBreakOpen(true);
+            // Sitting through a whole session is the single most effortful
+            // thing the app asks for, so it is the largest single award.
+            award('focusSession');
             return 25 * 60;
           }
           return prev - 1;
@@ -126,6 +156,8 @@ function AppRoot() {
                 <Route path="/mindmap" element={<MindMapChat />} />
                 <Route path="/library" element={<Library />} />
                 <Route path="/modes" element={<Modes />} />
+                <Route path="/listen" element={<Listen />} />
+                <Route path="/momentum" element={<Momentum />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
@@ -157,6 +189,12 @@ function AppRoot() {
         onKeepGoing={handleBreakKeepGoing}
         onTakeFive={handleBreakTakeFive}
       />
+
+      {/* Global working-memory offload and reward notifications. Kept outside the
+          Shell so they survive route changes and are reachable from the landing
+          and onboarding screens too. */}
+      {!isLandingOrOnboarding && <ParkingLot />}
+      <RewardToast />
     </>
   );
 }
@@ -168,8 +206,9 @@ function RootRedirect() {
 const NAV = [
   { to: '/mindmap', label: 'Mind Map', icon: 'ph-graph', hint: 'Ask anything, get a map' },
   { to: '/library', label: 'Library', icon: 'ph-books', hint: 'Saved maps & documents' },
-  { to: '/modes', label: 'Modes', icon: 'ph-squares-four', hint: 'Seven cognitive tools' },
-  { to: '/settings', label: 'Settings', icon: 'ph-gear', hint: 'Dyslexia & ADHD controls' }
+  { to: '/modes', label: 'Modes', icon: 'ph-squares-four', hint: 'Eight cognitive tools' },
+  { to: '/listen', label: 'Listen', icon: 'ph-heart', hint: 'Somewhere to put it' },
+  { to: '/settings', label: 'Settings', icon: 'ph-gear', hint: 'Reading & focus controls' }
 ];
 
 function Shell({
@@ -275,7 +314,7 @@ function Shell({
 
           {/* Quick Sensory / Focus Tools in Sidebar */}
           <div className="pt-2 px-3 space-y-1">
-            <span className="kicker text-[9.5px] px-1">ADHD Focus Guide</span>
+            <span className="kicker text-[9.5px] px-1">Focus Tools</span>
             <button
               onClick={onToggleRuler}
               className={`w-full flex items-center justify-between p-2 rounded-[var(--radius-md)] border text-xs font-semibold transition-colors ${
@@ -347,6 +386,9 @@ function Shell({
             </button>
           </div>
         </div>
+
+        {/* Reward progress summary */}
+        <MomentumRail />
 
         {/* Engine & MongoDB Status Badge */}
         <div className="border-t border-[var(--color-divider)] p-3 bg-[var(--color-surface)]">

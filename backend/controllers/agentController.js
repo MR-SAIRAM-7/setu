@@ -83,6 +83,125 @@ async function handleExplain(req, res, next) {
   }
 }
 
+/**
+ * POST /api/agent/explain/stream — the same explanation, as server-sent events.
+ *
+ * Free models take 20-40 seconds to finish a paragraph and about a second to
+ * start one. Streaming spends that difference on the reader already reading
+ * rather than on a spinner, which is the whole of the perceived-latency win.
+ *
+ * Errors are delivered *inside* the stream once the headers are out, because by
+ * then it is far too late for a status code.
+ */
+async function handleExplainStream(req, res) {
+  const text = String(req.body.text || '').trim();
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    // Render and most reverse proxies buffer responses by default, which would
+    // hold every token until the stream closed and defeat the entire point.
+    'X-Accel-Buffering': 'no'
+  });
+  res.flushHeaders?.();
+
+  const send = (payload) => res.write(`data: ${JSON.stringify(payload)}\n\n`);
+
+  if (!text) {
+    send({ error: 'Text to explain is required.', code: 'request' });
+    return res.end();
+  }
+
+  // A disconnected client must not leave a model call running to completion.
+  let aborted = false;
+  req.on('close', () => {
+    aborted = true;
+  });
+
+  try {
+    if (!config.aiEnabled) {
+      send({ text: fallbacks.generateLocalSimplifyMode(text).plainLanguageRewrite });
+      send({ done: true, fallback: true });
+      return res.end();
+    }
+
+    for await (const chunk of agent.streamExplanation({
+      text,
+      language: req.body.language || 'English',
+      style: req.body.style || 'plain'
+    })) {
+      if (aborted) break;
+      send({ text: chunk });
+    }
+
+    if (!aborted) {
+      res.write('data: [DONE]\n\n');
+    }
+  } catch (error) {
+    console.warn('[SETU Agent] Streamed explanation failed, sending local rewrite:', error.message);
+    if (!aborted) {
+      // Falling back mid-stream is better than ending on an error: the reader
+      // still gets something usable, clearly labelled as the offline engine.
+      send({ text: fallbacks.generateLocalSimplifyMode(text).plainLanguageRewrite });
+      send({ done: true, fallback: true, fallbackReason: error.message });
+    }
+  } finally {
+    res.end();
+  }
+}
+
+/**
+ * POST /api/agent/visualize — turn a chart, table, or dense section into a
+ * structure the client can draw.
+ *
+ * Accepts `text` or `image`. The answer is data, not prose, because the client
+ * renders it as a mind map, a flow, or a redrawn chart in the reader's own
+ * palette — which is the accommodation. A paragraph describing a diagram is
+ * still a paragraph.
+ */
+async function handleVisualize(req, res, next) {
+  try {
+    const text = String(req.body.text || '').trim();
+    const image = String(req.body.image || '');
+
+    if (!text && !image) {
+      return res.status(400).json({ error: 'Text or an image is required.' });
+    }
+
+    if (!config.aiEnabled) {
+      return res.status(503).json({
+        error: 'Mapping needs an AI provider configured on the server.',
+        fallbackToLocal: true
+      });
+    }
+
+    // Accept either a bare base64 payload or a full data: URL.
+    const match = image.match(/^data:([^;]+);base64,(.*)$/);
+
+    const map = await agent.visualiseContent({
+      text,
+      imageBase64: match ? match[2] : image,
+      mimeType: match ? match[1] : req.body.mimeType || 'image/jpeg',
+      context: String(req.body.context || '').slice(0, 600),
+      language: req.body.language || 'English'
+    });
+
+    res.json({ ...map, fallback: false });
+  } catch (error) {
+    // A model that could not produce a usable structure is a normal outcome on
+    // free tiers, not a server fault. Say so with a status the client can route
+    // to its own in-page fallback map.
+    if (error.emptyMap || /JSON|contract|empty|rate limit|quota/i.test(error.message || '')) {
+      return res.status(503).json({
+        error: 'The AI could not produce a usable map for this. Try a smaller selection.',
+        fallbackToLocal: true
+      });
+    }
+    next(error);
+  }
+}
+
 /** POST /api/agent/chunk — collapse a dense page into 3 calm steps. */
 async function handleChunkPage(req, res, next) {
   try {
@@ -161,4 +280,11 @@ async function handleDescribeImage(req, res, next) {
   }
 }
 
-module.exports = { handleAgentPlan, handleExplain, handleChunkPage, handleDescribeImage };
+module.exports = {
+  handleAgentPlan,
+  handleExplain,
+  handleExplainStream,
+  handleVisualize,
+  handleChunkPage,
+  handleDescribeImage
+};

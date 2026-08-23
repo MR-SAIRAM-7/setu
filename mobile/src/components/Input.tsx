@@ -11,6 +11,8 @@ import {
   ViewStyle,
 } from 'react-native';
 import { COLORS, RADIUS, SPACING } from '../constants/theme';
+import { Palette } from '../constants/themes';
+import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
 import { Text } from './Typography';
 import { useAccessibility } from '../context/AccessibilityContext';
 
@@ -35,6 +37,8 @@ export const Input: React.FC<InputProps> = ({
   numberOfLines = 1,
   ...rest
 }) => {
+  const COLORS = useThemeColors();
+  const styles = useThemedStyles(makeStyles);
   const [isFocused, setIsFocused] = useState(false);
   const { font } = useAccessibility();
 
@@ -93,7 +97,8 @@ export const Input: React.FC<InputProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
   wrapper: {
     marginBottom: SPACING.md,
   },
@@ -103,18 +108,18 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.bg,
+    backgroundColor: t.bg,
     borderWidth: 1.5,
-    borderColor: COLORS.divider,
+    borderColor: t.divider,
     borderRadius: RADIUS.sm,
     paddingHorizontal: SPACING.md,
     minHeight: 48,
   },
   focused: {
-    borderColor: COLORS.cyan,
+    borderColor: t.cyan,
   },
   errorBorder: {
-    borderColor: COLORS.magenta,
+    borderColor: t.magenta,
   },
   leading: {
     marginRight: SPACING.sm,
@@ -125,7 +130,7 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontSize: 16,
-    color: COLORS.text,
+    color: t.text,
     paddingVertical: SPACING.sm,
   },
   multiline: {

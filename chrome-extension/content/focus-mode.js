@@ -13,7 +13,7 @@
  */
 
 (() => {
-  const { Feature, UI, Store, Text } = window.SETU;
+  const { Feature, UI, Store, Text, Scroll, icon } = window.SETU;
 
   /** Tags carried into the reader. Everything else is unwrapped or dropped. */
   const KEEP = new Set([
@@ -44,8 +44,11 @@
     onEnable() {
       const article = this.extract();
       if (!article) {
-        UI.toast('No readable article found on this page.', { tone: 'warn' });
-        throw new Error('no-content');
+        // The message is the error, because the orchestrator surfaces
+        // error.message to the user — "no-content" told them nothing.
+        throw new Error(
+          'Focus Mode needs an article to read, and this page does not have one it can find.'
+        );
       }
 
       this.fontScale = Store.getSetting('fontScale') || 1;
@@ -63,6 +66,39 @@
 
     onDisable() {
       UI.destroyHost('focus');
+      this.scope = null;
+      this.surface = null;
+    }
+
+    /**
+     * A single-page app replaced the article without a document load.
+     *
+     * Common enough to matter: every news site, every docs site, and every
+     * React router does it. Without this the reader kept showing the previous
+     * article while the page underneath had moved on — and because the reader
+     * covers the viewport, there was no way to tell from the outside.
+     *
+     * A failed re-extract keeps what is on screen. The new view may simply not
+     * have rendered yet, and replacing a readable article with an error would
+     * be a worse answer than being one navigation behind.
+     */
+    onNavigate() {
+      const article = this.extract();
+      if (!article) return;
+
+      const previousTheme = this.reader?.dataset.theme;
+      UI.destroyHost('focus');
+      this.runCleanups();
+      this.build(article);
+      if (previousTheme) this.reader.dataset.theme = previousTheme;
+
+      // build() re-locks scrolling and re-claims the surface through cleanups,
+      // which runCleanups() has just released.
+      this.previousOverflow = document.documentElement.style.overflow;
+      document.documentElement.style.overflow = 'hidden';
+      this.cleanup(() => {
+        document.documentElement.style.overflow = this.previousOverflow;
+      });
     }
 
     /* ------------------------------------------------------------------ */
@@ -186,11 +222,11 @@
           <header class="bar">
             <span class="brand">SETU · Focus</span>
             <div class="tools">
-              <button class="setu-btn" data-act="font-down" aria-label="Smaller text">A−</button>
-              <button class="setu-btn" data-act="font-up" aria-label="Larger text">A+</button>
-              <button class="setu-btn" data-act="theme">Theme</button>
-              <button class="setu-btn" data-act="tts" aria-label="Read aloud">Read aloud</button>
-              <button class="setu-btn" data-variant="danger" data-act="close" aria-label="Close Focus Mode">Esc</button>
+              <button class="setu-btn" data-act="font-down" aria-label="Smaller text" title="Smaller text">${icon('minus', { size: 16 })}<span class="a">A</span></button>
+              <button class="setu-btn" data-act="font-up" aria-label="Larger text" title="Larger text">${icon('plus', { size: 16 })}<span class="a">A</span></button>
+              <button class="setu-btn" data-act="theme">${icon('palette', { size: 16 })}Theme</button>
+              <button class="setu-btn" data-act="tts" aria-label="Read aloud">${icon('speaker-high', { size: 16 })}Read aloud</button>
+              <button class="setu-btn" data-variant="danger" data-act="close" aria-label="Close Focus Mode">${icon('x', { size: 16 })}Close</button>
             </div>
           </header>
           <main class="surface" tabindex="0">
@@ -231,6 +267,12 @@
         scope.querySelector('.progress-fill').style.width = `${Math.min(100, pct)}%`;
       });
 
+      // The reader is its own scroll container, so `window.scrollBy` does
+      // nothing here — which used to mean turning Focus Mode on silently
+      // killed Auto Scroll, Gaze Scroll, and read-aloud's follow-along. The
+      // arbiter routes all three to whatever surface is actually on top.
+      this.cleanup(Scroll.claim(this.surface, 10));
+
       this.surface.focus();
     }
 
@@ -260,8 +302,8 @@
         }
         .reader[data-theme="calm"]     { --page:#f3f2f2; --ink:#201e1d; --muted:rgba(32,30,29,0.65); --rule:rgba(32,30,29,0.16); }
         .reader[data-theme="sepia"]    { --page:#f6ecd9; --ink:#3b3226; --muted:#7a6a53; --rule:rgba(0,0,0,.14); }
-        .reader[data-theme="dark"]     { --page:#201e1d; --ink:#f3f2f2; --muted:#9a9a9a; --rule:rgba(255,255,255,.16); }
-        .reader[data-theme="contrast"] { --page:#000; --ink:#fff; --muted:#edbb00; --rule:#fff; }
+        .reader[data-theme="dark"]     { --page:#18181a; --ink:#f3f2f2; --muted:rgba(243,242,242,0.66); --rule:rgba(243,242,242,0.15); }
+        .reader[data-theme="contrast"] { --page:#0d0d0d; --ink:#fff; --muted:#facc15; --rule:#fff; }
 
         .progress { position:absolute; top:0; left:0; right:0; height:3px; background:transparent; z-index:2; }
         .progress-fill { height:100%; width:0; background:var(--accent); transition:width .1s linear; }
@@ -270,10 +312,11 @@
           display:flex; align-items:center; justify-content:space-between; gap:16px;
           padding:12px 20px; border-bottom:1px solid var(--rule); flex-shrink:0; background: var(--page);
         }
-        .brand { font-size:12px; font-weight:800; letter-spacing:.09em; text-transform: uppercase; color:var(--accent-700); }
-        .tools { display:flex; gap:7px; flex-wrap:wrap; }
-        .tools .setu-btn { min-height:32px; padding:5px 11px; font-size:12px; background:transparent; border-color:var(--rule); color:var(--ink); border-radius: var(--radius); }
-        .tools .setu-btn:hover { background:var(--accent-100); border-color: var(--accent); color: var(--accent-700); }
+        .brand { font-size:10px; font-weight:700; letter-spacing:.08em; text-transform: uppercase; color:var(--accent-700); }
+        .tools { display:flex; gap:8px; flex-wrap:wrap; }
+        .tools .setu-btn { min-height:34px; padding:6px 12px; font-size:13px; gap:6px; background:transparent; border-color:var(--rule); color:var(--ink); border-radius: var(--radius); }
+        .tools .setu-btn:hover { background:var(--accent-100); border-color: var(--accent); color: var(--accent-900); }
+        .tools .a { font-weight: 700; }
 
         .surface { flex:1; overflow-y:auto; padding:48px 24px 120px; }
         .surface:focus-visible { outline:none; }

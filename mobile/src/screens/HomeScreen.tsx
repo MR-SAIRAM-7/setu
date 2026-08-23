@@ -1,12 +1,14 @@
 /**
- * SETU Mobile — Sanctuary Home Dashboard Screen
- * ---------------------------------------------
- * Central launchpad for cognitive accessibility:
- * - Engine status & focus session timer
- * - Instant research prompt with voice input
- * - Camera OCR document scanner
- * - 7 Cognitive Mode quick cards
- * - Recent mind maps library
+ * SETU Mobile — Home.
+ *
+ * The launchpad, ordered by what someone opening the app is most likely to be
+ * in the middle of: ask a question, scan the thing in front of them, pick a
+ * mode, or pick up a map they already made.
+ *
+ * The quick toggles sit near the top on purpose. Whether the ruler or the tint
+ * is on is not a setup decision that gets made once; it changes with the hour,
+ * the light and how tired someone is, and burying it two screens deep means it
+ * simply does not get used.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -32,9 +34,14 @@ import {
   BookOpen,
   Volume2,
   VolumeX,
-  Info,
+  Calculator,
+  Heart,
+  TrendingUp,
+  Flame,
 } from 'lucide-react-native';
 import { COLORS, RADIUS, SPACING, PLATE_COLORS } from '../constants/theme';
+import { Palette } from '../constants/themes';
+import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
 import { Text, Heading, Subheading, Kicker } from '../components/Typography';
 import { Input } from '../components/Input';
 import { Button } from '../components/Button';
@@ -47,85 +54,110 @@ import { useFocus } from '../context/FocusContext';
 import { getSavedMindMaps } from '../services/storage';
 import { MindMapDocument, CognitiveModeKey } from '../types';
 import { tts } from '../services/tts';
+import { getProgress, getRank, subscribeProgress } from '../services/progress';
+import { languageSample } from '../constants/languages';
 import { formatRelativeDate, truncateText } from '../utils/formatters';
 
 export interface HomeScreenProps {
   navigation: any;
 }
 
+type PlateKey = 'cyan' | 'magenta' | 'yellow' | 'ink';
+
 const MODES_PREVIEWS: {
   key: CognitiveModeKey;
   name: string;
   tagline: string;
-  tint: string;
+  tintKey: PlateKey;
   icon: any;
 }[] = [
   {
     key: 'start',
     name: 'Start',
     tagline: 'Break task freeze',
-    tint: COLORS.yellow,
+    tintKey: 'yellow',
     icon: PlayCircle,
   },
   {
     key: 'simplify',
     name: 'Simplify',
     tagline: 'Plain language rewrite',
-    tint: COLORS.cyan,
+    tintKey: 'cyan',
     icon: Waves,
   },
   {
     key: 'learn',
     name: 'Learn',
     tagline: 'Study notes & self-quiz',
-    tint: COLORS.magenta,
+    tintKey: 'magenta',
     icon: GraduationCap,
   },
   {
     key: 'meet',
     name: 'Meet',
     tagline: 'Decisions & action items',
-    tint: COLORS.cyan,
+    tintKey: 'cyan',
     icon: Users,
   },
   {
     key: 'practice',
     name: 'Practice',
     tagline: 'Rehearse conversations',
-    tint: COLORS.magenta,
+    tintKey: 'magenta',
     icon: MessageCircle,
   },
   {
     key: 'write',
     name: 'Write',
     tagline: 'Accessible writing check',
-    tint: COLORS.yellow,
+    tintKey: 'yellow',
     icon: PenTool,
   },
   {
     key: 'guide',
     name: 'Guide',
     tagline: 'Step-by-step workflow',
-    tint: COLORS.ink,
+    tintKey: 'ink',
     icon: Route,
+  },
+  {
+    key: 'numbers',
+    name: 'Numbers',
+    tagline: 'Sums with objects',
+    tintKey: 'magenta',
+    icon: Calculator,
   },
 ];
 
+/**
+ * One line a day, rotated.
+ *
+ * These are the features people do not find on their own — every one of them
+ * came out of watching somebody miss it. Nothing here is a productivity slogan.
+ */
 const TIPS = [
-  "Bionic Reading bolds the first half of every word to guide your eye.",
-  "The 25-minute focus session follows the Pomodoro technique — built for ADHD working memory.",
-  "Use the Reading Ruler to isolate one line at a time.",
-  "Voice input lets you ask questions without typing.",
-  "Every mode has a worked example. Tap any card to see it in action."
+  'Tap the microphone anywhere you can type. Dictation handles all eleven languages.',
+  'The 25-minute focus session keeps running while you use another app.',
+  'The reading ruler isolates one line at a time. It is in Settings, or the ribbon above.',
+  'Tap a mind map branch to hear it read aloud instead of decoding it.',
+  'The pin button parks a thought so you can let go of it and finish what you were doing.',
+  'If text seems to shimmer, try a colour tint in Settings. Which colour helps is personal.',
+  'Every mode opens on a worked example, so no screen is ever blank.',
+  'Numbers mode explains a sum with countable things rather than notation.',
 ];
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
-  const { bionic, readingRuler, toggleBionic, toggleReadingRuler } = useAccessibility();
+  const COLORS = useThemeColors();
+  const styles = useThemedStyles(makeStyles);
+  const { bionic, readingRuler, language, toggleBionic, toggleReadingRuler } = useAccessibility();
   const { totalSessionsCompleted } = useFocus();
   const [researchTopic, setResearchTopic] = useState('');
   const [recentMaps, setRecentMaps] = useState<MindMapDocument[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [progress, setProgress] = useState(getProgress);
+
+  useEffect(() => subscribeProgress(setProgress), []);
 
   const loadData = async () => {
     try {
@@ -169,13 +201,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       setIsSpeaking(false);
     } else {
       setIsSpeaking(true);
-      tts.speak(
-        'Welcome to SETU Sanctuary. A bridge between dense digital worlds and the neurodivergent mind.',
-        {
-          onDone: () => setIsSpeaking(false),
-          onError: () => setIsSpeaking(false),
-        }
-      );
+      // Spoken in the chosen language, so the sample demonstrates the voice the
+      // user will actually get rather than an English one.
+      tts.speak(languageSample(language), {
+        onDone: () => setIsSpeaking(false),
+        onError: () => setIsSpeaking(false),
+      });
     }
   };
 
@@ -221,21 +252,36 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
             <Text variant="titleSm" weight="bold" color={COLORS.text}>{totalSessionsCompleted}</Text>
             <Text variant="caption" color={COLORS.textMuted}>Focus sessions</Text>
           </View>
-          <View style={styles.statBlock} accessible={true} accessibilityRole="text" accessibilityLabel="7 Cognitive modes">
-            <Text variant="titleSm" weight="bold" color={COLORS.text}>7</Text>
-            <Text variant="caption" color={COLORS.textMuted}>Cognitive modes</Text>
-          </View>
-          <View style={styles.statBlock} accessible={true} accessibilityRole="text" accessibilityLabel="0 bytes uploaded">
-            <Text variant="titleSm" weight="bold" color={COLORS.text}>0</Text>
-            <Text variant="caption" color={COLORS.textMuted}>Bytes uploaded</Text>
-          </View>
+          <TouchableOpacity
+            style={styles.statBlock}
+            accessibilityRole="button"
+            accessibilityLabel={`${progress.streakDays} day streak. Open Momentum.`}
+            onPress={() => navigation.navigate('Momentum')}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Flame size={13} color={COLORS.yellowDark} />
+              <Text variant="titleSm" weight="bold" style={{ marginLeft: 3 }}>
+                {progress.streakDays}
+              </Text>
+            </View>
+            <Text variant="caption" color={COLORS.textMuted}>Day streak</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.statBlock}
+            accessibilityRole="button"
+            accessibilityLabel={`${progress.points} points, ${getRank(progress.points).name}. Open Momentum.`}
+            onPress={() => navigation.navigate('Momentum')}
+          >
+            <Text variant="titleSm" weight="bold" color={COLORS.text}>{progress.points}</Text>
+            <Text variant="caption" color={COLORS.textMuted}>Points</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Quick Accessibility Toggles Ribbon */}
         <View style={styles.accessibilityRibbon}>
           <TouchableOpacity
             accessibilityRole="button"
-            accessibilityLabel={`Toggle Bionic Reading, currently ${bionic ? 'ON' : 'OFF'}`}
+            accessibilityLabel={`Bold word starts, currently ${bionic ? 'on' : 'off'}`}
             activeOpacity={0.8}
             style={[styles.ribbonChip, bionic ? styles.ribbonChipActive : {}]}
             onPress={toggleBionic}
@@ -247,13 +293,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
               color={bionic ? COLORS.cyanDark : COLORS.text}
               style={{ marginLeft: 4 }}
             >
-              Bionic Reading {bionic ? 'ON' : 'OFF'}
+              Bold word starts
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             accessibilityRole="button"
-            accessibilityLabel={`Toggle Reading Ruler, currently ${readingRuler ? 'ON' : 'OFF'}`}
+            accessibilityLabel={`Reading ruler, currently ${readingRuler ? 'on' : 'off'}`}
             activeOpacity={0.8}
             style={[styles.ribbonChip, readingRuler ? styles.ribbonChipActive : {}]}
             onPress={toggleReadingRuler}
@@ -268,13 +314,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
               color={readingRuler ? COLORS.cyanDark : COLORS.text}
               style={{ marginLeft: 4 }}
             >
-              Reading Ruler {readingRuler ? 'ON' : 'OFF'}
+              Reading ruler
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             accessibilityRole="button"
-            accessibilityLabel={isSpeaking ? 'Stop TTS Audio' : 'Play TTS Audio sample'}
+            accessibilityLabel={isSpeaking ? 'Stop the sample' : 'Hear how the voice sounds'}
             activeOpacity={0.8}
             style={[styles.ribbonChip, isSpeaking ? styles.ribbonChipActive : {}]}
             onPress={handleToggleTtsSample}
@@ -290,7 +336,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
               color={isSpeaking ? COLORS.magenta : COLORS.text}
               style={{ marginLeft: 4 }}
             >
-              {isSpeaking ? 'Stop TTS' : 'TTS Audio'}
+              {isSpeaking ? 'Stop' : 'Hear the voice'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -366,10 +412,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         >
           {MODES_PREVIEWS.map((mode) => {
             const IconComp = mode.icon;
+            const tint = COLORS[mode.tintKey];
             return (
               <Card
                 key={mode.key}
-                plateColor={mode.tint}
+                plateColor={tint}
                 elevated
                 style={styles.modeCard}
                 onPress={() =>
@@ -382,8 +429,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
                 accessibilityLabel={`${mode.name} mode: ${mode.tagline}`}
                 accessibilityHint={`Opens ${mode.name} cognitive mode`}
               >
-                <View style={[styles.modeIconCircle, { backgroundColor: `${mode.tint}20` }]}>
-                  <IconComp size={20} color={mode.tint} />
+                <View style={[styles.modeIconCircle, { backgroundColor: COLORS.surfaceAlt }]}>
+                  <IconComp size={20} color={tint} />
                 </View>
                 <Text variant="body" weight="bold" color={COLORS.text} style={{ marginTop: 6 }}>
                   {mode.name}
@@ -399,9 +446,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         {/* Tip of the day */}
         <Card style={styles.tipCard} elevated={false}>
           <View style={styles.tipHeader}>
-            <Info size={16} color={COLORS.yellowDark} />
+            <Sparkles size={16} color={COLORS.yellowDark} />
             <Text variant="caption" weight="bold" color={COLORS.yellowDark} style={{ marginLeft: 6 }}>
-              Tip of the Day
+              Something you might not have found
             </Text>
           </View>
           <Text variant="bodySm" color={COLORS.text} style={{ lineHeight: 20 }}>
@@ -488,10 +535,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: COLORS.bg,
+    backgroundColor: t.bg,
   },
   scrollContent: {
     padding: SPACING.lg,
@@ -524,23 +572,23 @@ const styles = StyleSheet.create({
   ribbonChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.surface,
+    backgroundColor: t.surface,
     paddingHorizontal: SPACING.sm,
     paddingVertical: 6,
     borderRadius: RADIUS.pill,
     borderWidth: 1,
-    borderColor: COLORS.dividerSubtle,
+    borderColor: t.dividerSubtle,
     minHeight: 48,
   },
   ribbonChipActive: {
-    backgroundColor: COLORS.cyanLight,
-    borderColor: COLORS.cyanBorder,
+    backgroundColor: t.cyanLight,
+    borderColor: t.cyanBorder,
   },
   heroResearchCard: {
     padding: SPACING.lg,
     marginBottom: SPACING.lg,
     borderLeftWidth: 4,
-    borderLeftColor: COLORS.cyan,
+    borderLeftColor: t.cyan,
   },
   heroActionsRow: {
     flexDirection: 'row',
@@ -579,12 +627,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   tipCard: {
-    backgroundColor: COLORS.yellowLight,
+    backgroundColor: t.yellowLight,
     padding: SPACING.md,
     marginBottom: SPACING.lg,
     borderWidth: 0,
     borderLeftWidth: 4,
-    borderLeftColor: COLORS.yellow,
+    borderLeftColor: t.yellow,
   },
   tipHeader: {
     flexDirection: 'row',
@@ -607,9 +655,9 @@ const styles = StyleSheet.create({
   emptyStateCard: {
     alignItems: 'center',
     padding: SPACING.xl,
-    backgroundColor: COLORS.surface,
+    backgroundColor: t.surface,
     borderStyle: 'dashed',
     borderWidth: 1,
-    borderColor: COLORS.divider,
+    borderColor: t.divider,
   },
 });

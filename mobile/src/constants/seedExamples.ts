@@ -7,6 +7,7 @@ import {
   PracticeModeResult,
   WriteModeResult,
   GuideModeResult,
+  NumbersModeResult,
 } from '../types';
 
 export const WORKED_EXAMPLES: Record<CognitiveModeKey, any> = {
@@ -156,4 +157,55 @@ export const WORKED_EXAMPLES: Record<CognitiveModeKey, any> = {
       },
     ],
   } as GuideModeResult,
+
+  /**
+   * The dyscalculia worked example.
+   *
+   * A division, chosen because division is where notation loses people fastest
+   * and where the arrangement of objects carries the whole insight - "three
+   * plates of four" explains it in a way that "12 divided by 3" never does.
+   */
+  numbers: {
+    plainQuestion: 'You have 12 samosas and 3 friends. How many does each person get?',
+    objectName: 'samosa',
+    objectNamePlural: 'samosas',
+    objectEmoji: '🥟',
+    story:
+      'You bought a box of 12 samosas to share equally between the three of you. Nobody should get more than anyone else, and none should be left over.',
+    steps: [
+      {
+        narration: 'Start with all 12 samosas on the table.',
+        operation: 'start',
+        count: 12,
+        runningTotal: 12,
+      },
+      {
+        narration: 'Put out one plate for each of the three friends.',
+        operation: 'group',
+        count: 3,
+        runningTotal: 0,
+        groupSize: 3,
+      },
+      {
+        narration: 'Deal them out one at a time, going round the plates, until the box is empty.',
+        operation: 'split',
+        count: 12,
+        runningTotal: 4,
+        groupSize: 3,
+      },
+      {
+        narration: 'Every plate has the same amount and nothing is left over.',
+        operation: 'result',
+        count: 4,
+        runningTotal: 4,
+        groupSize: 3,
+      },
+    ],
+    answer: '4 samosas each',
+    answerNumber: 4,
+    checkIt:
+      'Count one plate: 4. Now count all three plates together - 4 and 4 and 4 makes 12, which is exactly what you started with.',
+    realLife:
+      'This is the same move as splitting a bill three ways, or working out how many days a strip of 12 tablets lasts if you take three a day.',
+  } as NumbersModeResult,
 };

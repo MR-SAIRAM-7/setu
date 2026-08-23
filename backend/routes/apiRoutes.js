@@ -14,11 +14,18 @@ const agent = require('../controllers/agentController');
 const dbCtrl = require('../controllers/databaseController');
 const fileCtrl = require('../controllers/fileController');
 const convCtrl = require('../controllers/conversationController');
+const speechCtrl = require('../controllers/speechController');
 
 const { validateInputMiddleware } = require('../middleware/validator');
 const { checkHealth } = require('../services/aiService');
 const { getStatus } = require('../config/db');
 const config = require('../config');
+const multer = require('multer');
+
+const audioUploadMiddleware = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024 }
+}).single('file');
 
 /* -------------------------------------------------------------------------- */
 /* Health Probes & System Status                                              */
@@ -33,13 +40,31 @@ router.get('/health', (_req, res) => {
     version: '3.0.0',
     primaryProvider: config.primaryProvider,
     aiConfigured: config.aiEnabled,
+    speech: {
+      provider: config.speechEnabled ? 'sarvam' : 'browser',
+      configured: config.speechEnabled,
+      model: config.speechEnabled ? config.sarvamTtsModel : null,
+      sttProvider: config.sttEnabled ? 'sarvam' : 'browser',
+      sttConfigured: config.sttEnabled,
+      sttModel: config.sttEnabled ? config.sarvamSttModel : null
+    },
     database: {
       provider: 'MongoDB',
       connected: dbStatus.connected,
       state: dbStatus.state,
       name: dbStatus.database
     },
-    modes: ['start', 'simplify', 'learn', 'meet', 'practice', 'write', 'guide'],
+    modes: [
+      'start',
+      'simplify',
+      'learn',
+      'meet',
+      'practice',
+      'write',
+      'guide',
+      'numbers',
+      'listen'
+    ],
     timestamp: new Date().toISOString()
   });
 });
@@ -102,6 +127,9 @@ router.get('/settings', dbCtrl.handleGetSettings);
 router.post('/settings', dbCtrl.handleSaveSettings);
 router.put('/settings', dbCtrl.handleSaveSettings);
 
+router.get('/progress', dbCtrl.handleGetProgress);
+router.post('/progress', dbCtrl.handleSaveProgress);
+
 /* -------------------------------------------------------------------------- */
 /* Conversational AI & Research Streaming                                     */
 /* -------------------------------------------------------------------------- */
@@ -122,6 +150,10 @@ router.post('/practice', validateInputMiddleware('topic', 2000), modes.handlePra
 router.post('/write', validateInputMiddleware('text', config.maxTextLength), modes.handleWriteMode);
 router.post('/guide', validateInputMiddleware('goal', 2000), modes.handleGuideMode);
 
+/* Numbers (dyscalculia) and Listen (anxiety support) */
+router.post('/numbers', validateInputMiddleware('problem', 2000), modes.handleNumbersMode);
+router.post('/listen', validateInputMiddleware('entry', 4000), modes.handleListenMode);
+
 /* -------------------------------------------------------------------------- */
 /* In-Page Agent & Assistive Tools                                            */
 /* -------------------------------------------------------------------------- */
@@ -129,9 +161,30 @@ router.post('/guide', validateInputMiddleware('goal', 2000), modes.handleGuideMo
 router.post('/agent/plan', validateInputMiddleware('task', 2000), agent.handleAgentPlan);
 router.post('/agent/navigate', validateInputMiddleware('task', 2000), agent.handleAgentPlan);
 router.post('/agent/explain', validateInputMiddleware('text', config.maxTextLength), agent.handleExplain);
+router.post(
+  '/agent/explain/stream',
+  validateInputMiddleware('text', config.maxTextLength),
+  agent.handleExplainStream
+);
+router.post('/agent/visualize', agent.handleVisualize);
 router.post('/agent/chunk', agent.handleChunkPage);
 router.post('/agent/describe-image', agent.handleDescribeImage);
 router.post('/explain', validateInputMiddleware('text', config.maxTextLength), agent.handleExplain);
+
+/* -------------------------------------------------------------------------- */
+/* Natural-voice read-aloud & Speech-to-Text (Sarvam AI)                      */
+/* -------------------------------------------------------------------------- */
+
+router.get('/speech/voices', speechCtrl.handleListVoices);
+router.post('/speech', speechCtrl.handleSynthesize);
+router.post('/speech/transcribe', (req, res, next) => {
+  audioUploadMiddleware(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({ error: `Audio upload error: ${err.message}` });
+    }
+    speechCtrl.handleTranscribe(req, res, next);
+  });
+});
 
 /* -------------------------------------------------------------------------- */
 /* Utilities                                                                  */

@@ -1,14 +1,15 @@
 /**
- * SETU Mobile — Root App Navigation & Shell (Phase 13)
- * ---------------------------------------------------
- * Connects Onboarding, Bottom Tab Navigator (Home, Mind Map, Modes, Library, Settings),
- * and auxiliary modal stacks with Broadsheet newsprint design styling.
+ * SETU Mobile — app shell and navigation.
  *
- * Features:
- * - Dynamic Focus Session persistent floating bar across all tabs
- * - Floating Reading Ruler overlay
- * - Break Dialog modal prompt
- * - Full deep-linking parameter passing across stacks
+ * Six tabs rather than five. Listen earns a permanent slot instead of living
+ * behind Home, because the moment somebody needs it is the moment they have the
+ * least patience for hunting through a menu — and Settings earns one because for
+ * an accessibility app the typeface, size and theme controls are not a
+ * "configure once" screen, they are part of using the thing.
+ *
+ * Everything that must survive a tab change — the focus banner, the reading
+ * ruler, the parking lot, reward toasts and the colour film — is mounted above
+ * the navigator rather than inside a screen.
  */
 
 import React from 'react';
@@ -21,12 +22,14 @@ import {
   Waves,
   BookOpen,
   Settings,
+  Heart,
   Pause,
   Play,
-  Clock,
 } from 'lucide-react-native';
 
-import { COLORS, RADIUS, SPACING, SHADOWS } from '../constants/theme';
+import { RADIUS, SPACING, SHADOWS } from '../constants/theme';
+import { Palette } from '../constants/themes';
+import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
 import { Text } from '../components/Typography';
 import { useAccessibility } from '../context/AccessibilityContext';
 import { useFocus } from '../context/FocusContext';
@@ -38,28 +41,41 @@ import { ModesScreen } from '../screens/ModesScreen';
 import { LibraryScreen } from '../screens/LibraryScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { CameraOcrScreen } from '../screens/CameraOcrScreen';
+import { ListenScreen } from '../screens/ListenScreen';
+import { MomentumScreen } from '../screens/MomentumScreen';
+
 import { BreakDialogModal } from '../components/BreakDialogModal';
 import { ReadingRuler } from '../components/ReadingRuler';
+import { ParkingLot } from '../components/ParkingLot';
+import { RewardToast } from '../components/RewardToast';
+import { ColorOverlay } from '../components/ColorOverlay';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
 /**
- * Floating Focus Session Indicator Banner
- * Displays across all tabs when a Pomodoro focus timer is active.
+ * Floating focus indicator.
+ *
+ * Shown across every tab while a session runs, because the timer's whole job is
+ * to be glanceable — a countdown you have to navigate to is a countdown you
+ * forget about.
  */
 function FloatingFocusBanner() {
-  const { isActive, isPaused, formattedTime, pauseSession, startSession } = useFocus();
+  const COLORS = useThemeColors();
+  const styles = useThemedStyles(makeStyles);
+  const { isActive, isPaused, isBreak, formattedTime, pauseSession, startSession } = useFocus();
 
   if (!isActive) return null;
 
   return (
-    <View style={styles.focusBannerContainer}>
+    <View style={styles.focusBannerContainer} pointerEvents="box-none">
       <View style={styles.focusBannerContent}>
         <View style={styles.focusBannerLeft}>
-          <View style={[styles.focusDot, !isPaused ? styles.focusDotActive : styles.focusDotPaused]} />
-          <Text variant="caption" weight="bold" color={COLORS.text}>
-            Focus Session:
+          <View
+            style={[styles.focusDot, !isPaused ? styles.focusDotActive : styles.focusDotPaused]}
+          />
+          <Text variant="caption" weight="bold">
+            {isBreak ? 'Break:' : 'Focus:'}
           </Text>
           <Text variant="caption" weight="bold" color={COLORS.cyan} style={{ marginLeft: 6 }}>
             {formattedTime}
@@ -69,9 +85,8 @@ function FloatingFocusBanner() {
         <TouchableOpacity
           style={styles.focusActionBtn}
           onPress={isPaused ? startSession : pauseSession}
-          accessible={true}
           accessibilityRole="button"
-          accessibilityLabel={isPaused ? 'Resume focus timer' : 'Pause focus timer'}
+          accessibilityLabel={isPaused ? 'Resume the timer' : 'Pause the timer'}
         >
           {isPaused ? (
             <Play size={14} color={COLORS.cyan} />
@@ -93,6 +108,10 @@ function FloatingFocusBanner() {
 }
 
 function MainTabNavigator() {
+  const COLORS = useThemeColors();
+  const styles = useThemedStyles(makeStyles);
+  const { sizeScale } = useAccessibility();
+
   return (
     <View style={{ flex: 1, backgroundColor: COLORS.bg }}>
       <Tab.Navigator
@@ -102,14 +121,16 @@ function MainTabNavigator() {
             backgroundColor: COLORS.bg,
             borderTopWidth: 1,
             borderTopColor: COLORS.dividerSubtle,
-            height: 60,
+            // Grows with the reading-size setting: six labels at a fixed height
+            // is exactly where a large-text user loses the bottom row.
+            height: 60 + (sizeScale - 1) * 46,
             paddingBottom: 8,
             paddingTop: 6,
           },
           tabBarActiveTintColor: COLORS.cyan,
           tabBarInactiveTintColor: COLORS.textMuted,
           tabBarLabelStyle: {
-            fontSize: 11,
+            fontSize: Math.round(10 * sizeScale),
             fontWeight: '600',
           },
         }}
@@ -119,15 +140,17 @@ function MainTabNavigator() {
           component={HomeScreen}
           options={{
             tabBarLabel: 'Home',
-            tabBarIcon: ({ color, size }) => <Sparkles size={size - 2} color={color} />,
+            tabBarAccessibilityLabel: 'Home',
+            tabBarIcon: ({ color, size }) => <Sparkles size={size - 4} color={color} />,
           }}
         />
         <Tab.Screen
           name="MindMapTab"
           component={MindMapScreen}
           options={{
-            tabBarLabel: 'Mind Map',
-            tabBarIcon: ({ color, size }) => <Network size={size - 2} color={color} />,
+            tabBarLabel: 'Map',
+            tabBarAccessibilityLabel: 'Mind map',
+            tabBarIcon: ({ color, size }) => <Network size={size - 4} color={color} />,
           }}
         />
         <Tab.Screen
@@ -135,7 +158,17 @@ function MainTabNavigator() {
           component={ModesScreen}
           options={{
             tabBarLabel: 'Modes',
-            tabBarIcon: ({ color, size }) => <Waves size={size - 2} color={color} />,
+            tabBarAccessibilityLabel: 'Cognitive modes',
+            tabBarIcon: ({ color, size }) => <Waves size={size - 4} color={color} />,
+          }}
+        />
+        <Tab.Screen
+          name="ListenTab"
+          component={ListenScreen}
+          options={{
+            tabBarLabel: 'Listen',
+            tabBarAccessibilityLabel: 'Listen — somewhere to put it',
+            tabBarIcon: ({ color, size }) => <Heart size={size - 4} color={color} />,
           }}
         />
         <Tab.Screen
@@ -143,7 +176,8 @@ function MainTabNavigator() {
           component={LibraryScreen}
           options={{
             tabBarLabel: 'Library',
-            tabBarIcon: ({ color, size }) => <BookOpen size={size - 2} color={color} />,
+            tabBarAccessibilityLabel: 'Library',
+            tabBarIcon: ({ color, size }) => <BookOpen size={size - 4} color={color} />,
           }}
         />
         <Tab.Screen
@@ -151,23 +185,23 @@ function MainTabNavigator() {
           component={SettingsScreen}
           options={{
             tabBarLabel: 'Settings',
-            tabBarIcon: ({ color, size }) => <Settings size={size - 2} color={color} />,
+            tabBarAccessibilityLabel: 'Reading and voice settings',
+            tabBarIcon: ({ color, size }) => <Settings size={size - 4} color={color} />,
           }}
         />
       </Tab.Navigator>
 
-      {/* Floating Active Focus Session Banner */}
       <FloatingFocusBanner />
+      <ParkingLot />
     </View>
   );
 }
 
 export const RootNavigator: React.FC = () => {
+  const COLORS = useThemeColors();
   const { hasCompletedOnboarding, isLoading } = useAccessibility();
 
-  if (isLoading) {
-    return null;
-  }
+  if (isLoading) return null;
 
   return (
     <>
@@ -189,12 +223,25 @@ export const RootNavigator: React.FC = () => {
         ) : null}
 
         <Stack.Screen name="MainTabs" component={MainTabNavigator} />
+
         <Stack.Screen
           name="CameraOCR"
           component={CameraOcrScreen}
           options={{
             headerShown: true,
-            title: 'Scan Document OCR',
+            title: 'Scan a document',
+            headerStyle: { backgroundColor: COLORS.bg },
+            headerTintColor: COLORS.text,
+            headerTitleStyle: { fontWeight: 'bold' },
+          }}
+        />
+
+        <Stack.Screen
+          name="Momentum"
+          component={MomentumScreen}
+          options={{
+            headerShown: true,
+            title: 'Momentum',
             headerStyle: { backgroundColor: COLORS.bg },
             headerTintColor: COLORS.text,
             headerTitleStyle: { fontWeight: 'bold' },
@@ -202,59 +249,60 @@ export const RootNavigator: React.FC = () => {
         />
       </Stack.Navigator>
 
-      {/* Global Break Dialog Modal */}
       <BreakDialogModal />
-
-      {/* Global Reading Ruler Overlay (if enabled in settings) */}
       <ReadingRuler />
+      <RewardToast />
+      <ColorOverlay />
     </>
   );
 };
 
-const styles = StyleSheet.create({
-  focusBannerContainer: {
-    position: 'absolute',
-    bottom: 64,
-    left: SPACING.md,
-    right: SPACING.md,
-    zIndex: 99,
-  },
-  focusBannerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: COLORS.surface,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: 8,
-    borderRadius: RADIUS.pill,
-    borderWidth: 1.5,
-    borderColor: COLORS.cyanBorder,
-    ...SHADOWS.md,
-  },
-  focusBannerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  focusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 8,
-  },
-  focusDotActive: {
-    backgroundColor: COLORS.cyan,
-  },
-  focusDotPaused: {
-    backgroundColor: COLORS.yellow,
-  },
-  focusActionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 4,
-    borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.bg,
-    borderWidth: 1,
-    borderColor: COLORS.dividerSubtle,
-  },
-});
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
+    focusBannerContainer: {
+      position: 'absolute',
+      bottom: 70,
+      left: SPACING.md,
+      right: SPACING.md + 56,
+      zIndex: 99,
+    },
+    focusBannerContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: t.surface,
+      paddingHorizontal: SPACING.md,
+      paddingVertical: 8,
+      borderRadius: RADIUS.pill,
+      borderWidth: 1.5,
+      borderColor: t.cyanBorder,
+      ...SHADOWS.md,
+    },
+    focusBannerLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    focusDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      marginRight: 8,
+    },
+    focusDotActive: {
+      backgroundColor: t.cyan,
+    },
+    focusDotPaused: {
+      backgroundColor: t.yellow,
+    },
+    focusActionBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: SPACING.sm,
+      paddingVertical: 4,
+      borderRadius: RADIUS.pill,
+      backgroundColor: t.bg,
+      borderWidth: 1,
+      borderColor: t.dividerSubtle,
+      minHeight: 36,
+    },
+  });

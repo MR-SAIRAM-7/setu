@@ -8,10 +8,14 @@ import React from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { Play, Pause, RotateCcw, Timer } from 'lucide-react-native';
 import { COLORS, RADIUS, SPACING } from '../constants/theme';
+import { Palette } from '../constants/themes';
+import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
 import { Text, Kicker } from './Typography';
 import { useFocus } from '../context/FocusContext';
 
 export const FocusTimerWidget: React.FC = () => {
+  const COLORS = useThemeColors();
+  const styles = useThemedStyles(makeStyles);
   const {
     isActive,
     isPaused,
@@ -94,13 +98,14 @@ export const FocusTimerWidget: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
   container: {
-    backgroundColor: COLORS.surface,
+    backgroundColor: t.surface,
     borderRadius: RADIUS.md,
     padding: SPACING.md,
     borderWidth: 1,
-    borderColor: COLORS.dividerSubtle,
+    borderColor: t.dividerSubtle,
     marginBottom: SPACING.md,
   },
   headerRow: {
@@ -138,15 +143,15 @@ const styles = StyleSheet.create({
     marginLeft: SPACING.sm,
   },
   playBtn: {
-    backgroundColor: COLORS.cyan,
+    backgroundColor: t.cyan,
   },
   pauseBtn: {
-    backgroundColor: COLORS.yellowDark,
+    backgroundColor: t.yellowDark,
   },
   resetBtn: {
-    backgroundColor: COLORS.bg,
+    backgroundColor: t.bg,
     borderWidth: 1,
-    borderColor: COLORS.divider,
+    borderColor: t.divider,
   },
   stateNote: {
     marginTop: SPACING.xs,

@@ -11,7 +11,7 @@
  */
 
 (() => {
-  const { Feature, UI, Store, Text } = window.SETU;
+  const { Feature, UI, Store, Text, icon } = window.SETU;
 
   class LineFocus extends Feature {
     static key = 'lineFocus';
@@ -73,29 +73,33 @@
           background: rgba(0, 136, 176, 0.04);
         }
         .pill {
-          position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+          position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
           display: flex; align-items: center; gap: 10px;
-          padding: 6px 10px 6px 14px;
+          padding: 8px 10px 8px 15px;
           background: var(--surface); border: 1px solid var(--border);
-          border-radius: 999px; box-shadow: var(--shadow);
+          border-radius: var(--radius-lg); box-shadow: var(--shadow);
           pointer-events: auto; white-space: nowrap; font-family: var(--font);
         }
-        .pill-label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--accent-700); letter-spacing: .06em; }
+        .pill-label { font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--accent-700); letter-spacing: .08em; }
         .sep { width: 1px; height: 16px; background: var(--border); }
-        .seg { display: flex; gap: 3px; }
+        .seg { display: flex; gap: 4px; }
         .seg button {
-          background: transparent; color: var(--text-dim); border: none;
-          padding: 4px 10px; border-radius: 999px;
-          font-size: 12px; font-weight: 600; cursor: pointer;
+          background: transparent; color: var(--text-dim);
+          border: 1px solid var(--border);
+          padding: 4px 11px; border-radius: var(--radius-sm);
+          font-family: var(--font); font-size: 12.5px; font-weight: 600; cursor: pointer;
+          transition: background .15s ease, border-color .15s ease, color .15s ease;
         }
-        .seg button:hover { background: var(--accent-100); color: var(--accent-700); }
-        .seg button[aria-pressed="true"] { background: var(--accent); color: var(--bg); font-weight: 700; }
+        .seg button:hover { background: var(--accent-100); border-color: var(--accent); color: var(--accent-900); }
+        .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
         .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
         .close {
           background: transparent; border: none; color: var(--text-dim);
-          font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px;
+          display: grid; place-items: center; cursor: pointer;
+          padding: 3px; border-radius: var(--radius-sm);
         }
-        .close:hover { color: var(--danger); }
+        .close:hover { color: var(--accent-2-700); background: var(--accent-2-100); }
+        .close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
       `;
       root.appendChild(style);
 
@@ -115,7 +119,7 @@
             <button data-lines="4" aria-pressed="false">Block</button>
           </div>
           <div class="sep"></div>
-          <button class="close" title="Close Line Focus (Alt+L)" aria-label="Close Line Focus">&times;</button>
+          <button class="close" title="Close Line Focus (Alt+L)" aria-label="Close Line Focus">${icon('x', { size: 16 })}</button>
         </div>
       `;
       root.appendChild(scope);

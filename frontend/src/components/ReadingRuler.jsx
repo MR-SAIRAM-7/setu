@@ -63,7 +63,7 @@ export default function ReadingRuler({ enabled, onClose }) {
 
       {/* Reading Strip (Clear / Tinted Guide) */}
       <div
-        className="absolute inset-x-0 border-y-2 transition-all duration-75 shadow-lg flex items-center justify-between px-6"
+        className="absolute inset-x-0 border-y-2 transition-all duration-75 shadow-lg"
         style={{
           top: `${rulerTop}px`,
           height: `${height}px`,
@@ -77,14 +77,7 @@ export default function ReadingRuler({ enabled, onClose }) {
                   ? '#22c55e'
                   : 'rgba(0,0,0,0.4)'
         }}
-      >
-        <div className="flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-[var(--color-accent)] animate-pulse"></span>
-          <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-text)] opacity-70">
-            ADHD Focus Guide
-          </span>
-        </div>
-      </div>
+      />
 
       {/* Bottom Mask */}
       <div

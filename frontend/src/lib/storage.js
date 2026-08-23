@@ -230,7 +230,61 @@ export const DEFAULT_PREFS = {
   motion: 'move', // 'move' | 'still'
   readingRuler: false,
   bionicReading: false,
-  onboardingDone: false
+  onboardingDone: false,
+
+  /**
+   * Speak a mind-map node when the cursor or keyboard focus lands on it.
+   *
+   * On by default. A map whose branches are silent text is, for a reader whose
+   * difficulty is decoding rather than eyesight, just a differently-shaped wall
+   * of words — pairing each node with audio on interaction is what makes the
+   * diagram readable at all.
+   */
+  speakOnHover: true,
+
+  /**
+   * Draw nodes as a symbol with a short label instead of a text block.
+   *
+   * Pairs with speakOnHover: the picture carries the structure, the voice
+   * carries the detail, and neither depends on sustained reading.
+   */
+  pictureMode: false,
+
+  /** MindMap Canvas & Layout Customization Preferences */
+  mapColorTheme: 'broadsheet', // 'broadsheet' | 'cyberpunk' | 'nature' | 'sunset' | 'monochrome' | 'pastel'
+  mapEdgeStyle: 'bezier', // 'bezier' | 'straight' | 'orthogonal' | 'arc'
+  mapGridPattern: 'dots', // 'dots' | 'grid' | 'isometric' | 'crosses' | 'clean'
+  mapNodeStyle: 'comfortable', // 'comfortable' | 'compact' | 'glass' | 'pill'
+  mapEdgeWidth: 2.2, // 1.4 | 2.2 | 3.2
+  mapTextScale: 1.0, // 0.85 | 1.0 | 1.15 | 1.3
+  chatPanelWidth: 392,
+  chatPanelSide: 'left', // 'left' | 'right'
+  zenMode: false,
+  colorOverlay: 'none', // 'none' | 'peach' | 'rose' | 'mint' | 'aqua' | 'lavender' | 'yellow'
+  colorOverlayOpacity: 0.12,
+
+  /** Show points, streaks, and milestones. Counting continues either way. */
+  rewards: true,
+
+  /**
+   * Sarvam AI speaker id for read-aloud, e.g. 'priya'.
+   *
+   * Null follows whatever the engine is configured to use, so a deployment can
+   * change the house voice without every existing browser pinning the old one.
+   */
+  voice: null,
+
+  /** Speaking pace, 0.5–2.0. Maps to Sarvam `pace` and browser `rate`. */
+  speechRate: 1,
+
+  /**
+   * Conversation language, e.g. 'hi-IN'.
+   *
+   * Drives both halves at once: the language the AI answers in, and the language
+   * the audio is synthesised in. Setting only one of those gives you a Hindi
+   * voice reading English sentences, which helps nobody.
+   */
+  language: 'en-IN'
 };
 
 export function getPrefs() {
@@ -283,6 +337,15 @@ export function applyPrefs(prefs = getPrefs()) {
   root.classList.remove('spacing-normal', 'spacing-relaxed', 'spacing-spacious');
   if (prefs.spacing === 'relaxed') root.classList.add('spacing-relaxed');
   else if (prefs.spacing === 'spacious') root.classList.add('spacing-spacious');
+
+  // Color tint overlay for Irlen / visual stress
+  if (prefs.colorOverlay && prefs.colorOverlay !== 'none') {
+    root.setAttribute('data-color-overlay', prefs.colorOverlay);
+    root.style.setProperty('--overlay-opacity', String(prefs.colorOverlayOpacity || 0.12));
+  } else {
+    root.removeAttribute('data-color-overlay');
+    root.style.removeProperty('--overlay-opacity');
+  }
 
   // Motion class
   try {

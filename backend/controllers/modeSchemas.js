@@ -210,6 +210,108 @@ const summarySchema = {
   required: ['gist', 'points', 'readingTimeMinutes']
 };
 
+/**
+ * Numbers — dyscalculia support.
+ *
+ * The clinical guidance this implements is that arithmetic has to be taught the
+ * way special education teaches it: with countable physical objects inside a
+ * story, not as notation. So the contract deliberately forbids the model from
+ * answering in symbols — it must name one concrete object, then hand back a
+ * sequence of steps where every step carries an actual *count* the client can
+ * draw. The drawn quantity, not the sentence, is the explanation.
+ *
+ * `runningTotal` is what the reader can see on the table after the step, which
+ * is what makes each step checkable without holding the previous one in working
+ * memory.
+ */
+const numbersSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    plainQuestion: { type: 'string' },
+    objectName: { type: 'string' },
+    objectNamePlural: { type: 'string' },
+    objectEmoji: { type: 'string' },
+    story: { type: 'string' },
+    steps: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          narration: { type: 'string' },
+          operation: {
+            type: 'string',
+            enum: ['start', 'add', 'remove', 'group', 'split', 'compare', 'result']
+          },
+          count: { type: 'number' },
+          runningTotal: { type: 'number' },
+          groupSize: { type: 'number' }
+        },
+        required: ['narration', 'operation', 'count', 'runningTotal']
+      },
+      minItems: 2,
+      maxItems: 6
+    },
+    answer: { type: 'string' },
+    answerNumber: { type: 'number' },
+    checkIt: { type: 'string' },
+    realLife: { type: 'string' }
+  },
+  required: [
+    'plainQuestion',
+    'objectName',
+    'objectNamePlural',
+    'objectEmoji',
+    'story',
+    'steps',
+    'answer',
+    'answerNumber',
+    'checkIt',
+    'realLife'
+  ]
+};
+
+/**
+ * Listen — reflective support for the roughly 40% of dyslexic and ADHD adults
+ * who also carry anxiety or depression.
+ *
+ * This is deliberately shaped as *reflective listening*, not counselling: the
+ * model reflects back what it heard, names the feeling, validates it, and offers
+ * one grounding exercise and one small next thing. It is never asked for a
+ * diagnosis, an interpretation, or advice about medication, and the crisis path
+ * never reaches the model at all (see listenController).
+ */
+const listenSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    reflection: { type: 'string' },
+    namedFeelings: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 3 },
+    validation: { type: 'string' },
+    groundingExercise: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        name: { type: 'string' },
+        durationMinutes: { type: 'number' },
+        steps: { type: 'array', items: { type: 'string' }, minItems: 2, maxItems: 5 }
+      },
+      required: ['name', 'durationMinutes', 'steps']
+    },
+    openQuestion: { type: 'string' },
+    oneSmallThing: { type: 'string' }
+  },
+  required: [
+    'reflection',
+    'namedFeelings',
+    'validation',
+    'groundingExercise',
+    'openQuestion',
+    'oneSmallThing'
+  ]
+};
+
 module.exports = {
   startSchema,
   simplifySchema,
@@ -218,5 +320,7 @@ module.exports = {
   practiceSchema,
   writeSchema,
   guideSchema,
-  summarySchema
+  summarySchema,
+  numbersSchema,
+  listenSchema
 };

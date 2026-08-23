@@ -1,11 +1,12 @@
 /**
- * SETU Mobile — Settings & Accessibility Customization Screen
- * -----------------------------------------------------------
- * Faithfully maps to Broadsheet Design Guidelines:
- * - Reading Preferences (Typeface, Text Scaling, Motion, Bionic, Reading ruler)
- * - Speech synthesis controls (Speed & Pitch) with live voice tester
- * - Backend server engine probe & customizable API URL (shared with Web & Extension)
- * - Anonymous device identity & local data wiping / reference library restore
+ * SETU Mobile — Settings.
+ *
+ * For most apps settings are a place you visit once. Here they are part of the
+ * product: the typeface, the ground colour, the tint, the language and the voice
+ * are the accommodations themselves, and people change them as their day and
+ * their eyes change. So everything is one screen, grouped by what it affects
+ * rather than by which subsystem implements it, and every control takes effect
+ * immediately rather than behind a save button.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -19,19 +20,16 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import {
-  Sparkles,
   Volume2,
-  Server,
   Trash2,
-  RotateCcw,
-  CheckCircle2,
-  XCircle,
-  ExternalLink,
-  Shield,
-  BookOpen,
-  Sliders,
+  Languages,
+  Palette as PaletteIcon,
+  TrendingUp,
+  Check,
 } from 'lucide-react-native';
 import { COLORS, RADIUS, SPACING } from '../constants/theme';
+import { Palette } from '../constants/themes';
+import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
 import { Text, Heading, Subheading, Kicker } from '../components/Typography';
 import { Input } from '../components/Input';
 import { Button } from '../components/Button';
@@ -41,10 +39,24 @@ import { useIdentity } from '../context/IdentityContext';
 import { clearAllLocalData, restoreReferenceLibrary } from '../services/storage';
 import { api } from '../services/api';
 import { tts } from '../services/tts';
-import { FontStyleOption, TextSizeOption, MotionOption } from '../types';
+import {
+  FontStyleOption,
+  TextSizeOption,
+  MotionOption,
+  SpacingOption,
+  ThemeOption,
+  SarvamVoice,
+} from '../types';
+import { LANGUAGES, languageSample } from '../constants/languages';
+import { COLOR_OVERLAYS, OVERLAY_LABELS, THEME_LABELS, paletteFor } from '../constants/themes';
+import { DEFAULT_API_URL, isCustomApiUrl } from '../constants/config';
 import * as Haptics from 'expo-haptics';
 
-export const SettingsScreen: React.FC = () => {
+const THEME_ORDER: ThemeOption[] = ['broadsheet', 'cream', 'pastel', 'sage', 'velvet', 'contrast'];
+
+export const SettingsScreen: React.FC<{ navigation?: any }> = ({ navigation }) => {
+  const COLORS = useThemeColors();
+  const styles = useThemedStyles(makeStyles);
   const {
     font,
     size,
@@ -54,6 +66,13 @@ export const SettingsScreen: React.FC = () => {
     speechRate,
     speechPitch,
     customApiUrl,
+    theme,
+    spacing,
+    language,
+    voice,
+    speakOnTap,
+    colorOverlay,
+    colorOverlayOpacity,
     setFont,
     setSize,
     setMotion,
@@ -62,6 +81,12 @@ export const SettingsScreen: React.FC = () => {
     setSpeechRate,
     setSpeechPitch,
     setCustomApiUrl,
+    setTheme,
+    setSpacing,
+    setLanguage,
+    setVoice,
+    toggleSpeakOnTap,
+    setColorOverlay,
   } = useAccessibility();
 
   const {
@@ -78,9 +103,25 @@ export const SettingsScreen: React.FC = () => {
   const [apiUrlInput, setApiUrlInput] = useState(customApiUrl);
   const [isTestingAi, setIsTestingAi] = useState(false);
   const [aiTestResult, setAiTestResult] = useState<string | null>(null);
+  const [voices, setVoices] = useState<SarvamVoice[]>([]);
+  const [naturalVoice, setNaturalVoice] = useState<boolean | null>(null);
 
   useEffect(() => {
     setApiUrlInput(customApiUrl);
+  }, [customApiUrl]);
+
+  // The speaker list is a property of whichever engine we are pointed at, so it
+  // is re-asked whenever the address changes rather than fetched once at mount.
+  useEffect(() => {
+    let cancelled = false;
+    tts.probeNaturalVoice(true).then(async (available) => {
+      if (cancelled) return;
+      setNaturalVoice(available);
+      setVoices(available ? await tts.getVoiceCatalogue() : []);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [customApiUrl]);
 
   const handleSaveApiUrl = async () => {
@@ -89,7 +130,12 @@ export const SettingsScreen: React.FC = () => {
     } catch (_) {}
     await setCustomApiUrl(apiUrlInput.trim());
     await checkHealth();
-    Alert.alert('Backend URL Saved', 'Engine connection settings have been updated.');
+    Alert.alert(
+      'Engine address saved',
+      apiUrlInput.trim()
+        ? `SETU will talk to ${apiUrlInput.trim()}.`
+        : 'SETU is back to the engine this build ships with.'
+    );
   };
 
   const handleTestAiConnection = async () => {
@@ -118,7 +164,9 @@ export const SettingsScreen: React.FC = () => {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } catch (_) {}
-    tts.speak('This is your current speech synthesis speed and pitch setting in SETU.');
+    // Spoken in the chosen language, not in English, so the test actually
+    // demonstrates the thing being configured.
+    tts.speak(languageSample(language));
   };
 
   const handleResetUserId = async () => {
@@ -168,12 +216,12 @@ export const SettingsScreen: React.FC = () => {
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Screen Header */}
         <View style={styles.header}>
-          <Kicker color={COLORS.cyan}>Preferences & Engine</Kicker>
+          <Kicker color={COLORS.cyan}>Make it readable for you</Kicker>
           <Heading variant="h1" style={{ marginTop: 2 }}>
             Settings
           </Heading>
           <Text variant="bodySm" color={COLORS.textMuted}>
-            Personalize typography, voice feedback, backend endpoints, and data controls.
+            Change anything here at any time. Nothing needs saving and nothing is permanent.
           </Text>
         </View>
 
@@ -191,9 +239,11 @@ export const SettingsScreen: React.FC = () => {
           <View style={styles.optionsRow}>
             {(
               [
-                { id: 'serif', label: 'Source Serif' },
+                { id: 'serif', label: 'Serif' },
+                { id: 'system', label: 'System sans' },
                 { id: 'hyper', label: 'Hyperlegible' },
-                { id: 'system', label: 'System Sans' },
+                { id: 'lexend', label: 'Lexend' },
+                { id: 'dyslexic', label: 'Dyslexia-friendly' },
               ] as { id: FontStyleOption; label: string }[]
             ).map((item) => (
               <Button
@@ -252,6 +302,122 @@ export const SettingsScreen: React.FC = () => {
             ))}
           </View>
 
+          {/* Ground colour. Not a light/dark switch — see constants/themes.ts. */}
+          <Text variant="bodySm" weight="semibold" style={styles.groupLabel}>
+            Page colour
+          </Text>
+          <View style={styles.swatchRow}>
+            {THEME_ORDER.map((option) => {
+              const palette = paletteFor(option);
+              const selected = theme === option;
+              return (
+                <TouchableOpacity
+                  key={option}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                  accessibilityLabel={`${THEME_LABELS[option].name}. ${THEME_LABELS[option].blurb}`}
+                  onPress={() => setTheme(option)}
+                  style={[styles.swatch, selected ? styles.swatchSelected : null]}
+                >
+                  <View style={[styles.swatchChip, { backgroundColor: palette.bg }]}>
+                    <View style={[styles.swatchInk, { backgroundColor: palette.text }]} />
+                    <View style={[styles.swatchInk, { backgroundColor: palette.cyan }]} />
+                    {selected ? <Check size={12} color={palette.text} /> : null}
+                  </View>
+                  <Text
+                    variant="caption"
+                    weight={selected ? 'bold' : 'normal'}
+                    color={selected ? COLORS.text : COLORS.textMuted}
+                    align="center"
+                  >
+                    {THEME_LABELS[option].name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Line spacing */}
+          <Text variant="bodySm" weight="semibold" style={styles.groupLabel}>
+            Line spacing
+          </Text>
+          <View style={styles.optionsRow}>
+            {(
+              [
+                { id: 'normal', label: 'Normal' },
+                { id: 'relaxed', label: 'Relaxed' },
+                { id: 'spacious', label: 'Spacious' },
+              ] as { id: SpacingOption; label: string }[]
+            ).map((item) => (
+              <Button
+                key={item.id}
+                variant={spacing === item.id ? 'primary' : 'secondary'}
+                size="sm"
+                title={item.label}
+                onPress={() => setSpacing(item.id)}
+                style={styles.optionBtn}
+              />
+            ))}
+          </View>
+
+          {/* Colour film for visual stress */}
+          <Text variant="bodySm" weight="semibold" style={styles.groupLabel}>
+            Colour tint over the screen
+          </Text>
+          <Text variant="caption" color={COLORS.textMuted} style={{ marginBottom: SPACING.xs }}>
+            If text seems to shimmer or swim on a plain background, a tint often settles it. Which
+            colour helps is personal — try a few.
+          </Text>
+          <View style={styles.swatchRow}>
+            {Object.keys(COLOR_OVERLAYS).map((key) => {
+              const tint = COLOR_OVERLAYS[key];
+              const selected = (colorOverlay || 'none') === key;
+              return (
+                <TouchableOpacity
+                  key={key}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                  accessibilityLabel={`${OVERLAY_LABELS[key]} tint`}
+                  onPress={() => setColorOverlay(key)}
+                  style={[styles.swatch, selected ? styles.swatchSelected : null]}
+                >
+                  <View
+                    style={[
+                      styles.swatchChip,
+                      { backgroundColor: tint || COLORS.surface, justifyContent: 'center' },
+                    ]}
+                  >
+                    {selected ? <Check size={12} color={COLORS.text} /> : null}
+                  </View>
+                  <Text
+                    variant="caption"
+                    color={selected ? COLORS.text : COLORS.textMuted}
+                    align="center"
+                  >
+                    {OVERLAY_LABELS[key]}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {colorOverlay && colorOverlay !== 'none' ? (
+            <View style={styles.optionsRow}>
+              {[0.08, 0.12, 0.2, 0.3].map((value) => (
+                <Button
+                  key={`tint-${value}`}
+                  variant={
+                    Math.abs((colorOverlayOpacity || 0.12) - value) < 0.01 ? 'primary' : 'secondary'
+                  }
+                  size="sm"
+                  title={`${Math.round(value * 100)}%`}
+                  onPress={() => setColorOverlay(colorOverlay, value)}
+                  style={{ flex: 1 }}
+                />
+              ))}
+            </View>
+          ) : null}
+
           {/* Dyslexia Quick Features */}
           <View style={styles.togglesCard}>
             <TouchableOpacity
@@ -264,10 +430,11 @@ export const SettingsScreen: React.FC = () => {
             >
               <View style={{ flex: 1 }}>
                 <Text variant="bodySm" weight="semibold">
-                  Bionic Reading Anchors
+                  Bold the start of each word
                 </Text>
                 <Text variant="caption" color={COLORS.textMuted}>
-                  Bolds initial word letters to accelerate saccadic eye jumping
+                  Some readers find it helps them keep their place. The evidence for it is weak, so
+                  it is off by default — try it and keep it only if it actually helps you.
                 </Text>
               </View>
               <Tag label={bionic ? 'Active' : 'Off'} variant={bionic ? 'cyan' : 'neutral'} />
@@ -283,10 +450,11 @@ export const SettingsScreen: React.FC = () => {
             >
               <View style={{ flex: 1 }}>
                 <Text variant="bodySm" weight="semibold">
-                  Movable Reading Ruler
+                  Reading ruler
                 </Text>
                 <Text variant="caption" color={COLORS.textMuted}>
-                  Draggable focus guide line eliminating paragraph crowding
+                  A movable band that isolates one line at a time, so your eye cannot skip or repeat
+                  a line in a dense paragraph.
                 </Text>
               </View>
               <Tag
@@ -297,15 +465,115 @@ export const SettingsScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* 2. VOICE & AUDIO PREFERENCES */}
+        {/* 2. LANGUAGE, VOICE & READING ALOUD */}
         <View style={styles.section}>
-          <Kicker color={COLORS.cyan}>Speech Synthesis</Kicker>
+          <Kicker color={COLORS.cyan}>Language & voice</Kicker>
           <Subheading variant="titleSm" style={{ marginTop: 2, marginBottom: SPACING.sm }}>
-            Text-to-Speech Settings
+            How SETU talks to you
           </Subheading>
 
+          <View style={styles.noteRow}>
+            <Languages size={15} color={COLORS.cyan} />
+            <Text variant="caption" color={COLORS.textMuted} style={{ flex: 1, marginLeft: 8 }}>
+              One choice covers both halves: the language answers come back in, and the language
+              they are read aloud in. Setting only one gives you a Hindi voice reading English.
+            </Text>
+          </View>
+
+          <View style={styles.languageGrid}>
+            {LANGUAGES.map((item) => {
+              const selected = language === item.code;
+              return (
+                <TouchableOpacity
+                  key={item.code}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                  accessibilityLabel={`${item.name}, ${item.native}`}
+                  onPress={() => setLanguage(item.code)}
+                  style={[styles.languageChip, selected ? styles.languageChipSelected : null]}
+                >
+                  <Text
+                    variant="bodySm"
+                    weight={selected ? 'bold' : 'normal'}
+                    color={selected ? COLORS.cyanDark : COLORS.text}
+                  >
+                    {item.native}
+                  </Text>
+                  <Text variant="caption" color={COLORS.textMuted}>
+                    {item.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Natural voice picker, only when the engine actually offers one */}
           <Text variant="bodySm" weight="semibold" style={styles.groupLabel}>
-            Playback Speed
+            Voice
+          </Text>
+
+          {naturalVoice === null ? (
+            <Text variant="caption" color={COLORS.textMuted}>
+              Checking which voices this engine has...
+            </Text>
+          ) : naturalVoice ? (
+            <View style={styles.voiceGrid}>
+              {voices.map((item) => {
+                const selected = voice === item.id;
+                return (
+                  <TouchableOpacity
+                    key={item.id}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={`${item.label}, ${item.note}`}
+                    onPress={async () => {
+                      await setVoice(item.id);
+                      tts.speak(languageSample(language));
+                    }}
+                    style={[styles.voiceChip, selected ? styles.voiceChipSelected : null]}
+                  >
+                    <Text
+                      variant="bodySm"
+                      weight={selected ? 'bold' : 'normal'}
+                      color={selected ? COLORS.cyanDark : COLORS.text}
+                    >
+                      {item.label}
+                    </Text>
+                    <Text variant="caption" color={COLORS.textMuted}>
+                      {item.note}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ) : (
+            <Text variant="caption" color={COLORS.textMuted}>
+              This engine has no natural voice configured, so SETU is using the synthesiser built
+              into your phone. Everything still reads aloud - it just sounds more robotic.
+            </Text>
+          )}
+
+          <TouchableOpacity
+            accessibilityRole="switch"
+            accessibilityState={{ checked: speakOnTap }}
+            accessibilityLabel="Speak mind map branches when tapped"
+            onPress={toggleSpeakOnTap}
+            style={[styles.toggleRow, speakOnTap ? styles.toggleRowActive : null]}
+          >
+            <View style={{ flex: 1 }}>
+              <Text variant="bodySm" weight="semibold">
+                Read a branch when I tap it
+              </Text>
+              <Text variant="caption" color={COLORS.textMuted}>
+                A map of silent text is still a wall of words. Pairing each branch with audio is what
+                makes the diagram readable.
+              </Text>
+            </View>
+            <Tag label={speakOnTap ? 'On' : 'Off'} variant={speakOnTap ? 'cyan' : 'neutral'} />
+          </TouchableOpacity>
+
+          <Text variant="bodySm" weight="semibold" style={styles.groupLabel}>
+            Reading pace
           </Text>
           <View style={styles.optionsRow}>
             {[0.75, 1.0, 1.25, 1.5].map((rate) => (
@@ -321,7 +589,7 @@ export const SettingsScreen: React.FC = () => {
           </View>
 
           <Text variant="bodySm" weight="semibold" style={styles.groupLabel}>
-            Voice Pitch
+            Pitch
           </Text>
           <View style={styles.optionsRow}>
             {[0.8, 1.0, 1.2].map((pitch) => (
@@ -337,13 +605,33 @@ export const SettingsScreen: React.FC = () => {
           </View>
 
           <Button
-            title="Test voice speech"
+            title="Hear how that sounds"
             variant="secondary"
             size="md"
             icon={<Volume2 size={16} color={COLORS.cyan} />}
             onPress={handleTestVoice}
             style={{ marginTop: SPACING.sm }}
           />
+        </View>
+
+        {/* 3. MOMENTUM */}
+        <View style={styles.section}>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Open Momentum - points, streak and milestones"
+            onPress={() => navigation?.navigate('Momentum')}
+            style={styles.linkRow}
+          >
+            <TrendingUp size={18} color={COLORS.cyan} />
+            <View style={{ flex: 1, marginLeft: SPACING.md }}>
+              <Text variant="bodySm" weight="semibold">
+                Momentum
+              </Text>
+              <Text variant="caption" color={COLORS.textMuted}>
+                Points, streak and milestones - and the switch to turn the notifications off
+              </Text>
+            </View>
+          </TouchableOpacity>
         </View>
 
         {/* 3. ENGINE & BACKEND CONNECTION */}
@@ -383,12 +671,18 @@ export const SettingsScreen: React.FC = () => {
             </View>
 
             <Input
-              label="Backend Server URL"
-              hint="Android emulator uses http://10.0.2.2:3000, physical devices use your LAN or cloud URL"
+              label="Engine address"
+              hint={
+                isCustomApiUrl(customApiUrl)
+                  ? `Leave this empty to go back to the engine this build ships with (${DEFAULT_API_URL}).`
+                  : `Using the engine this build ships with: ${DEFAULT_API_URL}. Only change this if you are running your own.`
+              }
+              placeholder={DEFAULT_API_URL}
               value={apiUrlInput}
               onChangeText={setApiUrlInput}
               autoCapitalize="none"
               autoCorrect={false}
+              keyboardType="url"
               containerStyle={{ marginTop: SPACING.sm }}
             />
 
@@ -479,10 +773,11 @@ export const SettingsScreen: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: COLORS.bg,
+    backgroundColor: t.bg,
   },
   scrollContent: {
     padding: SPACING.md,
@@ -503,15 +798,114 @@ const styles = StyleSheet.create({
     gap: SPACING.xs,
     marginBottom: SPACING.sm,
   },
+  swatchRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+    marginBottom: SPACING.sm,
+  },
+  swatch: {
+    width: 76,
+    alignItems: 'center',
+    gap: 4,
+    padding: 6,
+    borderRadius: RADIUS.md,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  swatchSelected: {
+    borderColor: t.cyan,
+    backgroundColor: t.cyanLight,
+  },
+  swatchChip: {
+    width: '100%',
+    height: 38,
+    borderRadius: RADIUS.sm,
+    borderWidth: 1,
+    borderColor: t.divider,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+  },
+  swatchInk: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  noteRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: SPACING.md,
+    borderRadius: RADIUS.md,
+    backgroundColor: t.surface,
+    borderWidth: 1,
+    borderColor: t.divider,
+    marginBottom: SPACING.md,
+  },
+  languageGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+  },
+  languageChip: {
+    minWidth: 96,
+    flexGrow: 1,
+    minHeight: 56,
+    justifyContent: 'center',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: t.divider,
+    backgroundColor: t.surface,
+  },
+  languageChipSelected: {
+    borderColor: t.cyan,
+    borderWidth: 1.5,
+    backgroundColor: t.cyanLight,
+  },
+  voiceGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+  },
+  voiceChip: {
+    minWidth: 108,
+    flexGrow: 1,
+    minHeight: 52,
+    justifyContent: 'center',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: t.divider,
+    backgroundColor: t.surface,
+  },
+  voiceChipSelected: {
+    borderColor: t.cyan,
+    borderWidth: 1.5,
+    backgroundColor: t.cyanLight,
+  },
+  linkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 64,
+    padding: SPACING.md,
+    borderRadius: RADIUS.md,
+    backgroundColor: t.surface,
+    borderWidth: 1,
+    borderColor: t.divider,
+  },
   optionBtn: {
     flex: 1,
   },
   togglesCard: {
-    backgroundColor: COLORS.surface,
+    backgroundColor: t.surface,
     borderRadius: RADIUS.md,
     padding: SPACING.sm,
     borderWidth: 1,
-    borderColor: COLORS.dividerSubtle,
+    borderColor: t.dividerSubtle,
     marginTop: SPACING.xs,
   },
   toggleRow: {
@@ -522,7 +916,7 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS.sm,
   },
   toggleRowActive: {
-    backgroundColor: COLORS.cyanLight,
+    backgroundColor: t.cyanLight,
   },
   engineCard: {
     padding: SPACING.md,

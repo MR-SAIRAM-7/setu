@@ -1,7 +1,32 @@
 import { useEffect, useState } from 'react';
 import { getPrefs, savePrefs, listMaps, clearAllMaps, restoreSeedMaps, THEMES } from '../lib/storage';
 import { getUserId } from '../lib/identity';
-import { api } from '../lib/api';
+import { api, setApiLanguage } from '../lib/api';
+import { tts } from '../lib/tts';
+import VoiceInputButton from '../components/VoiceInputButton';
+
+/**
+ * Audition line, per language.
+ *
+ * Written natively rather than machine-translated from the English one, so each
+ * sample actually demonstrates that language's rhythm. Falls back to English for
+ * anything not listed.
+ */
+const VOICE_SAMPLES = {
+  'en-IN': 'Here is your map. Point at any branch and I will read it to you, one piece at a time.',
+  'hi-IN': 'यह रहा आपका मानचित्र। किसी भी शाखा पर इशारा कीजिए, मैं उसे एक-एक करके पढ़कर सुनाऊँगी।',
+  'bn-IN': 'এই যে আপনার মানচিত্র। যেকোনো শাখায় আঙুল রাখুন, আমি এক এক করে পড়ে শোনাব।',
+  'gu-IN': 'આ રહ્યો તમારો નકશો. કોઈ પણ શાખા પર આંગળી મૂકો, હું એક પછી એક વાંચી સંભળાવીશ.',
+  'kn-IN': 'ಇದು ನಿಮ್ಮ ನಕ್ಷೆ. ಯಾವುದೇ ಶಾಖೆಯ ಮೇಲೆ ತೋರಿಸಿ, ನಾನು ಒಂದೊಂದಾಗಿ ಓದಿ ಹೇಳುತ್ತೇನೆ.',
+  'ml-IN': 'ഇതാ നിങ്ങളുടെ ഭൂപടം. ഏതെങ്കിലും ശാഖയിൽ ചൂണ്ടിക്കാണിക്കൂ, ഞാൻ ഓരോന്നായി വായിച്ചു തരാം.',
+  'mr-IN': 'हा तुमचा नकाशा. कोणत्याही फांदीवर बोट ठेवा, मी एक एक करून वाचून दाखवेन.',
+  'od-IN': 'ଏହା ଆପଣଙ୍କର ମାନଚିତ୍ର। ଯେକୌଣସି ଶାଖାକୁ ଦେଖାନ୍ତୁ, ମୁଁ ଗୋଟି ଗୋଟି କରି ପଢ଼ି ଶୁଣାଇବି।',
+  'pa-IN': 'ਇਹ ਤੁਹਾਡਾ ਨਕਸ਼ਾ ਹੈ। ਕਿਸੇ ਵੀ ਸ਼ਾਖਾ ਵੱਲ ਇਸ਼ਾਰਾ ਕਰੋ, ਮੈਂ ਇੱਕ-ਇੱਕ ਕਰਕੇ ਪੜ੍ਹ ਕੇ ਸੁਣਾਵਾਂਗੀ।',
+  'ta-IN': 'இதோ உங்கள் வரைபடம். எந்தக் கிளையையும் சுட்டிக்காட்டுங்கள், நான் ஒவ்வொன்றாகப் படித்துக் காட்டுகிறேன்.',
+  'te-IN': 'ఇదిగో మీ మ్యాప్. ఏ శాఖనైనా చూపించండి, నేను ఒక్కొక్కటిగా చదివి వినిపిస్తాను.'
+};
+
+const sampleFor = (code) => VOICE_SAMPLES[code] || VOICE_SAMPLES['en-IN'];
 
 export default function Settings() {
   const [prefs, setPrefs] = useState(getPrefs);
@@ -9,6 +34,9 @@ export default function Settings() {
   const [checking, setChecking] = useState(false);
   const [mapsCount, setMapsCount] = useState(0);
   const [notice, setNotice] = useState(null);
+  const [speech, setSpeech] = useState(null);
+  const [auditioning, setAuditioning] = useState(null);
+  const [sttTestTranscript, setSttTestTranscript] = useState('');
   const userId = getUserId();
 
   useEffect(() => {
@@ -16,15 +44,52 @@ export default function Settings() {
     api.health().then((result) => {
       if (!cancelled) setHealth(result);
     });
+    api.speechVoices().then((result) => {
+      if (!cancelled) setSpeech(result);
+    });
     setMapsCount(listMaps().length);
     return () => {
       cancelled = true;
+      tts.stop();
     };
   }, []);
 
   const update = (patch) => {
     const next = savePrefs(patch);
     setPrefs(next);
+  };
+
+  /** Switch voice and immediately play it, so the choice is heard, not guessed. */
+  const chooseVoice = (voiceId) => {
+    update({ voice: voiceId });
+    tts.setSpeaker(voiceId);
+    setAuditioning(voiceId);
+    tts.speak(sampleFor(prefs.language), { onEnd: () => setAuditioning(null) }).catch(() =>
+      setAuditioning(null)
+    );
+  };
+
+  const changeSpeechRate = (rate) => {
+    update({ speechRate: rate });
+    tts.setRate(rate);
+  };
+
+  /**
+   * Switch the conversation language.
+   *
+   * Updates all three consumers together — the AI request layer, the speech
+   * engine, and the document `lang` attribute that drives screen-reader
+   * pronunciation — then reads the sample so the change is immediately audible.
+   */
+  const chooseLanguage = (code) => {
+    update({ language: code });
+    setApiLanguage(code);
+    tts.setLanguage(code);
+    document.documentElement.lang = code;
+    setAuditioning(`lang_${code}`);
+    tts.speak(sampleFor(code), { onEnd: () => setAuditioning(null) }).catch(() =>
+      setAuditioning(null)
+    );
   };
 
   const deepCheck = async () => {
@@ -210,41 +275,332 @@ export default function Settings() {
             </div>
           </div>
 
-          {/* Bionic Reading & Reading Ruler Toggles */}
+          {/* Tracking aids — honestly framed. See the note below. */}
           <div className="space-y-3 pt-2">
-            <div className="flex items-center justify-between p-3 rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-divider)]">
-              <div>
+            <div className="flex items-center justify-between gap-4 p-3 rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-divider)]">
+              <div className="min-w-0">
                 <span className="block text-[14px] font-bold text-[var(--color-text)]">
-                  Bionic Syllable Fixation
+                  Bionic fixation bolding
                 </span>
                 <span className="block text-[12px] text-[color-mix(in_srgb,var(--color-text)_60%,transparent)]">
-                  Bolds first letters of words to guide eye fixations and speed comprehension
+                  Bolds the first letters of each word. Some people find it helps them track a
+                  line; the evidence that it improves comprehension is weak. Try it and keep it
+                  only if it genuinely helps you.
                 </span>
               </div>
               <input
                 type="checkbox"
                 checked={prefs.bionicReading !== false}
                 onChange={(e) => update({ bionicReading: e.target.checked })}
-                className="h-5 w-5 rounded accent-[var(--color-accent)] cursor-pointer"
+                aria-label="Bionic fixation bolding"
+                className="h-5 w-5 shrink-0 rounded accent-[var(--color-accent)] cursor-pointer"
               />
             </div>
 
-            <div className="flex items-center justify-between p-3 rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-divider)]">
-              <div>
+            <div className="flex items-center justify-between gap-4 p-3 rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-divider)]">
+              <div className="min-w-0">
                 <span className="block text-[14px] font-bold text-[var(--color-text)]">
-                  ADHD Reading Ruler / Focus Guide
+                  Reading ruler
                 </span>
                 <span className="block text-[12px] text-[color-mix(in_srgb,var(--color-text)_60%,transparent)]">
-                  Highlights active reading line and masks peripheral distractions (Toggle with Alt+H)
+                  Highlights the line you are on and dims the rest. Toggle any time with Alt+H.
                 </span>
               </div>
               <input
                 type="checkbox"
                 checked={Boolean(prefs.readingRuler)}
                 onChange={(e) => update({ readingRuler: e.target.checked })}
-                className="h-5 w-5 rounded accent-[var(--color-accent)] cursor-pointer"
+                aria-label="Reading ruler"
+                className="h-5 w-5 shrink-0 rounded accent-[var(--color-accent)] cursor-pointer"
               />
             </div>
+
+            <p className="p-3 rounded-[var(--radius-md)] border border-dashed border-[var(--color-divider)] text-[12.5px] leading-relaxed text-[color-mix(in_srgb,var(--color-text)_68%,transparent)]">
+              <strong className="text-[var(--color-text)]">A note on fonts and bolding.</strong>{' '}
+              Dyslexia is a difficulty with decoding and comprehension, not with eyesight — so
+              bigger text and bolded word-starts help far less than people expect. The settings
+              above are comfort options. The tools that actually move comprehension are in the
+              next section.
+            </p>
+          </div>
+        </section>
+
+        {/* Comprehension support — the things that actually address decoding */}
+        <section className="space-y-4 pt-4 border-t border-[var(--color-divider)]">
+          <div>
+            <span className="kicker block">Comprehension Support</span>
+            <p className="mt-1 text-[13px] leading-relaxed text-[color-mix(in_srgb,var(--color-text)_68%,transparent)]">
+              Audio and diagrams carry meaning without asking you to decode text first. These are
+              the primary accommodations in SETU.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 p-3 rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-divider)]">
+            <div className="min-w-0">
+              <span className="block text-[14px] font-bold text-[var(--color-text)]">
+                Speak mind map branches on hover
+              </span>
+              <span className="block text-[12px] text-[color-mix(in_srgb,var(--color-text)_60%,transparent)]">
+                Pointing at or tabbing to a branch reads it aloud. A diagram whose labels are
+                silent is still a reading task — this is what makes the map usable.
+              </span>
+            </div>
+            <input
+              type="checkbox"
+              checked={prefs.speakOnHover !== false}
+              onChange={(e) => update({ speakOnHover: e.target.checked })}
+              aria-label="Speak mind map branches on hover"
+              className="h-5 w-5 shrink-0 rounded accent-[var(--color-accent)] cursor-pointer"
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-4 p-3 rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-divider)]">
+            <div className="min-w-0">
+              <span className="block text-[14px] font-bold text-[var(--color-text)]">
+                Picture mode on mind maps
+              </span>
+              <span className="block text-[12px] text-[color-mix(in_srgb,var(--color-text)_60%,transparent)]">
+                Strips the supporting sentences so the map reads as shape and colour. The detail
+                moves to the voice instead of the page.
+              </span>
+            </div>
+            <input
+              type="checkbox"
+              checked={Boolean(prefs.pictureMode)}
+              onChange={(e) => update({ pictureMode: e.target.checked })}
+              aria-label="Picture mode on mind maps"
+              className="h-5 w-5 shrink-0 rounded accent-[var(--color-accent)] cursor-pointer"
+            />
+          </div>
+
+          {/* Language. Deliberately above the voice picker, because it changes
+              what SETU says as well as how it sounds. */}
+          <div className="space-y-3 p-3 rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-divider)]">
+            <div>
+              <span className="block text-[14px] font-bold text-[var(--color-text)]">
+                Conversation language
+              </span>
+              <span className="block text-[12px] leading-relaxed text-[color-mix(in_srgb,var(--color-text)_62%,transparent)]">
+                Mind maps, mode results, the listener, and the reading voice all switch together.
+                Pick one to hear it straight away.
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {(speech?.languages || [{ code: 'en-IN', name: 'English', native: 'English' }]).map(
+                (language) => {
+                  const selected = (prefs.language || 'en-IN') === language.code;
+                  return (
+                    <button
+                      key={language.code}
+                      onClick={() => chooseLanguage(language.code)}
+                      aria-pressed={selected}
+                      lang={language.code}
+                      className={`rounded-[var(--radius-md)] border p-2.5 text-left transition-all ${
+                        selected
+                          ? 'border-[var(--color-accent)] bg-[var(--color-accent-100)] shadow-[var(--shadow-sm)]'
+                          : 'border-[var(--color-divider)] bg-[var(--color-bg)] hover:border-[var(--color-accent)]'
+                      }`}
+                    >
+                      <span className="flex items-center gap-1.5">
+                        {auditioning === `lang_${language.code}` && (
+                          <i className="ph-duotone ph-speaker-high animate-setu-breathe text-sm text-[var(--color-accent)]"></i>
+                        )}
+                        <span
+                          className={`text-[15px] font-bold leading-tight ${
+                            selected ? 'text-[var(--color-accent-900)]' : 'text-[var(--color-text)]'
+                          }`}
+                        >
+                          {language.native}
+                        </span>
+                      </span>
+                      <span className="mt-0.5 block text-[11px] text-[color-mix(in_srgb,var(--color-text)_58%,transparent)]">
+                        {language.name}
+                      </span>
+                    </button>
+                  );
+                }
+              )}
+            </div>
+
+            <p className="text-[11.5px] leading-relaxed text-[color-mix(in_srgb,var(--color-text)_55%,transparent)]">
+              Buttons and menus stay in English for now — this changes what SETU writes and says,
+              not the app's own labels.
+            </p>
+          </div>
+
+          {/* Voice picker. The catalogue comes from the engine so it always
+              matches the model actually configured server-side. */}
+          <div className="space-y-3 p-3 rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-divider)]">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <span className="block text-[14px] font-bold text-[var(--color-text)]">
+                Reading voice
+              </span>
+              {speech && (
+                <span
+                  className={`tag ${speech.enabled ? 'tag-accent' : 'tag-neutral'} text-[10.5px]`}
+                >
+                  {speech.enabled ? `Sarvam AI · ${speech.model}` : 'Browser voice'}
+                </span>
+              )}
+            </div>
+
+            {speech?.enabled ? (
+              <>
+                <p className="text-[12px] leading-relaxed text-[color-mix(in_srgb,var(--color-text)_62%,transparent)]">
+                  Natural human voices. Pick one to hear it straight away — it is used everywhere
+                  SETU reads to you.
+                </p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {(speech.voices || []).map((voice) => {
+                    const selected = (prefs.voice || speech.defaultSpeaker) === voice.id;
+                    return (
+                      <button
+                        key={voice.id}
+                        onClick={() => chooseVoice(voice.id)}
+                        aria-pressed={selected}
+                        className={`rounded-[var(--radius-md)] border p-2.5 text-left transition-all ${
+                          selected
+                            ? 'border-[var(--color-accent)] bg-[var(--color-accent-100)] shadow-[var(--shadow-sm)]'
+                            : 'border-[var(--color-divider)] bg-[var(--color-bg)] hover:border-[var(--color-accent)]'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <i
+                            className={`ph-duotone ${
+                              auditioning === voice.id
+                                ? 'ph-speaker-high animate-setu-breathe'
+                                : 'ph-play-circle'
+                            } text-base text-[var(--color-accent)]`}
+                          ></i>
+                          <span
+                            className={`text-[13.5px] font-bold ${
+                              selected ? 'text-[var(--color-accent-900)]' : 'text-[var(--color-text)]'
+                            }`}
+                          >
+                            {voice.label}
+                          </span>
+                        </span>
+                        <span className="mt-0.5 block text-[11px] leading-snug text-[color-mix(in_srgb,var(--color-text)_58%,transparent)]">
+                          {voice.note}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <p className="text-[12px] leading-relaxed text-[color-mix(in_srgb,var(--color-text)_62%,transparent)]">
+                Using your browser's built-in voice. For natural human speech, set{' '}
+                <code className="bg-[var(--color-bg)] px-1">SARVAM_API_KEY</code> in the engine's{' '}
+                <code className="bg-[var(--color-bg)] px-1">.env</code> and restart it.
+              </p>
+            )}
+
+            <div className="space-y-1.5 border-t border-[var(--color-divider)] pt-3">
+              <label className="block text-[13px] font-semibold text-[var(--color-text)]">
+                Speaking pace
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { value: 0.75, label: 'Slower' },
+                  { value: 1, label: 'Normal' },
+                  { value: 1.25, label: 'Brisk' },
+                  { value: 1.5, label: 'Fast' }
+                ].map((option) => {
+                  const selected = (prefs.speechRate || 1) === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      onClick={() => changeSpeechRate(option.value)}
+                      aria-pressed={selected}
+                      className={`rounded-[var(--radius-md)] border px-3 py-1.5 text-[12.5px] font-semibold transition-all ${
+                        selected
+                          ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-bg)]'
+                          : 'border-[var(--color-divider)] text-[var(--color-text)] hover:border-[var(--color-accent)]'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+                <button
+                  onClick={() => {
+                    setAuditioning('sample');
+                    tts
+                      .speak(sampleFor(prefs.language), { onEnd: () => setAuditioning(null) })
+                      .catch(() => setAuditioning(null));
+                  }}
+                  className="btn btn-ghost !min-h-[32px] text-[12.5px]"
+                >
+                  <i className="ph-duotone ph-speaker-high"></i>
+                  Test voice
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Microphone & Voice Input Test */}
+          <div className="space-y-3 p-3 rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-divider)]">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <span className="block text-[14px] font-bold text-[var(--color-text)]">
+                Microphone & Speech Input (STT)
+              </span>
+              <span className="tag tag-accent text-[10.5px]">
+                {speech?.sttEnabled ? 'Sarvam Saaras · Live' : 'Web Speech STT'}
+              </span>
+            </div>
+            <p className="text-[12px] leading-relaxed text-[color-mix(in_srgb,var(--color-text)_62%,transparent)]">
+              Speak into your microphone to test speech recognition. Works across Mind Map Chat, Modes, Listen, and Search.
+            </p>
+            <div className="flex items-center gap-2.5">
+              <VoiceInputButton
+                onTranscript={(txt) => setSttTestTranscript(txt)}
+                showLabel={true}
+                label="Test Microphone"
+                size="md"
+              />
+              {sttTestTranscript && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    tts.speak(sttTestTranscript);
+                  }}
+                  className="btn btn-ghost !min-h-[34px] text-[12px] flex items-center gap-1.5"
+                  title="Read back transcribed speech"
+                >
+                  <i className="ph-duotone ph-speaker-high"></i>
+                  Read back
+                </button>
+              )}
+            </div>
+            {sttTestTranscript && (
+              <div className="p-2.5 rounded-[var(--radius-sm)] bg-[var(--color-bg)] border border-[var(--color-divider)] text-[13px] text-[var(--color-text)] animate-setu-rise">
+                <span className="text-[11px] font-semibold text-[color-mix(in_srgb,var(--color-text)_55%,transparent)] block mb-1">
+                  Transcribed Result:
+                </span>
+                “{sttTestTranscript}”
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between gap-4 p-3 rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-divider)]">
+            <div className="min-w-0">
+              <span className="block text-[14px] font-bold text-[var(--color-text)]">
+                Points, streaks, and milestones
+              </span>
+              <span className="block text-[12px] text-[color-mix(in_srgb,var(--color-text)_60%,transparent)]">
+                Progress rewards for finishing things. Turn off if scoring makes the work feel
+                like pressure — your progress keeps counting quietly either way.
+              </span>
+            </div>
+            <input
+              type="checkbox"
+              checked={prefs.rewards !== false}
+              onChange={(e) => update({ rewards: e.target.checked })}
+              aria-label="Points, streaks, and milestones"
+              className="h-5 w-5 shrink-0 rounded accent-[var(--color-accent)] cursor-pointer"
+            />
           </div>
         </section>
 

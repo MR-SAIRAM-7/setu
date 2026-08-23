@@ -7,7 +7,7 @@
  */
 
 (() => {
-  const { Feature, UI, Store } = window.SETU;
+  const { Feature, UI, Store, Scroll, Dock, icon } = window.SETU;
 
   class AutoScroll extends Feature {
     static key = 'scroll';
@@ -30,7 +30,12 @@
     }
 
     onDisable() {
+      clearTimeout(this.resumeTimer);
+      this.releaseDock?.();
+      this.releaseDock = null;
+      Scroll.reset();
       UI.destroyHost('scroll');
+      this.scope = null;
     }
 
     onSettings() {
@@ -58,19 +63,16 @@
 
       if (!this.running) return;
 
-      const distance = this.pixelsPerSecond() * deltaSeconds + this.remainder;
-      const whole = Math.floor(distance);
-      this.remainder = distance - whole;
+      // Through the arbiter: it carries the sub-pixel remainder (so 80 wpm
+      // actually moves) and it targets the Focus Mode reader when that is
+      // open, instead of scrolling the document uselessly behind it.
+      const moved = Scroll.by(this.pixelsPerSecond() * deltaSeconds);
 
-      if (whole > 0) {
-        const before = window.scrollY;
-        window.scrollBy(0, whole);
+      if (moved === 0 && Scroll.position() >= Scroll.max() - 1) {
         // Reached the bottom — stop rather than spin against the end.
-        if (window.scrollY === before) {
-          this.running = false;
-          this.render();
-          UI.toast('Reached the end of the page.', { tone: 'info' });
-        }
+        this.running = false;
+        this.render();
+        UI.toast('Reached the end of the page.', { tone: 'info' });
       }
     }
 
@@ -100,6 +102,9 @@
       if (!this.running) return;
       this.running = false;
       this.render();
+
+      // One timer, replaced on each nudge. Registering a fresh cleanup per
+      // wheel event leaked an entry for every scroll the user made.
       clearTimeout(this.resumeTimer);
       this.resumeTimer = setTimeout(() => {
         if (this.enabled) {
@@ -108,7 +113,6 @@
           this.render();
         }
       }, 1800);
-      this.cleanup(() => clearTimeout(this.resumeTimer));
     }
 
     toggleRun() {
@@ -129,22 +133,24 @@
       const style = document.createElement('style');
       style.textContent = `
         .bar {
-          position: fixed; bottom: 24px; right: 24px;
-          display: flex; align-items: center; gap: 9px;
-          padding: 8px 14px; background: var(--surface);
-          border: 1px solid var(--border); border-radius: 999px;
+          position: fixed;
+          display: flex; align-items: center; gap: 10px;
+          padding: 10px 15px; background: var(--surface);
+          border: 1px solid var(--border); border-radius: var(--radius-lg);
           box-shadow: var(--shadow); pointer-events: auto; font-family: var(--font);
         }
         button {
           background: transparent; border: 1px solid var(--border);
-          color: var(--text); width: 32px; height: 32px; border-radius: 50%;
-          cursor: pointer; font-size: 13px; font-weight: 700;
+          color: var(--text); width: 32px; height: 32px; border-radius: var(--radius);
+          display: grid; place-items: center; cursor: pointer;
+          transition: background .15s ease, border-color .15s ease, color .15s ease;
         }
-        button:hover { background: var(--accent-100); border-color: var(--accent); color: var(--accent-700); }
+        button:hover { background: var(--accent-100); border-color: var(--accent); color: var(--accent-900); }
         button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-        button[data-primary] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
-        .wpm { font-size: 12px; font-weight: 700; min-width: 62px; text-align: center; color: var(--text-dim); }
-        .wpm b { color: var(--text); font-size: 13.5px; }
+        button[data-primary] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+        button[data-primary]:hover { background: var(--accent-600); border-color: var(--accent-600); color: var(--on-accent); }
+        .wpm { font-size: 12.5px; font-weight: 600; min-width: 66px; text-align: center; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+        .wpm b { color: var(--text); font-size: 14px; }
       `;
       root.appendChild(style);
 
@@ -152,15 +158,22 @@
       scope.className = 'setu-scope';
       scope.innerHTML = `
         <div class="bar" role="group" aria-label="Auto scroll controls">
-          <button data-act="slower" aria-label="Slower" title="Slower (Shift+↓)">−</button>
+          <button data-act="slower" aria-label="Slower" title="Slower (Shift+Down)">${icon('minus')}</button>
           <span class="wpm"><b>220</b> wpm</span>
-          <button data-act="faster" aria-label="Faster" title="Faster (Shift+↑)">+</button>
-          <button data-primary data-act="run" aria-label="Pause" title="Pause / resume (Space)">❚❚</button>
-          <button data-act="close" aria-label="Close auto scroll" title="Close">×</button>
+          <button data-act="faster" aria-label="Faster" title="Faster (Shift+Up)">${icon('plus')}</button>
+          <button data-primary data-act="run" aria-label="Pause" title="Pause / resume (Space)">${icon('pause')}</button>
+          <button data-act="close" aria-label="Close auto scroll" title="Close">${icon('x')}</button>
         </div>
       `;
       root.appendChild(scope);
       this.scope = scope;
+
+      // Docked rather than pinned to the corner: Read Aloud and the Commander
+      // also live along the bottom edge, and three bars in one corner meant
+      // two of them were unreachable.
+      const bar = scope.querySelector('.bar');
+      this.releaseDock = Dock.register('scroll', 'bottom-right', bar);
+      Dock.observe(bar);
 
       scope.querySelector('[data-act="slower"]').onclick = () => this.changeSpeed(-20);
       scope.querySelector('[data-act="faster"]').onclick = () => this.changeSpeed(20);
@@ -174,7 +187,7 @@
       if (!this.scope) return;
       this.scope.querySelector('.wpm').innerHTML = `<b>${this.wpm}</b> wpm`;
       const btn = this.scope.querySelector('[data-act="run"]');
-      btn.textContent = this.running ? '❚❚' : '▶';
+      btn.innerHTML = icon(this.running ? 'pause' : 'play');
       btn.setAttribute('aria-label', this.running ? 'Pause' : 'Resume');
     }
   }

@@ -11,6 +11,7 @@ const { requestStructuredAI } = require('../services/aiService');
 const fallbacks = require('../services/fallbackEngine');
 const config = require('../config');
 const schemas = require('./modeSchemas');
+const { languageDirective, resolveLanguage, DEFAULT_CODE } = require('../config/languages');
 
 /**
  * @typedef {object} ModeDefinition
@@ -105,6 +106,52 @@ completes the sentence "You will know it worked when …" — so write
 "the terminal prints Done", not "It worked when the terminal prints Done".`,
     input: (b) => `GOAL: "${b.goal}"`,
     fallback: (b) => fallbacks.generateLocalGuideMode(b.goal)
+  },
+
+  numbers: {
+    name: 'setu_numbers',
+    schema: schemas.numbersSchema,
+    instructions: `You teach arithmetic to adults with dyscalculia, using the method special
+education uses: countable physical objects inside a short everyday story. Never
+explain with notation — no "carry the one", no equations, no algebra vocabulary.
+
+Choose ONE everyday countable object and stay with it for the whole problem.
+"objectEmoji" is a single emoji of that object, because the client draws that
+many of it on screen — the picture is the explanation, the words only narrate it.
+
+Every step must be something the reader could physically do with objects on a
+table: put down, add, slide away, deal into piles. "count" is how many objects
+that step involves, and "runningTotal" is how many are on the table afterwards —
+the client draws exactly those numbers, so they must be arithmetically correct
+and consistent from step to step, or the picture will contradict the words.
+
+Keep numbers whole wherever the problem allows. "checkIt" is a physical way to
+undo the operation and land back where they started. "realLife" is one ordinary
+situation where this exact sum shows up.`,
+    input: (b) => `NUMBER PROBLEM: "${b.problem}"`,
+    fallback: (b) => fallbacks.generateLocalNumbersMode(b.problem)
+  },
+
+  listen: {
+    name: 'setu_listen',
+    schema: schemas.listenSchema,
+    instructions: `You are a calm listener for someone who is frustrated, anxious, or worn down.
+Many of the people writing to you are dyslexic or ADHD adults who have spent the
+day being told they are careless when they are working twice as hard as anyone
+around them.
+
+Reflect back what you actually heard in their own register, name the feeling
+plainly, and validate it without flattery or forced positivity. Offer one short
+grounding exercise they can do at their desk, one open question, and one small
+concrete thing for the next ten minutes.
+
+Hard limits: you are not a therapist and must not present as one. Do not
+diagnose, do not interpret their childhood, do not mention medication, and do not
+tell them what their feelings "really" mean. Do not promise things will be fine.
+Never minimise with "at least" or "everyone feels that". Short sentences, second
+person, warm but not saccharine.`,
+    input: (b) => `WHAT THEY WROTE:\n${b.entry}\n\nHOW THEY RATED TODAY (1 worst - 5 best): ${b.mood || 'not given'}`,
+    fallback: (b) => fallbacks.generateLocalListenMode(b.entry)
   }
 };
 
@@ -119,34 +166,84 @@ function runMode(modeKey) {
 
   return async function handler(req, res, next) {
     try {
+      const language = resolveLanguage(req.body.language);
+
+      // The deterministic L0 engine only speaks English. Saying so explicitly
+      // is better than silently handing back English prose to someone who asked
+      // for Tamil and leaving them to wonder whether the feature is broken.
+      const fallbackPayload = (reason) => ({
+        ...mode.fallback(req.body),
+        fallback: true,
+        fallbackReason: reason,
+        language: DEFAULT_CODE,
+        languageFallback: language.code !== DEFAULT_CODE ? language.code : undefined
+      });
+
       if (!config.aiEnabled) {
-        return res.json({
-          ...mode.fallback(req.body),
-          fallback: true,
-          fallbackReason: 'No AI provider is configured on the server.'
-        });
+        return res.json(fallbackPayload('No AI provider is configured on the server.'));
       }
 
       try {
         const result = await requestStructuredAI({
           name: mode.name,
           schema: mode.schema,
-          instructions: mode.instructions,
+          instructions: `${mode.instructions}${languageDirective(language.code)}`,
           input: mode.input(req.body)
         });
-        res.json({ ...result, fallback: false });
+        res.json({ ...result, fallback: false, language: language.code });
       } catch (error) {
         console.warn(`[SETU ${modeKey}] AI failed, engaging L0 engine:`, error.message);
-        res.json({
-          ...mode.fallback(req.body),
-          fallback: true,
-          fallbackReason: error.message
-        });
+        res.json(fallbackPayload(error.message));
       }
     } catch (error) {
       next(error);
     }
   };
+}
+
+/**
+ * POST /api/numbers — concrete-object arithmetic.
+ *
+ * Guarded rather than left to the shared runner: with no problem text the
+ * deterministic engine would happily draw an empty table, and an explanation of
+ * nothing reads as a broken feature.
+ */
+const numbersRunner = runMode('numbers');
+
+function handleNumbersMode(req, res, next) {
+  const problem = String(req.body.problem || '').trim();
+  if (!problem) {
+    return res.status(400).json({ error: 'Type the sum or the word problem you are stuck on.' });
+  }
+  return numbersRunner(req, res, next);
+}
+
+/**
+ * POST /api/listen — reflective support, with the crisis path short-circuited.
+ *
+ * Risk language is checked *before* any provider call and answered from a fixed
+ * script, so a crisis reply can never be a sampled one, never depends on the AI
+ * being reachable, and never varies between runs. Only once that check passes
+ * does the turn go to the normal mode runner.
+ */
+const listenRunner = runMode('listen');
+
+async function handleListenMode(req, res, next) {
+  try {
+    const entry = String(req.body.entry || '').trim();
+    if (!entry) return res.status(400).json({ error: 'Write something first — anything at all.' });
+
+    if (fallbacks.detectCrisisLanguage(entry)) {
+      return res.json({
+        ...fallbacks.buildCrisisResponse(resolveLanguage(req.body.language).code),
+        fallback: false
+      });
+    }
+
+    return listenRunner(req, res, next);
+  } catch (error) {
+    next(error);
+  }
 }
 
 /** POST /api/summarize — key points from arbitrary page text. */
@@ -205,6 +302,8 @@ module.exports = {
   handlePracticeMode: runMode('practice'),
   handleWriteMode: runMode('write'),
   handleGuideMode: runMode('guide'),
+  handleNumbersMode,
+  handleListenMode,
   handleSummarize,
   handleExport
 };

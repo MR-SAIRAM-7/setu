@@ -1,28 +1,26 @@
 /**
  * Reading Themes — typography and colour adjustments applied to the live page.
  *
- * Unlike the overlay features this must reach into the page's own cascade, so
- * it works by injecting one stylesheet and setting a data attribute on <html>.
- * Everything is scoped under that attribute and removed cleanly on disable.
- *
- * Care is taken not to restyle SETU's own hosts, form controls the user is
- * typing in, or code blocks where letter-spacing would corrupt alignment.
+ * Implements Sanctuary's sensory palettes on arbitrary websites:
+ * Sepia, Velvet Dark, Sage, Pastel, High Contrast AAA, Cream & Dyslexia.
+ * Everything is scoped cleanly under [data-setu-theme] and cleanly removed on disable.
  */
 
 (() => {
   const { Feature, UI, Store } = window.SETU;
 
   const THEMES = {
-    default: null,
-    sepia: { bg: '#f6ecd9', text: '#3b3226', link: '#8a5a1f', border: 'rgba(0,0,0,.14)' },
-    dark: { bg: '#12151c', text: '#dfe3ea', link: '#8ab4ff', border: 'rgba(255,255,255,.12)' },
-    contrast: { bg: '#000000', text: '#ffffff', link: '#ffe600', border: '#ffffff' },
-    dyslexia: { bg: '#fffbf0', text: '#2b2b2b', link: '#0f5c8c', border: 'rgba(0,0,0,.18)', dyslexic: true },
-    calm: { bg: '#eef4f2', text: '#26332f', link: '#0f6f5c', border: 'rgba(0,0,0,.12)' }
+    sepia:    { name: 'Sepia', bg: '#f6ecd9', text: '#3b3226', link: '#8a5a1f', border: 'rgba(0,0,0,.14)' },
+    dark:     { name: 'Velvet Dark', bg: '#18181a', text: '#f3f2f2', link: '#38bdf8', border: 'rgba(243,242,242,.15)' },
+    contrast: { name: 'High Contrast AAA', bg: '#0d0d0d', text: '#ffffff', link: '#facc15', border: 'rgba(255,255,255,.25)' },
+    dyslexia: { name: 'Dyslexia Friendly', bg: '#faf7ee', text: '#26231e', link: '#00779c', border: 'rgba(38,35,30,.15)', dyslexic: true },
+    calm:     { name: 'Sage Calm', bg: '#f2f6f1', text: '#1c2b1d', link: '#15803d', border: 'rgba(28,43,29,.15)' },
+    pastel:   { name: 'Pastel Blue', bg: '#f0f4f8', text: '#1e293b', link: '#0284c7', border: 'rgba(30,41,59,.14)' },
+    cream:    { name: 'Warm Cream', bg: '#faf7ee', text: '#26231e', link: '#00779c', border: 'rgba(38,35,30,.15)' }
   };
 
   class ReadingTheme extends Feature {
-    static key = 'dyslexia';
+    static key = 'theme';
 
     constructor() {
       super();
@@ -30,32 +28,33 @@
     }
 
     onEnable() {
-      const stored = window.SETU.Store.get().theme;
-      this.theme = stored && stored !== 'default' ? stored : 'dyslexia';
       this.apply(this.theme);
-      UI.toast(`Reading theme: ${this.theme}`, { tone: 'success' });
+      this.cleanup(() => this.clear());
+      const label = THEMES[this.theme]?.name || this.theme;
+      UI.toast(`Reading theme: ${label}`, { tone: 'success' });
     }
 
     onDisable() {
       this.clear();
     }
 
-    /** Public entry point used by the popup's theme picker. */
-    setTheme(theme) {
-      this.theme = theme;
-      if (theme === 'default') {
-        this.clear();
-        // A theme of "default" means the feature is effectively off.
-        if (this.enabled) {
-          this.enabled = false;
-          this.runCleanups();
-        }
+    onSettings() {
+      if (this.enabled) this.apply(this.theme);
+    }
+
+    /**
+     * The single public entry point. `default` means "no theme", which is the
+     * same thing as the feature being off.
+     */
+    applyTheme(name) {
+      if (!name || name === 'default' || !THEMES[name]) {
+        this.disable();
         return;
       }
-      if (!this.enabled) {
-        this.enabled = true;
-      }
-      this.apply(theme);
+
+      this.theme = name;
+      if (this.enabled) this.apply(name);
+      else this.enable();
     }
 
     clear() {
@@ -77,62 +76,61 @@
         style = document.createElement('style');
         style.id = 'setu-theme-style';
         style.setAttribute('data-setu', 'style');
-        (document.head || document.documentElement).appendChild(style);
       }
+      (document.head || document.documentElement).appendChild(style);
 
       const settings = Store.get().settings;
+      const letterSpacing = Number(settings.letterSpacing ?? 0.02);
+      const lineHeight = Number(settings.lineHeight ?? 1.8);
       const fontStack = theme.dyslexic
-        ? `"OpenDyslexic", "Comic Sans MS", "Trebuchet MS", Verdana, sans-serif`
-        : `"Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+        ? '"Atkinson Hyperlegible", "Lexend", "OpenDyslexic", system-ui, sans-serif'
+        : '"Source Serif 4", Georgia, "Atkinson Hyperlegible", serif';
 
-      // `:not([data-setu])` keeps our own overlay hosts out of the cascade.
+      const root = `html[data-setu-theme="${themeName}"]`;
+      const notOurs = ':not([data-setu]):not([data-setu] *):not([data-setu-fix]):not([data-setu-bionic])';
+
       style.textContent = `
-        html[data-setu-theme="${themeName}"] {
-          background: ${theme.bg} !important;
-        }
-        html[data-setu-theme="${themeName}"] body {
-          background: ${theme.bg} !important;
-          color: ${theme.text} !important;
-        }
-        html[data-setu-theme="${themeName}"] body *:not([data-setu]):not([data-setu] *):not(svg):not(svg *):not(pre):not(pre *):not(code) {
+        ${root} { background: ${theme.bg} !important; }
+        ${root} body { background: ${theme.bg} !important; color: ${theme.text} !important; }
+
+        ${root} body *${notOurs}:not(svg):not(svg *):not(pre):not(pre *):not(code) {
           background-color: transparent !important;
           color: ${theme.text} !important;
           border-color: ${theme.border} !important;
           font-family: ${fontStack} !important;
-          letter-spacing: ${settings.letterSpacing ?? 0.02}em !important;
+          letter-spacing: ${letterSpacing}em !important;
           word-spacing: .08em !important;
           text-shadow: none !important;
         }
-        html[data-setu-theme="${themeName}"] body :where(p, li, dd, blockquote, td):not([data-setu] *) {
-          line-height: 1.8 !important;
+
+        /* Bionic anchors keep their weight; only the palette follows the theme. */
+        ${root} body b[data-setu-fix] {
+          color: ${theme.text} !important;
+          font-weight: 800 !important;
+          font-family: ${fontStack} !important;
+        }
+
+        ${root} body :where(p, li, dd, blockquote, td)${notOurs} {
+          line-height: ${lineHeight} !important;
           max-width: 78ch;
         }
-        html[data-setu-theme="${themeName}"] body :where(a, a *):not([data-setu] *) {
+        ${root} body :where(a, a *)${notOurs} {
           color: ${theme.link} !important;
           text-decoration: underline !important;
           text-underline-offset: 3px !important;
         }
-        html[data-setu-theme="${themeName}"] body :where(section, article, main, div, header, aside, nav, li, table):not([data-setu]):not([data-setu] *) {
+        ${root} body :where(section, article, main, div, header, aside, nav, li, table)${notOurs} {
           box-shadow: none !important;
           background-image: none !important;
         }
-        html[data-setu-theme="${themeName}"] body :where(input, textarea, select):not([data-setu] *) {
+        ${root} body :where(input, textarea, select)${notOurs} {
           background: ${theme.bg} !important;
           color: ${theme.text} !important;
           border: 1px solid ${theme.border} !important;
         }
-        html[data-setu-theme="${themeName}"] body :where(img, video, picture, canvas) {
-          filter: ${themeName === 'contrast' ? 'contrast(1.15)' : 'none'};
-        }
-        /* Stop decorative motion — a common sensory trigger. */
-        html[data-setu-theme="${themeName}"] body :where(marquee, blink, [class*="animate"]):not([data-setu] *) {
-          animation: none !important;
-        }
       `;
-
-      this.cleanup(() => this.clear());
     }
   }
 
-  window.SETU.features.set('dyslexia', ReadingTheme);
+  window.SETU.features.set('theme', ReadingTheme);
 })();

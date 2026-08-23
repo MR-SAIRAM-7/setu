@@ -14,7 +14,7 @@
  */
 
 (() => {
-  const { Feature, UI, Store, Text } = window.SETU;
+  const { Feature, UI, Store, Text, Dock } = window.SETU;
 
   const MODES = {
     line: { label: 'Line', pad: 3 },
@@ -41,7 +41,10 @@
     }
 
     onDisable() {
+      this.releaseDock?.();
+      this.releaseDock = null;
       UI.destroyHost('ruler');
+      this.scope = null;
     }
 
     onSettings() {
@@ -68,7 +71,7 @@
         .ruler[data-mode="block"] { border-radius: var(--radius); background: rgba(0, 136, 176, 0.08); }
 
         .dock {
-          position: fixed; right: 18px; bottom: 96px;
+          position: fixed;
           display: flex; flex-direction: column; gap: 4px;
           padding: 6px; background: var(--surface);
           border: 1px solid var(--border); border-radius: var(--radius);
@@ -104,6 +107,13 @@
       this.scope = scope;
       this.ruler = scope.querySelector('.ruler');
 
+      // The mode switcher is a real control, so it joins the shared dock
+      // rather than pinning itself above the bottom-right corner — where it
+      // used to sit underneath the agent panel and the auto-scroll bar.
+      const modeSwitch = scope.querySelector('.dock');
+      this.releaseDock = Dock.register('ruler', 'bottom-right', modeSwitch);
+      Dock.observe(modeSwitch);
+
       scope.querySelectorAll('.dock button').forEach((btn) => {
         btn.addEventListener('click', () => {
           this.mode = btn.dataset.mode;
@@ -135,6 +145,10 @@
         if (event.altKey || event.ctrlKey || event.metaKey) return;
         const active = document.activeElement;
         if (active && (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName))) return;
+
+        // Line Focus owns the arrow keys when it is running — both features
+        // stepping on the same press moved the reader two lines at a time.
+        if (window.setuLens?.features.get('lineFocus')?.enabled) return;
 
         if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
           const delta = (this.target?.height || 24) * (event.key === 'ArrowDown' ? 1 : -1);

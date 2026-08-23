@@ -9,6 +9,8 @@ import React, { useState } from 'react';
 import { View, StyleSheet, TouchableOpacity, Modal } from 'react-native';
 import { X, Volume2, GitBranch, MessageSquare, Sparkles } from 'lucide-react-native';
 import { COLORS, RADIUS, SPACING, SHADOWS } from '../constants/theme';
+import { Palette } from '../constants/themes';
+import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
 import { Text, Heading, Kicker } from './Typography';
 import { Button } from './Button';
 import { BionicText } from './BionicText';
@@ -30,6 +32,8 @@ export const NodeDetailSheet: React.FC<NodeDetailSheetProps> = ({
   onAskAboutNode,
   isExpanding = false,
 }) => {
+  const COLORS = useThemeColors();
+  const styles = useThemedStyles(makeStyles);
   const [isPlayingTts, setIsPlayingTts] = useState(false);
 
   if (!node) return null;
@@ -115,19 +119,20 @@ export const NodeDetailSheet: React.FC<NodeDetailSheetProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(32, 30, 29, 0.4)',
     justifyContent: 'flex-end',
   },
   sheetCard: {
-    backgroundColor: COLORS.bg,
+    backgroundColor: t.bg,
     borderTopLeftRadius: RADIUS.lg,
     borderTopRightRadius: RADIUS.lg,
     padding: SPACING.lg,
     borderWidth: 1,
-    borderColor: COLORS.divider,
+    borderColor: t.divider,
     ...SHADOWS.lg,
     maxHeight: '80%',
   },
@@ -141,18 +146,18 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: COLORS.surface,
+    backgroundColor: t.surface,
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: SPACING.sm,
   },
   detailContainer: {
-    backgroundColor: COLORS.surface,
+    backgroundColor: t.surface,
     padding: SPACING.md,
     borderRadius: RADIUS.sm,
     marginBottom: SPACING.md,
     borderLeftWidth: 3,
-    borderLeftColor: COLORS.cyan,
+    borderLeftColor: t.cyan,
   },
   actionsGrid: {
     flexDirection: 'row',

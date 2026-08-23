@@ -5,6 +5,8 @@
 import React from 'react';
 import { View, StyleSheet, TouchableOpacity, ViewStyle, StyleProp } from 'react-native';
 import { COLORS, RADIUS, SPACING, SHADOWS } from '../constants/theme';
+import { Palette } from '../constants/themes';
+import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
 import { Text } from './Typography';
 
 export interface CardProps {
@@ -30,6 +32,8 @@ export const Card: React.FC<CardProps> = ({
   accessibilityLabel,
   accessibilityHint,
 }) => {
+  const COLORS = useThemeColors();
+  const styles = useThemedStyles(makeStyles);
   const containerStyle: ViewStyle = {
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.md,
@@ -83,6 +87,8 @@ export const Tag: React.FC<TagProps> = ({
   icon,
   size = 'sm',
 }) => {
+  const COLORS = useThemeColors();
+  const styles = useThemedStyles(makeStyles);
   const getColors = () => {
     switch (variant) {
       case 'cyan':
@@ -126,7 +132,8 @@ export const Tag: React.FC<TagProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
   tagContainer: {
     flexDirection: 'row',
     alignItems: 'center',

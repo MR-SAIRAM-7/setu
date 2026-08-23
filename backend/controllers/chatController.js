@@ -9,6 +9,7 @@
 const research = require('../services/researchService');
 const documentService = require('../services/documentService');
 const mongoService = require('../services/mongodbService');
+const { resolveLanguage } = require('../config/languages');
 
 function toText(value, fallback = '') {
   if (typeof value === 'string') return value;
@@ -92,6 +93,7 @@ async function handleChat(req, res) {
     const messages = Array.isArray(req.body.messages) ? req.body.messages : [];
     const currentMap = req.body.map || null;
     const documentId = req.body.documentId || null;
+    const language = resolveLanguage(req.body.language).code;
 
     if (!messages.length) {
       stream.send('error', { message: 'No messages supplied.' });
@@ -163,6 +165,7 @@ async function handleChat(req, res) {
       generatedMap = await research.researchMindMap({
         topic: topicQuery,
         context,
+        language,
         onProgress: (update) => stream.send('status', update)
       });
 
@@ -181,6 +184,7 @@ async function handleChat(req, res) {
       generatedMap = await research.researchMindMap({
         topic: currentMap.title,
         context: `The user has an existing map and asked: "${lastUserText}". Deepen existing branches and discover missing facets.`,
+        language,
         onProgress: (update) => stream.send('status', update)
       });
       sources = generatedMap.sources || [];
@@ -194,7 +198,7 @@ async function handleChat(req, res) {
     } else if (routedIntent === 'answer_question' || routedIntent === 'query_document') {
       // query_document lands here when the router expected an attachment that is
       // no longer present — answering from the open map beats a dead end.
-      const answer = await research.answerAboutMap({ messages, map: currentMap });
+      const answer = await research.answerAboutMap({ messages, map: currentMap, language });
       finalAssistantReply = toText(answer, 'I could not answer that from the current map yet.');
       stream.send('reply', { text: finalAssistantReply, intent: 'answer', final: true });
     }
@@ -230,7 +234,8 @@ async function handleMindMap(req, res, next) {
 
     const map = await research.researchMindMap({
       topic: req.body.topic,
-      context: req.body.context || ''
+      context: req.body.context || '',
+      language: req.body.language
     });
 
     const saved = await mongoService.saveMindMap({
@@ -251,11 +256,11 @@ async function handleMindMap(req, res, next) {
  */
 async function handleExpandNode(req, res, next) {
   try {
-    const { topic, nodeLabel, nodeDetail, path } = req.body;
+    const { topic, nodeLabel, nodeDetail, path, language } = req.body;
     if (!nodeLabel) {
       return res.status(400).json({ error: 'nodeLabel is required.' });
     }
-    const children = await research.expandNode({ topic, nodeLabel, nodeDetail, path });
+    const children = await research.expandNode({ topic, nodeLabel, nodeDetail, path, language });
     res.json({ children });
   } catch (error) {
     next(error);

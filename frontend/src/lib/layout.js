@@ -11,7 +11,40 @@
  * children's slots.
  */
 
-export const PLATE_COLORS = ['#0088b0', '#d6006c', '#edbb00', '#201e1d']; // cyan, magenta, yellow, ink
+export const COLOR_PALETTES = {
+  broadsheet: {
+    name: 'Broadsheet Classic',
+    id: 'broadsheet',
+    colors: ['#0088b0', '#d6006c', '#edbb00', '#201e1d', '#10b981', '#6366f1', '#f97316']
+  },
+  cyberpunk: {
+    name: 'Neon Horizon',
+    id: 'cyberpunk',
+    colors: ['#06b6d4', '#ec4899', '#8b5cf6', '#f59e0b', '#10b981', '#3b82f6', '#14b8a6']
+  },
+  nature: {
+    name: 'Forest & Earth',
+    id: 'nature',
+    colors: ['#059669', '#d97706', '#0284c7', '#7c3aed', '#db2777', '#16a34a', '#ca8a04']
+  },
+  sunset: {
+    name: 'Sunset & Warmth',
+    id: 'sunset',
+    colors: ['#f97316', '#e11d48', '#9333ea', '#2563eb', '#0d9488', '#eab308', '#dc2626']
+  },
+  monochrome: {
+    name: 'Slate Minimal',
+    id: 'monochrome',
+    colors: ['#334155', '#475569', '#64748b', '#1e293b', '#0f172a', '#6b7280', '#52525b']
+  },
+  pastel: {
+    name: 'Calming Pastel',
+    id: 'pastel',
+    colors: ['#38bdf8', '#fb7185', '#fbbf24', '#34d399', '#a78bfa', '#f472b6', '#818cf8']
+  }
+};
+
+export const PLATE_COLORS = COLOR_PALETTES.broadsheet.colors;
 
 /** Column width per depth, in px. Root is 186; depth 1 is 200; leaves are 168. */
 const WIDTH = [186, 200, 168];
@@ -46,12 +79,17 @@ export function heightFor(node, depth) {
 /**
  * Compute absolute positions for every visible node.
  *
- * @param {object} root      tree with { id, label, detail, children }
- * @param {Set}    collapsed ids whose children are hidden
+ * @param {object} root          tree with { id, label, detail, children }
+ * @param {Set}    collapsed     ids whose children are hidden
+ * @param {string|Array} palette palette name or color array
  * @returns {{nodes: Array, edges: Array, width: number, height: number, byId: Map}}
  */
-export function layoutTree(root, collapsed = new Set()) {
+export function layoutTree(root, collapsed = new Set(), palette = 'broadsheet') {
   if (!root) return { nodes: [], edges: [], width: 0, height: 0, byId: new Map() };
+
+  const activeColors = Array.isArray(palette)
+    ? palette
+    : (COLOR_PALETTES[palette] || COLOR_PALETTES.broadsheet).colors;
 
   const nodes = [];
   const edges = [];
@@ -91,11 +129,6 @@ export function layoutTree(root, collapsed = new Set()) {
 
   /**
    * Pass 2 — place each node at the vertical centre of its allotted span.
-   *
-   * `branch` is passed down rather than read back off the parent's placed
-   * record: the parent's own branch is only known to its caller, so reading it
-   * here would see `undefined` and collapse every node below depth 1 onto the
-   * first plate colour.
    */
   function place(node, depth, x, spanTop, branch) {
     const { own: height, span } = metrics.get(node);
@@ -109,6 +142,8 @@ export function layoutTree(root, collapsed = new Set()) {
       id: node.id,
       label: node.label,
       detail: node.detail,
+      emoji: node.emoji || null,
+      customColor: node.customColor || null,
       depth,
       x,
       y,
@@ -131,7 +166,7 @@ export function layoutTree(root, collapsed = new Set()) {
       const child = children[i];
       // Top-level branches each claim a plate; everything below inherits it, so
       // a whole subtree reads as one colour family.
-      const branchIndex = depth === 0 ? i % PLATE_COLORS.length : branch;
+      const branchIndex = depth === 0 ? i % activeColors.length : branch;
       const childPlaced = place(child, depth + 1, childX, cursor, branchIndex);
 
       edges.push({
@@ -149,12 +184,9 @@ export function layoutTree(root, collapsed = new Set()) {
   }
 
   const totalHeight = measure(root, 0);
-  // 3 is the ink plate — the root is deliberately not one of the branch colours.
-  place(root, 0, 16, 16, 3);
+  place(root, 0, 16, 16, 3 % activeColors.length);
 
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  // reduce, not Math.max(...spread) — an expanded map can hold enough nodes to
-  // blow the argument limit.
   const maxX = nodes.reduce((max, n) => Math.max(max, n.x + n.width), 0) + 32;
 
   return {
@@ -166,8 +198,35 @@ export function layoutTree(root, collapsed = new Set()) {
   };
 }
 
-/** Cubic bezier connecting two points horizontally. */
-export function edgePath({ from, to }) {
+/**
+ * Connecting path between two points supporting various visual aesthetics.
+ *
+ * @param {object} from  {x, y}
+ * @param {object} to    {x, y}
+ * @param {string} style 'bezier' | 'straight' | 'orthogonal' | 'arc'
+ */
+export function edgePath({ from, to }, style = 'bezier') {
+  if (style === 'straight') {
+    return `M ${from.x},${from.y} L ${to.x},${to.y}`;
+  }
+
+  if (style === 'orthogonal') {
+    const midX = (from.x + to.x) / 2;
+    return `M ${from.x},${from.y} H ${midX} V ${to.y} H ${to.x}`;
+  }
+
+  if (style === 'arc') {
+    const midX = (from.x + to.x) / 2;
+    const dy = to.y - from.y;
+    const radius = Math.min(18, Math.abs(dy) / 2, Math.abs(midX - from.x) / 2);
+    if (Math.abs(dy) < 4 || radius <= 2) {
+      return `M ${from.x},${from.y} L ${to.x},${to.y}`;
+    }
+    const dirY = dy > 0 ? 1 : -1;
+    return `M ${from.x},${from.y} H ${midX - radius} Q ${midX},${from.y} ${midX},${from.y + radius * dirY} V ${to.y - radius * dirY} Q ${midX},${to.y} ${midX + radius},${to.y} H ${to.x}`;
+  }
+
+  // Default: organic smooth cubic bezier curve
   const dx = Math.max(36, (to.x - from.x) * 0.45);
   return `M ${from.x},${from.y} C ${from.x + dx},${from.y} ${to.x - dx},${to.y} ${to.x},${to.y}`;
 }
@@ -200,4 +259,56 @@ export function withChildren(root, id, children) {
   if (!root) return root;
   if (root.id === id) return { ...root, children };
   return { ...root, children: (root.children || []).map((c) => withChildren(c, id, children)) };
+}
+
+/** Immutably add a new child node to a parent node in the tree. */
+export function addNodeToTree(root, parentId, newNode) {
+  if (!root) return null;
+  const nodeToAdd = {
+    id: newNode.id || `node_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    label: newNode.label || 'New Branch',
+    detail: newNode.detail || '',
+    emoji: newNode.emoji || null,
+    customColor: newNode.customColor || null,
+    children: []
+  };
+
+  if (root.id === parentId) {
+    return {
+      ...root,
+      children: [...(root.children || []), nodeToAdd]
+    };
+  }
+
+  return {
+    ...root,
+    children: (root.children || []).map((c) => addNodeToTree(c, parentId, newNode))
+  };
+}
+
+/** Immutably edit a node in the tree. */
+export function editNodeInTree(root, targetId, updates) {
+  if (!root) return null;
+  if (root.id === targetId) {
+    return {
+      ...root,
+      ...updates
+    };
+  }
+
+  return {
+    ...root,
+    children: (root.children || []).map((c) => editNodeInTree(c, targetId, updates))
+  };
+}
+
+/** Immutably delete a node and its descendants from the tree. */
+export function deleteNodeFromTree(root, targetId) {
+  if (!root || root.id === targetId) return null; // Cannot delete root directly
+  return {
+    ...root,
+    children: (root.children || [])
+      .filter((c) => c.id !== targetId)
+      .map((c) => deleteNodeFromTree(c, targetId))
+  };
 }

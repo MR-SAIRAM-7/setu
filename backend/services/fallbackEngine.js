@@ -178,6 +178,366 @@ function generateLocalSummary(text, maxPoints) {
   return sentences.slice(0, maxPoints);
 }
 
+/* -------------------------------------------------------------------------- */
+/* Numbers (dyscalculia) — offline concrete-object arithmetic                 */
+/* -------------------------------------------------------------------------- */
+
+/** Objects are countable, everyday, and cheap to picture. One per problem. */
+const COUNTABLE_OBJECTS = [
+  { name: 'apple', plural: 'apples', emoji: '🍎' },
+  { name: 'banana', plural: 'bananas', emoji: '🍌' },
+  { name: 'orange', plural: 'oranges', emoji: '🍊' },
+  { name: 'biscuit', plural: 'biscuits', emoji: '🍪' },
+  { name: 'coin', plural: 'coins', emoji: '🪙' },
+  { name: 'pencil', plural: 'pencils', emoji: '✏️' }
+];
+
+/**
+ * Pick an object deterministically from the question text, so re-running the
+ * same problem keeps drawing the same fruit and the picture stays familiar.
+ */
+function pickObject(seedText) {
+  const seed = String(seedText || '')
+    .split('')
+    .reduce((total, char) => total + char.charCodeAt(0), 0);
+  return COUNTABLE_OBJECTS[seed % COUNTABLE_OBJECTS.length];
+}
+
+/**
+ * Pull a single two-operand sum out of free text.
+ *
+ * Handles both notation ("12 - 5", "3 x 4") and the words people actually type
+ * ("what is 3 times 4"). Returns null when there is no clean single operation,
+ * which is the signal to fall back to a non-numeric breakdown rather than
+ * inventing an answer.
+ */
+function parseSimpleArithmetic(text) {
+  const normalised = String(text || '')
+    .toLowerCase()
+    .replace(/\bplus\b|\band\b|\badded to\b/g, '+')
+    .replace(/\bminus\b|\bless\b|\btake away\b|\bsubtract\b/g, '-')
+    .replace(/\btimes\b|\bmultiplied by\b|\blots of\b|\bgroups of\b|×/g, '*')
+    .replace(/\bdivided by\b|\bshared between\b|\bsplit between\b|÷/g, '/')
+    .replace(/\bx\b/g, '*');
+
+  const match = normalised.match(/(-?\d+(?:\.\d+)?)\s*([+\-*/])\s*(-?\d+(?:\.\d+)?)/);
+  if (!match) return null;
+
+  const left = Number(match[1]);
+  const operator = match[2];
+  const right = Number(match[3]);
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return null;
+  if (operator === '/' && right === 0) return null;
+
+  const result = {
+    '+': left + right,
+    '-': left - right,
+    '*': left * right,
+    '/': left / right
+  }[operator];
+
+  return { left, right, operator, result };
+}
+
+/**
+ * Deterministic dyscalculia explanation used when no AI provider is reachable.
+ *
+ * Deliberately mirrors the AI contract exactly — same objects, same step shape —
+ * so the client renders identical counters either way and the offline answer is
+ * never the visibly degraded one.
+ */
+function generateLocalNumbersMode(problem) {
+  const question = String(problem || '').trim();
+  const object = pickObject(question);
+  const sum = parseSimpleArithmetic(question);
+
+  if (!sum) {
+    return {
+      plainQuestion: question || 'Your number problem',
+      objectName: object.name,
+      objectNamePlural: object.plural,
+      objectEmoji: object.emoji,
+      story: `Let us lay this out with ${object.plural} on the table instead of keeping it in your head.`,
+      steps: [
+        {
+          narration: `Read the problem once and put down one ${object.name} for every number you can find.`,
+          operation: 'start',
+          count: 0,
+          runningTotal: 0
+        },
+        {
+          narration:
+            'Now say out loud what is happening to them — are they joining together, going away, or being shared out?',
+          operation: 'compare',
+          count: 0,
+          runningTotal: 0
+        },
+        {
+          narration: 'Do that one action with the objects in front of you, then count what is left.',
+          operation: 'result',
+          count: 0,
+          runningTotal: 0
+        }
+      ],
+      answer: 'Count the objects left on the table — that is your answer.',
+      answerNumber: 0,
+      checkIt: 'Count them a second time backwards. You should land on the same number.',
+      realLife: 'Laying out real objects removes the need to hold numbers in your head while you work.'
+    };
+  }
+
+  const { left, right, operator, result } = sum;
+  const round = (value) => Math.round(value * 100) / 100;
+
+  const byOperator = {
+    '+': {
+      story: `You have ${left} ${object.plural} on the table. Someone hands you ${right} more.`,
+      steps: [
+        {
+          narration: `Put ${left} ${object.plural} on the table and count them out loud.`,
+          operation: 'start',
+          count: left,
+          runningTotal: left
+        },
+        {
+          narration: `Now add ${right} more ${object.plural} next to them.`,
+          operation: 'add',
+          count: right,
+          runningTotal: round(result)
+        },
+        {
+          narration: `Count everything on the table. There are ${round(result)} ${object.plural}.`,
+          operation: 'result',
+          count: round(result),
+          runningTotal: round(result)
+        }
+      ],
+      checkIt: `Take the ${right} you added back off the table. You should be back to ${left}.`,
+      realLife: 'This is what you do when you add one shop bill to another.'
+    },
+    '-': {
+      story: `You have ${left} ${object.plural}. You give ${right} of them away.`,
+      steps: [
+        {
+          narration: `Put ${left} ${object.plural} on the table and count them out loud.`,
+          operation: 'start',
+          count: left,
+          runningTotal: left
+        },
+        {
+          narration: `Slide ${right} ${object.plural} away from the group.`,
+          operation: 'remove',
+          count: right,
+          runningTotal: round(result)
+        },
+        {
+          narration: `Count what is still in front of you. There are ${round(result)} ${object.plural}.`,
+          operation: 'result',
+          count: Math.max(0, round(result)),
+          runningTotal: round(result)
+        }
+      ],
+      checkIt: `Put the ${right} back. If you land on ${left} again, the answer is right.`,
+      realLife: 'This is working out how much money is left after you pay for something.'
+    },
+    '*': {
+      story: `You have ${left} baskets, and every basket holds ${right} ${object.plural}.`,
+      steps: [
+        {
+          narration: `Make ${left} separate piles.`,
+          operation: 'group',
+          count: left,
+          runningTotal: 0,
+          groupSize: right
+        },
+        {
+          narration: `Put ${right} ${object.plural} into every single pile.`,
+          operation: 'add',
+          count: round(result),
+          runningTotal: round(result),
+          groupSize: right
+        },
+        {
+          narration: `Now count every ${object.name} across all the piles: ${round(result)}.`,
+          operation: 'result',
+          count: round(result),
+          runningTotal: round(result)
+        }
+      ],
+      checkIt: `Count the piles one at a time, adding ${right} each time. You should reach ${round(result)}.`,
+      realLife: 'This is working out the cost of buying several of the same item.'
+    },
+    '/': {
+      story: `You have ${left} ${object.plural} and you are sharing them fairly between ${right} people.`,
+      steps: [
+        {
+          narration: `Put all ${left} ${object.plural} on the table.`,
+          operation: 'start',
+          count: left,
+          runningTotal: left
+        },
+        {
+          narration: `Deal them out one at a time into ${right} equal piles, like dealing cards.`,
+          operation: 'split',
+          count: left,
+          runningTotal: round(result),
+          groupSize: right
+        },
+        {
+          narration: `Count one pile. Each person gets ${round(result)} ${object.plural}.`,
+          operation: 'result',
+          count: Math.max(0, Math.floor(result)),
+          runningTotal: round(result)
+        }
+      ],
+      checkIt: `Push the ${right} piles back together. You should have ${left} again.`,
+      realLife: 'This is splitting a restaurant bill evenly between friends.'
+    }
+  }[operator];
+
+  const verb = { '+': 'plus', '-': 'take away', '*': 'lots of', '/': 'shared between' }[operator];
+
+  return {
+    plainQuestion: `What is ${left} ${verb} ${right}?`,
+    objectName: object.name,
+    objectNamePlural: object.plural,
+    objectEmoji: object.emoji,
+    story: byOperator.story,
+    steps: byOperator.steps,
+    answer: `${round(result)}`,
+    answerNumber: round(result),
+    checkIt: byOperator.checkIt,
+    realLife: byOperator.realLife
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Listen — offline reflective support                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Offline reflective response.
+ *
+ * Kept deliberately plain: with no model available the honest thing is to
+ * acknowledge, offer a grounding exercise that works without any AI at all, and
+ * ask one open question — not to simulate understanding it does not have.
+ */
+function generateLocalListenMode(entry) {
+  const text = String(entry || '').trim();
+  const firstLine = splitSentences(text)[0] || text.slice(0, 120);
+
+  return {
+    reflection: firstLine
+      ? `I hear you saying: "${firstLine}"`
+      : 'I hear that something is sitting heavily with you right now.',
+    namedFeelings: ['Overwhelmed'],
+    validation:
+      'That sounds genuinely hard, and it makes sense that it is taking up space. You are not being dramatic about it.',
+    groundingExercise: {
+      name: '5-4-3-2-1 senses',
+      durationMinutes: 3,
+      steps: [
+        'Name five things you can see right now.',
+        'Name four things you can physically feel touching you.',
+        'Name three things you can hear.',
+        'Name two things you can smell, and one slow breath out.'
+      ]
+    },
+    openQuestion: 'What part of this is sitting heaviest at the moment?',
+    oneSmallThing: 'Drink a glass of water and step away from the screen for two minutes before deciding anything.'
+  };
+}
+
+/**
+ * Crisis language detection.
+ *
+ * Runs before the model on every Listen turn. The patterns are intentionally
+ * narrow and anchored on first-person intent so that ordinary frustration
+ * ("this deadline is killing me", "I'm dying of boredom") does not trip them —
+ * a false positive that interrupts someone venting with a helpline banner does
+ * real harm to trust, so the cost of missing an ambiguous phrase is accepted
+ * here in favour of not crying wolf.
+ */
+const CRISIS_PATTERNS = [
+  /\bkill(?:ing)?\s+my\s?self\b/i,
+  /\bkms\b/i,
+  /\bend(?:ing)?\s+(?:my|it)\s+(?:life|all)\b/i,
+  /\btake\s+my\s+own\s+life\b/i,
+  /\bsuicid(?:e|al)\b/i,
+  /\b(?:want|going)\s+to\s+die\b/i,
+  /\bdon'?t\s+want\s+to\s+(?:be\s+here|live|wake\s+up)\b/i,
+  /\bbetter\s+off\s+(?:dead|without\s+me)\b/i,
+  /\bno\s+(?:reason|point)\s+(?:in\s+|to\s+)?(?:living|live|being\s+here|go(?:ing)?\s+on)\b/i,
+  /\bhurt(?:ing)?\s+my\s?self\b/i,
+  /\bself[\s-]?harm\b/i,
+  /\bcut(?:ting)?\s+my\s?self\b/i
+];
+
+function detectCrisisLanguage(text) {
+  const value = String(text || '');
+  return CRISIS_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+/**
+ * The fixed response for a crisis turn.
+ *
+ * Never generated by a model. When someone signals risk, the reply has to be
+ * predictable, must not attempt therapy, and must put a real human channel in
+ * front of them — so it is hardcoded and reviewed rather than sampled.
+ *
+ * This stays in English even when the rest of the app is speaking another
+ * language, and that is a deliberate refusal rather than an oversight: running
+ * a suicide-risk script through a translation model is exactly the case where a
+ * subtle mistranslation does the most harm, and there is no reviewer here who
+ * can verify eleven of them. The mitigation is that the helplines themselves are
+ * multilingual — Tele-MANAS operates in 20+ languages and KIRAN in 13 — so the
+ * response surfaces that fact and leads with the numbers, which need no
+ * translation. These strings want a professional human translation before this
+ * ships to non-English users.
+ */
+function buildCrisisResponse(language = 'en-IN') {
+  return {
+    crisis: true,
+    language: 'en-IN',
+    languageNote:
+      language && language !== 'en-IN'
+        ? 'This message is shown in English so its wording stays exact. The helplines below answer in Indian languages — Tele-MANAS covers 20+ and KIRAN 13.'
+        : null,
+    message:
+      'I am really glad you said that out loud. What you are carrying sounds far too heavy to hold on your own, and I am a piece of software — not the right support for this. Please talk to a person tonight.',
+    helplines: [
+      {
+        region: 'India',
+        name: 'Tele-MANAS (Government of India)',
+        contact: '14416 or 1-800-891-4416',
+        hours: '24 hours, every day, free'
+      },
+      {
+        region: 'India',
+        name: 'KIRAN Mental Health Helpline',
+        contact: '1800-599-0019',
+        hours: '24 hours, 13 languages, free'
+      },
+      {
+        region: 'India',
+        name: 'AASRA',
+        contact: '+91 98204 66726',
+        hours: '24 hours, every day'
+      },
+      {
+        region: 'Anywhere',
+        name: 'Find a Helpline (search by country)',
+        contact: 'https://findahelpline.com',
+        hours: 'Directory of verified local services'
+      }
+    ],
+    immediateStep:
+      'If you are in immediate danger, call your local emergency number or go to the nearest emergency department.',
+    stayingHere:
+      'You are welcome to keep this page open. Nothing you wrote leaves your browser unless you choose to save it.'
+  };
+}
+
 function formatArtifactMarkdown(mode, data) {
   let md = `# NeuroBridge One Artifact: ${mode.toUpperCase()}\n\n`;
   if (mode === 'start') {
@@ -272,7 +632,12 @@ module.exports = {
   generateLocalPracticeMode,
   generateLocalWriteMode,
   generateLocalGuideMode,
+  generateLocalNumbersMode,
+  generateLocalListenMode,
   generateLocalSummary,
   generateLocalNavigationPlan,
-  formatArtifactMarkdown
+  formatArtifactMarkdown,
+  parseSimpleArithmetic,
+  detectCrisisLanguage,
+  buildCrisisResponse
 };

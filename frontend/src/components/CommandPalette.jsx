@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { savePrefs, listMaps } from '../lib/storage';
 import { exportMindMapToPDF } from '../lib/exportUtils';
+import VoiceInputButton from './VoiceInputButton';
 
 export default function CommandPalette({ isOpen, onClose, onStartFocus }) {
   const [query, setQuery] = useState('');
@@ -206,8 +207,8 @@ export default function CommandPalette({ isOpen, onClose, onStartFocus }) {
         onClick={(e) => e.stopPropagation()}
       >
         {/* Search header */}
-        <div className="flex items-center gap-3 border-b border-[var(--color-divider)] px-4 py-3.5 bg-[var(--color-bg)]">
-          <i className="ph-duotone ph-magnifying-glass text-xl text-[var(--color-accent)]"></i>
+        <div className="flex items-center gap-2.5 border-b border-[var(--color-divider)] px-4 py-3 bg-[var(--color-bg)]">
+          <i className="ph-duotone ph-magnifying-glass text-xl text-[var(--color-accent)] shrink-0"></i>
           <input
             ref={inputRef}
             value={query}
@@ -215,9 +216,17 @@ export default function CommandPalette({ isOpen, onClose, onStartFocus }) {
               setQuery(e.target.value);
               setSelectedIndex(0);
             }}
-            placeholder="Do anything, navigate, or change reading mode…"
+            placeholder="Do anything, navigate, or speak your search…"
             className="flex-1 bg-transparent border-0 text-[16px] text-[var(--color-text)] outline-none placeholder:text-[color-mix(in_srgb,var(--color-text)_45%,transparent)] font-[var(--font-body)]"
             aria-label="Command palette input"
+          />
+          <VoiceInputButton
+            onTranscript={(txt) => {
+              setQuery(txt);
+              setSelectedIndex(0);
+            }}
+            size="sm"
+            title="Voice search command"
           />
           <kbd className="rounded border border-[var(--color-divider)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[11px] font-mono font-semibold text-[color-mix(in_srgb,var(--color-text)_60%,transparent)]">
             esc

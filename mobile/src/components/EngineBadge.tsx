@@ -9,6 +9,8 @@
 import React, { useEffect, useRef } from 'react';
 import { View, StyleSheet, Animated } from 'react-native';
 import { COLORS, RADIUS, SPACING } from '../constants/theme';
+import { Palette } from '../constants/themes';
+import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
 import { Text } from './Typography';
 import { useIdentity, EngineState } from '../context/IdentityContext';
 import { useAccessibility } from '../context/AccessibilityContext';
@@ -48,6 +50,8 @@ const BADGE_CONFIGS: Record<EngineState, BadgeConfig> = {
 };
 
 export const EngineBadge: React.FC = () => {
+  const COLORS = useThemeColors();
+  const styles = useThemedStyles(makeStyles);
   const { engineState, isDbConnected } = useIdentity();
   const { motion } = useAccessibility();
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -108,16 +112,17 @@ export const EngineBadge: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 4,
     paddingHorizontal: SPACING.sm,
-    backgroundColor: COLORS.surface,
+    backgroundColor: t.surface,
     borderRadius: RADIUS.pill,
     borderWidth: 1,
-    borderColor: COLORS.dividerSubtle,
+    borderColor: t.dividerSubtle,
     alignSelf: 'flex-start',
     minHeight: 48,
   },

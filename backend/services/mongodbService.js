@@ -10,6 +10,7 @@ const DocumentFile = require('../models/DocumentFile');
 const MindMap = require('../models/MindMap');
 const SavedSummary = require('../models/SavedSummary');
 const UserSettings = require('../models/UserSettings');
+const UserProgress = require('../models/UserProgress');
 const SessionLog = require('../models/SessionLog');
 
 function isDbActive() {
@@ -499,6 +500,61 @@ async function logSession(userId = 'anonymous_user', action, details = {}) {
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/* Reward progress                                                            */
+/* -------------------------------------------------------------------------- */
+
+async function getUserProgress(userId = 'anonymous_user') {
+  if (!isDbActive()) return null;
+  try {
+    return await UserProgress.findOne({ userId }).lean();
+  } catch (err) {
+    console.warn('[MongoDB Service] Error getting progress:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Mirror the browser's progress snapshot.
+ *
+ * The client sends whole state rather than deltas, so a dropped or duplicated
+ * sync can never double-count points. `points` and the streak counters are
+ * clamped to their previous high-water mark: two tabs syncing slightly stale
+ * snapshots would otherwise let the later, smaller write roll a streak
+ * backwards.
+ */
+async function saveUserProgress(userId = 'anonymous_user', progress = {}) {
+  if (!isDbActive()) return null;
+  try {
+    const existing = await UserProgress.findOne({ userId }).lean();
+
+    const merged = {
+      userId,
+      points: Math.max(Number(progress.points) || 0, existing?.points || 0),
+      counters: progress.counters && typeof progress.counters === 'object' ? progress.counters : {},
+      milestones: Array.from(
+        new Set([...(existing?.milestones || []), ...(progress.milestones || [])])
+      ),
+      streakDays: Number(progress.streakDays) || 0,
+      longestStreakDays: Math.max(
+        Number(progress.longestStreakDays) || 0,
+        existing?.longestStreakDays || 0
+      ),
+      lastActiveDay: progress.lastActiveDay || existing?.lastActiveDay || null,
+      updatedAt: new Date()
+    };
+
+    return await UserProgress.findOneAndUpdate({ userId }, merged, {
+      upsert: true,
+      returnDocument: 'after',
+      setDefaultsOnInsert: true
+    }).lean();
+  } catch (err) {
+    console.warn('[MongoDB Service] Error saving progress:', err.message);
+    return null;
+  }
+}
+
 module.exports = {
   isConfigured: () => getStatus().configured,
   isDbActive,
@@ -527,5 +583,8 @@ module.exports = {
   // User Settings & Session
   getUserSettings,
   saveUserSettings,
+  // Reward progress
+  getUserProgress,
+  saveUserProgress,
   logSession
 };

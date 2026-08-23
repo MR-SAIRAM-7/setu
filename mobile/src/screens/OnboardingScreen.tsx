@@ -1,5 +1,16 @@
 /**
- * SETU Mobile — 3-Step Onboarding Walkthrough
+ * SETU Mobile — first run.
+ *
+ * Three questions and a skip button. Every one of them is a setting the user
+ * could reach later in Settings; they are asked up front because the people this
+ * is built for are the least likely to go hunting through a preferences screen,
+ * and the app is close to unusable for some of them at the defaults.
+ *
+ * Language sits at the top of the first step rather than in its own step. It is
+ * shown in native script, so somebody who cannot read the English question can
+ * still recognise their own language and fix the rest afterwards.
+ *
+ * (original outline)
  * -------------------------------------------
  * Faithfully follows the Broadsheet Design Guidelines:
  * Step 1: Cognitive barrier selection (ADHD, Dyslexia, Autistic, Overwhelmed, Rather not say)
@@ -28,12 +39,15 @@ import {
   Sparkles,
 } from 'lucide-react-native';
 import { COLORS, RADIUS, SPACING } from '../constants/theme';
+import { Palette } from '../constants/themes';
+import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
 import { Text, Heading, Kicker } from '../components/Typography';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { BionicText } from '../components/BionicText';
 import { useAccessibility } from '../context/AccessibilityContext';
 import { ReadingProfile, FontStyleOption, TextSizeOption, MotionOption } from '../types';
+import { LANGUAGES } from '../constants/languages';
 
 export interface OnboardingScreenProps {
   onComplete: () => void;
@@ -90,6 +104,8 @@ const SIZE_OPTIONS: { id: TextSizeOption; label: string; hint: string }[] = [
 ];
 
 export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
+  const COLORS = useThemeColors();
+  const styles = useThemedStyles(makeStyles);
   const {
     profile,
     font,
@@ -102,6 +118,8 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }
     setMotion,
     toggleBionic,
     completeOnboarding,
+    language,
+    setLanguage,
   } = useAccessibility();
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -153,7 +171,44 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }
           {/* STEP 1 */}
           {step === 1 && (
             <View style={styles.stepContainer}>
-              <Kicker color={COLORS.cyan}>Profile Selection</Kicker>
+              <Kicker color={COLORS.cyan}>Your language</Kicker>
+              <Heading variant="titleLg" style={styles.stepHeading}>
+                भाषा · மொழி · Language
+              </Heading>
+              <Text variant="bodySm" color={COLORS.textMuted} style={styles.stepSub}>
+                SETU will answer and read aloud in whichever you pick.
+              </Text>
+
+              <View style={styles.languageWrap}>
+                {LANGUAGES.map((item) => {
+                  const selected = language === item.code;
+                  return (
+                    <TouchableOpacity
+                      key={item.code}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected }}
+                      accessibilityLabel={`${item.name}, ${item.native}`}
+                      onPress={() => setLanguage(item.code)}
+                      style={[
+                        styles.languageChip,
+                        selected ? styles.languageChipSelected : null,
+                      ]}
+                    >
+                      <Text
+                        variant="bodySm"
+                        weight={selected ? 'bold' : 'normal'}
+                        color={selected ? COLORS.cyanDark : COLORS.text}
+                      >
+                        {item.native}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <Kicker color={COLORS.cyan} style={{ marginTop: SPACING.xl }}>
+                Profile
+              </Kicker>
               <Heading variant="titleLg" style={styles.stepHeading}>
                 What tends to get in your way?
               </Heading>
@@ -429,10 +484,11 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: COLORS.bg,
+    backgroundColor: t.bg,
   },
   container: {
     flex: 1,
@@ -444,7 +500,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: SPACING.md,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.dividerSubtle,
+    borderBottomColor: t.dividerSubtle,
   },
   stepProgressContainer: {
     alignItems: 'flex-end',
@@ -462,10 +518,10 @@ const styles = StyleSheet.create({
     borderRadius: 2,
   },
   pipActive: {
-    backgroundColor: COLORS.cyan,
+    backgroundColor: t.cyan,
   },
   pipInactive: {
-    backgroundColor: COLORS.divider,
+    backgroundColor: t.divider,
   },
   scrollContent: {
     paddingVertical: SPACING.lg,
@@ -481,6 +537,26 @@ const styles = StyleSheet.create({
   stepSub: {
     marginBottom: SPACING.lg,
     lineHeight: 22,
+  },
+  languageWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+    marginTop: SPACING.sm,
+  },
+  languageChip: {
+    minHeight: 48,
+    justifyContent: 'center',
+    paddingHorizontal: SPACING.lg,
+    borderRadius: RADIUS.pill,
+    borderWidth: 1,
+    borderColor: t.divider,
+    backgroundColor: t.surface,
+  },
+  languageChipSelected: {
+    borderWidth: 1.5,
+    borderColor: t.cyan,
+    backgroundColor: t.cyanLight,
   },
   optionsStack: {
     marginBottom: SPACING.lg,
@@ -509,14 +585,14 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.md,
   },
   optionSelected: {
-    backgroundColor: COLORS.cyanLight,
+    backgroundColor: t.cyanLight,
     borderWidth: 1.5,
-    borderColor: COLORS.cyan,
+    borderColor: t.cyan,
   },
   optionUnselected: {
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: COLORS.divider,
+    borderColor: t.divider,
   },
   iconBox: {
     width: 36,
@@ -530,7 +606,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   iconBoxUnselected: {
-    backgroundColor: COLORS.surface,
+    backgroundColor: t.surface,
   },
   optionTextCol: {
     flex: 1,

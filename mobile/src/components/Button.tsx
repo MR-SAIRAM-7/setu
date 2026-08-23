@@ -17,6 +17,8 @@ import {
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { COLORS, RADIUS, SPACING } from '../constants/theme';
+import { Palette } from '../constants/themes';
+import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
 import { Text } from './Typography';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'destructive' | 'option';
@@ -48,6 +50,8 @@ export const Button: React.FC<ButtonProps> = ({
   onPress,
   ...rest
 }) => {
+  const COLORS = useThemeColors();
+  const styles = useThemedStyles(makeStyles);
   const handlePress = (e: any) => {
     if (disabled || loading) return;
     try {
@@ -160,7 +164,8 @@ export const Button: React.FC<ButtonProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
   innerRow: {
     flexDirection: 'row',
     alignItems: 'center',

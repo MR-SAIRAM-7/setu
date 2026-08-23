@@ -166,6 +166,244 @@ thousand years.`;
     return `${data.steps.length} steps`;
   });
 
+  /* ------------------------- Numbers (dyscalculia) ------------------------- */
+
+  await check('POST /api/numbers', async () => {
+    const data = await post('/api/numbers', { problem: 'what is 12 times 4' });
+    expect(data.objectEmoji, 'no countable object chosen');
+    expect(data.steps?.length >= 2, 'too few steps');
+    // The drawn quantity is the explanation, so a step without a real count
+    // would render an empty table and silently teach nothing.
+    expect(
+      data.steps.every((step) => Number.isFinite(step.count) && Number.isFinite(step.runningTotal)),
+      'a step is missing a numeric count or runningTotal'
+    );
+    expect(Number.isFinite(data.answerNumber), 'no numeric answer');
+    return `${data.steps.length} steps with ${data.objectNamePlural}, answer ${data.answerNumber}`;
+  });
+
+  await check(
+    'POST /api/numbers rejects an empty problem',
+    async () => {
+      const response = await fetch(`${BASE}/api/numbers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      expect(response.status === 400, `expected 400, got ${response.status}`);
+      return '400';
+    },
+    { usesAI: false }
+  );
+
+  /* --------------------------- Listen (support) --------------------------- */
+
+  await check('POST /api/listen', async () => {
+    const data = await post('/api/listen', {
+      entry: 'Everything took twice as long today and I still got asked why it was not finished.',
+      mood: 2
+    });
+    expect(!data.crisis, 'ordinary frustration was wrongly escalated to the crisis path');
+    expect(data.reflection?.length > 10, 'no reflection');
+    expect(data.groundingExercise?.steps?.length >= 2, 'no grounding exercise');
+    return `${data.namedFeelings?.length || 0} feelings named`;
+  });
+
+  await check(
+    'POST /api/listen routes crisis language to fixed helplines',
+    async () => {
+      const data = await post('/api/listen', { entry: 'there is no point in living anymore' });
+      expect(data.crisis === true, 'crisis language was not detected');
+      expect(data.helplines?.length >= 2, 'no helplines returned');
+      // A crisis reply must never be model output, so none of the reflective
+      // fields may be present on this path.
+      expect(!data.groundingExercise && !data.reflection, 'crisis reply leaked model content');
+      return `${data.helplines.length} helplines, fixed script`;
+    },
+    { usesAI: false }
+  );
+
+  /* ------------------------- Read-aloud (Sarvam AI) ------------------------- */
+
+  await check(
+    'GET /api/speech/voices',
+    async () => {
+      const response = await fetch(`${BASE}/api/speech/voices`);
+      const data = await response.json();
+      expect(response.ok, `expected 200, got ${response.status}`);
+      expect(Array.isArray(data.voices) && data.voices.length > 0, 'no voices listed');
+      // The advertised default must be one of the voices actually offered, or
+      // the picker opens with nothing selected.
+      expect(
+        data.voices.some((v) => v.id === data.defaultSpeaker),
+        `default speaker "${data.defaultSpeaker}" is not in the catalogue`
+      );
+      return data.enabled
+        ? `${data.voices.length} voices on ${data.model}, default ${data.defaultSpeaker}`
+        : 'not configured — clients use the browser voice';
+    },
+    { usesAI: false }
+  );
+
+  await check(
+    'POST /api/speech',
+    async () => {
+      const response = await fetch(`${BASE}/api/speech`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Point at any branch and I will read it to you.' })
+      });
+      const data = await response.json();
+
+      // Without a key this is expected to refuse — but it must refuse in the
+      // shape the client needs to switch engines, not with a bare error.
+      if (response.status === 503) {
+        expect(data.fallbackToBrowser === true, 'refusal did not tell the client to fall back');
+        return 'no key configured — signalled browser fallback correctly';
+      }
+
+      expect(response.ok, `expected 200, got ${response.status}`);
+      expect(typeof data.audio === 'string' && data.audio.length > 0, 'no audio returned');
+      expect(data.mime, 'no mime type returned');
+      return `${data.mime}, ${data.characters} chars, speaker ${data.speaker}`;
+    },
+    { usesAI: false }
+  );
+
+  /* ------------------------- Indian language support ------------------------ */
+
+  await check(
+    'GET /api/speech/voices lists every supported language',
+    async () => {
+      const data = await fetch(`${BASE}/api/speech/voices`).then((r) => r.json());
+      expect(Array.isArray(data.languages), 'no languages exposed');
+      expect(data.languages.length >= 11, `expected 11 languages, got ${data.languages.length}`);
+      expect(
+        data.languages.every((l) => /^[a-z]{2}-IN$/.test(l.code) && l.native && l.name),
+        'a language is missing its code, name, or native label'
+      );
+      return data.languages.map((l) => l.code.split('-')[0]).join(' ');
+    },
+    { usesAI: false }
+  );
+
+  await check('POST /api/start in Hindi keeps schema enums in English', async () => {
+    const data = await post('/api/start', {
+      task: 'write my quarterly report',
+      isStuck: true,
+      language: 'hi-IN'
+    });
+
+    if (data.fallback) return `L0 fallback (English) — ${data.fallbackReason}`;
+
+    expect(data.language === 'hi-IN', `echoed ${data.language}`);
+    // Devanagari must actually appear, or the directive was ignored.
+    expect(
+      /[ऀ-ॿ]/.test(data.supportiveMessage || ''),
+      'no Devanagari in the response — it answered in English'
+    );
+    // The client compares these as literal strings, so a translated enum is a
+    // silent UI break rather than a visible one.
+    expect(
+      ['Low', 'Medium', 'High'].includes(data.confidenceMeter?.effortLevel),
+      `effortLevel was translated: ${data.confidenceMeter?.effortLevel}`
+    );
+    expect(
+      ['Low', 'Moderate', 'High'].includes(data.confidenceMeter?.anxietyLevel),
+      `anxietyLevel was translated: ${data.confidenceMeter?.anxietyLevel}`
+    );
+    expect(
+      Number.isFinite(data.confidenceMeter?.estimatedTimeMinutes),
+      'estimatedTimeMinutes is not a number'
+    );
+    return 'Devanagari prose, English enums, numeric time';
+  });
+
+  await check('POST /api/numbers in Tamil keeps the operation enum intact', async () => {
+    const data = await post('/api/numbers', { problem: '12 times 4', language: 'ta-IN' });
+    if (data.fallback) return `L0 fallback (English) — ${data.fallbackReason}`;
+
+    expect(/[஀-௿]/.test(data.story || ''), 'no Tamil script in the story');
+
+    // These drive how objects are drawn on screen; a translated value renders
+    // nothing at all.
+    const VALID = ['start', 'add', 'remove', 'group', 'split', 'compare', 'result'];
+    const bad = (data.steps || []).find((step) => !VALID.includes(step.operation));
+    expect(!bad, `step operation was translated: ${bad?.operation}`);
+    expect(Number.isFinite(data.answerNumber), 'answerNumber is not numeric');
+    return `${data.steps.length} steps, Tamil prose, enums intact`;
+  });
+
+  await check(
+    'POST /api/speech accepts every supported language',
+    async () => {
+      const data = await fetch(`${BASE}/api/speech/voices`).then((r) => r.json());
+      if (!data.enabled) return 'no key configured — language plumbing untested';
+
+      for (const language of data.languages) {
+        const clip = await fetch(`${BASE}/api/speech`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: 'One two three.', language: language.code })
+        }).then((r) => r.json());
+        expect(clip.language === language.code, `${language.code} came back as ${clip.language}`);
+      }
+
+      // An unsupported code must be repaired, never forwarded to the provider.
+      const repaired = await fetch(`${BASE}/api/speech`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'hello', language: 'fr-FR' })
+      }).then((r) => r.json());
+      expect(repaired.language === 'en-IN', `fr-FR became ${repaired.language}`);
+
+      return `${data.languages.length} languages synthesised, fr-FR repaired to en-IN`;
+    },
+    { usesAI: false }
+  );
+
+  /* ---------------------------- Reward progress ---------------------------- */
+
+  await check(
+    'POST + GET /api/progress round-trips and resists stale writes',
+    async () => {
+      const headers = { 'Content-Type': 'application/json', 'x-user-id': 'smoke_progress_user' };
+      const put = (body) =>
+        fetch(`${BASE}/api/progress`, { method: 'POST', headers, body: JSON.stringify(body) }).then(
+          (r) => r.json()
+        );
+
+      await put({
+        points: 250,
+        counters: { modeRun: 9 },
+        milestones: ['first-move'],
+        streakDays: 4,
+        longestStreakDays: 4,
+        lastActiveDay: '2026-08-17'
+      });
+
+      // A second device syncing an older snapshot must not roll anything back.
+      const stale = await put({
+        points: 30,
+        counters: { modeRun: 1 },
+        milestones: ['mapmaker'],
+        streakDays: 1,
+        longestStreakDays: 1,
+        lastActiveDay: '2026-08-10'
+      });
+
+      expect(stale.progress.points === 250, `points rolled back to ${stale.progress.points}`);
+      expect(stale.progress.longestStreakDays === 4, 'longest streak rolled back');
+      expect(stale.progress.milestones.includes('first-move'), 'earned milestone was lost');
+      expect(stale.progress.milestones.includes('mapmaker'), 'new milestone was not merged');
+
+      const read = await fetch(`${BASE}/api/progress`, { headers }).then((r) => r.json());
+      expect(read.progress?.points === 250, 'read-back did not match');
+      return `${read.progress.points} pts, ${read.progress.milestones.length} milestones`;
+    },
+    { usesAI: false }
+  );
+
   /* ---------------------------- Research & Mind Maps ---------------------------- */
 
   await check('POST /api/research/mindmap', async () => {

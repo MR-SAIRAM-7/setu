@@ -8,9 +8,13 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, PanResponder, Dimensions } from 'react-native';
 import { COLORS } from '../constants/theme';
+import { Palette } from '../constants/themes';
+import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
 import { useAccessibility } from '../context/AccessibilityContext';
 
 export const ReadingRuler: React.FC = () => {
+  const COLORS = useThemeColors();
+  const styles = useThemedStyles(makeStyles);
   const { readingRuler } = useAccessibility();
   const [rulerY, setRulerY] = useState(250);
   const rulerHeight = 64;
@@ -62,7 +66,8 @@ export const ReadingRuler: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
   fullscreen: {
     position: 'absolute',
     left: 0,
@@ -84,7 +89,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 136, 176, 0.06)',
     borderTopWidth: 2,
     borderBottomWidth: 2,
-    borderColor: COLORS.cyan,
+    borderColor: t.cyan,
     justifyContent: 'center',
     alignItems: 'flex-end',
     paddingRight: 16,
@@ -95,7 +100,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 2,
-    backgroundColor: COLORS.cyan,
+    backgroundColor: t.cyan,
   },
   bottomGuideLine: {
     position: 'absolute',
@@ -103,13 +108,13 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 2,
-    backgroundColor: COLORS.cyan,
+    backgroundColor: t.cyan,
   },
   dragHandle: {
     width: 24,
     height: 6,
     borderRadius: 3,
-    backgroundColor: COLORS.cyan,
+    backgroundColor: t.cyan,
     opacity: 0.6,
   },
 });

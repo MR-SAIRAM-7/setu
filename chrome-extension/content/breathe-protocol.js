@@ -129,6 +129,7 @@
     }
 
     dismiss(simplify) {
+      this.clearEvery('phase');
       UI.destroyHost('breathe');
       this.active = false;
       this.mutedUntil = Date.now() + REARM_MS;
@@ -207,20 +208,15 @@
       const phase = scope.querySelector('.phase');
       const labels = ['BREATHE IN', 'HOLD', 'BREATHE OUT', 'REST'];
       let index = 0;
-      const timer = setInterval(() => {
+      // Named, so a second trigger replaces the first timer rather than
+      // stacking another one behind it for the life of the page.
+      this.every('phase', 4000, () => {
         index = (index + 1) % labels.length;
         phase.textContent = labels[index];
-      }, 4000);
-      this.cleanup(() => clearInterval(timer));
+      });
 
-      scope.querySelector('[data-act="dismiss"]').onclick = () => {
-        clearInterval(timer);
-        this.dismiss(false);
-      };
-      scope.querySelector('[data-act="simplify"]').onclick = () => {
-        clearInterval(timer);
-        this.dismiss(true);
-      };
+      scope.querySelector('[data-act="dismiss"]').onclick = () => this.dismiss(false);
+      scope.querySelector('[data-act="simplify"]').onclick = () => this.dismiss(true);
     }
   }
 

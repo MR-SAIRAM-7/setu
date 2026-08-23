@@ -697,7 +697,7 @@ async function seedConversations() {
           mindMapData: null,
           fileAttachments: message.fileAttachments || [],
           provider: message.role === 'assistant' ? 'openrouter' : null,
-          modelUsed: message.role === 'assistant' ? 'google/gemini-2.5-flash' : null,
+          modelUsed: message.role === 'assistant' ? (config.openRouterModel || 'openrouter/free') : null,
           metadata: SEED_TAG,
           createdAt: sentAt,
           updatedAt: sentAt

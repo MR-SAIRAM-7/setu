@@ -29,3 +29,6 @@ pnpm-debug.log*
 *.swo
 scratch/
 
+
+# Extension signing keys — never commit these
+*.pem

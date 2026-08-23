@@ -21,16 +21,54 @@ export interface UserPreferences {
   profile: ReadingProfile[];
   font: FontStyleOption;
   size: TextSizeOption;
-  theme?: ThemeOption;
-  spacing?: SpacingOption;
+  theme: ThemeOption;
+  spacing: SpacingOption;
   motion: MotionOption;
   bionic: boolean;
   readingRuler: boolean;
   speechRate: number;
   speechPitch: number;
   hasCompletedOnboarding: boolean;
+
+  /**
+   * Backend override typed in Settings. Empty means "follow the build", which is
+   * what nearly every install should be — see constants/config.ts.
+   */
   customApiUrl: string;
+
+  /**
+   * Conversation language, e.g. 'hi-IN'. Drives the language the model answers
+   * in and the language the audio is synthesised in, together.
+   */
+  language: string;
+
+  /** Sarvam speaker id. Null follows whatever the engine is configured to use. */
+  voice: string | null;
+
+  /**
+   * Speak a mind-map node when it is tapped.
+   *
+   * On by default. A map whose branches are silent text is, for a reader whose
+   * difficulty is decoding rather than eyesight, just a differently-shaped wall
+   * of words — pairing each node with audio is what makes the diagram readable.
+   */
+  speakOnTap: boolean;
+
+  /** Show points, streaks and milestones. Counting continues either way. */
+  rewards: boolean;
+
+  /** Tint film for visual stress. See COLOR_OVERLAYS. */
+  colorOverlay: string;
+  colorOverlayOpacity: number;
+
+  /** Mind map canvas presentation. */
+  mapEdgeStyle: MapEdgeStyle;
+  mapNodeStyle: MapNodeStyle;
+  mapTextScale: number;
 }
+
+export type MapEdgeStyle = 'bezier' | 'straight' | 'orthogonal';
+export type MapNodeStyle = 'comfortable' | 'compact';
 
 export interface FocusSessionState {
   isActive: boolean;
@@ -94,7 +132,8 @@ export type CognitiveModeKey =
   | 'meet'
   | 'practice'
   | 'write'
-  | 'guide';
+  | 'guide'
+  | 'numbers';
 
 export interface StartModeResult {
   supportiveMessage: string;
@@ -190,7 +229,8 @@ export type CognitiveModeResult =
   | MeetModeResult
   | PracticeModeResult
   | WriteModeResult
-  | GuideModeResult;
+  | GuideModeResult
+  | NumbersModeResult;
 
 export interface CognitiveModeConfig {
   key: CognitiveModeKey;
@@ -242,6 +282,14 @@ export interface SystemHealthStatus {
   version: string;
   primaryProvider: string;
   aiConfigured: boolean;
+  speech?: {
+    provider: string;
+    configured: boolean;
+    model: string | null;
+    sttProvider: string;
+    sttConfigured: boolean;
+    sttModel: string | null;
+  };
   database: {
     provider: string;
     connected: boolean;
@@ -355,9 +403,180 @@ export interface AgentPlanResult {
   fallback: boolean;
 }
 
-/** API mode response wrapper — all modes include fallback info */
+/**
+ * Every mode response carries the engine's own account of where it came from.
+ *
+ * `fallback` true means the deterministic offline engine answered rather than a
+ * model — usually because the AI provider was rate-limited. That engine only
+ * writes English, so `languageFallback` names the language the user asked for
+ * and did not get. Both are surfaced in the UI: silently handing someone rough
+ * English when they asked for Tamil is the failure this flag exists to prevent.
+ */
 export interface ModeResponseMeta {
   fallback: boolean;
   fallbackReason?: string;
+  language?: string;
+  languageFallback?: string;
 }
 
+
+
+/* -------------------------------------------------------------------------- */
+/* Numbers — dyscalculia support                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One beat of the worked story.
+ *
+ * `operation` is an English enum on purpose and is never translated, even when
+ * the narration is in Hindi — the renderer switches on it to decide whether to
+ * draw objects appearing, leaving, or being grouped.
+ */
+export interface NumbersStep {
+  narration: string;
+  operation: 'start' | 'add' | 'remove' | 'group' | 'split' | 'compare' | 'result';
+  count: number;
+  runningTotal: number;
+  groupSize?: number;
+}
+
+export interface NumbersModeResult {
+  plainQuestion: string;
+  objectName: string;
+  objectNamePlural: string;
+  objectEmoji: string;
+  story: string;
+  steps: NumbersStep[];
+  answer: string;
+  answerNumber: number;
+  checkIt: string;
+  realLife: string;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Listen — reflective support                                                */
+/* -------------------------------------------------------------------------- */
+
+export interface GroundingExercise {
+  name: string;
+  durationMinutes: number;
+  steps: string[];
+}
+
+export interface ListenResult {
+  reflection?: string;
+  namedFeelings?: string[];
+  validation?: string;
+  groundingExercise?: GroundingExercise;
+  openQuestion?: string;
+  oneSmallThing?: string;
+
+  /**
+   * Set by the server when the entry trips the risk check.
+   *
+   * When true the payload is fixed text with real helplines that never went
+   * near a model, and the client must render it verbatim — no summarising, no
+   * read-aloud rate changes, no scoring the turn.
+   */
+  crisis?: boolean;
+  message?: string;
+  languageNote?: string | null;
+  helplines?: CrisisHelpline[];
+  immediateStep?: string;
+  stayingHere?: string;
+}
+
+export interface CrisisHelpline {
+  region: string;
+  name: string;
+  /** A dialable number, or a URL for directory services. */
+  contact: string;
+  hours: string;
+}
+
+export interface JournalEntry {
+  id: string;
+  text: string;
+  mood: number | null;
+  at: string;
+  reflection: string | null;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Momentum — points, streaks, milestones                                     */
+/* -------------------------------------------------------------------------- */
+
+export type AwardKind =
+  | 'focusSession'
+  | 'modeRun'
+  | 'stepChecked'
+  | 'quizCorrect'
+  | 'mapCreated'
+  | 'branchExpanded'
+  | 'numbersSolved'
+  | 'checkIn'
+  | 'noteParked';
+
+export interface ProgressState {
+  points: number;
+  counters: Partial<Record<AwardKind, number>>;
+  milestones: string[];
+  streakDays: number;
+  longestStreakDays: number;
+  lastActiveDay: string | null;
+}
+
+export interface Rank {
+  level: number;
+  name: string;
+  at: number;
+  next: { level: number; name: string; at: number } | null;
+  pointsToNext: number;
+  fraction: number;
+}
+
+export interface AwardEvent {
+  kind: AwardKind;
+  label: string;
+  points: number;
+  total: number;
+  rankedUp: boolean;
+  rank: Rank;
+  newMilestones: { id: string; name: string }[];
+  streakDays: number;
+  announce: boolean;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Parking lot — working-memory offload                                       */
+/* -------------------------------------------------------------------------- */
+
+export interface ParkedNote {
+  id: string;
+  text: string;
+  at: string;
+  done: boolean;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Speech                                                                     */
+/* -------------------------------------------------------------------------- */
+
+export interface SarvamVoice {
+  id: string;
+  label: string;
+  note: string;
+}
+
+export interface VoiceCatalogue {
+  enabled: boolean;
+  sttEnabled: boolean;
+  provider: string;
+  model: string;
+  sttModel: string;
+  language: string;
+  defaultSpeaker: string;
+  maxCharacters: number;
+  voices: SarvamVoice[];
+  languages: { code: string; name: string; native: string }[];
+}

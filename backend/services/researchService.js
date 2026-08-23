@@ -9,6 +9,7 @@
  */
 
 const { requestStructuredAI, requestResearch, requestText } = require('./aiService');
+const { languageDirective, replyLanguageNote, resolveLanguage } = require('../config/languages');
 
 /* -------------------------------------------------------------------------- */
 /* Schemas                                                                    */
@@ -142,12 +143,18 @@ function buildTree(topic, structured) {
 /**
  * Full research → mind map pipeline for a topic or document context.
  */
-async function researchMindMap({ topic, context = '', onProgress = () => {} }) {
+async function researchMindMap({ topic, context = '', language, onProgress = () => {} }) {
   const cleanTopic = String(topic || '').trim();
   if (!cleanTopic) throw Object.assign(new Error('A topic or title is required.'), { status: 400 });
 
+  const lang = resolveLanguage(language);
+
   onProgress({ stage: 'researching', message: `Researching "${cleanTopic}"…` });
 
+  // The research pass stays in English regardless of the output language: it is
+  // an internal note-taking step, English sources are far better covered, and
+  // translating twice loses more than it gains. Only the structuring pass, whose
+  // output the user actually reads, is language-directed.
   const research = await requestResearch({
     instructions: RESEARCH_SYSTEM,
     input: context
@@ -165,7 +172,7 @@ async function researchMindMap({ topic, context = '', onProgress = () => {} }) {
   const structured = await requestStructuredAI({
     name: 'setu_mind_map',
     schema: mindMapSchema,
-    instructions: STRUCTURE_SYSTEM,
+    instructions: `${STRUCTURE_SYSTEM}${languageDirective(lang.code)}`,
     input: `TOPIC: ${cleanTopic}\n\nRESEARCH NOTES:\n${research.text}`,
     temperature: 0.3
   });
@@ -180,13 +187,14 @@ async function researchMindMap({ topic, context = '', onProgress = () => {} }) {
     followUps: structured.followUps || [],
     sources: research.sources || [],
     grounded: research.grounded,
+    language: lang.code,
     root: buildTree(cleanTopic, structured),
     createdAt: new Date().toISOString()
   };
 }
 
 /** Grow one node of an existing map into deeper children. */
-async function expandNode({ topic, nodeLabel, nodeDetail, path = [] }) {
+async function expandNode({ topic, nodeLabel, nodeDetail, path = [], language }) {
   const trail = path.length ? path.join(' → ') : nodeLabel;
 
   const result = await requestStructuredAI({
@@ -196,7 +204,7 @@ async function expandNode({ topic, nodeLabel, nodeDetail, path = [] }) {
 
 You are expanding ONE node of an existing mind map. Return 3-4 children that go a
 genuine level deeper — more specific mechanisms, examples, or consequences.
-Never restate the parent node in different words.`,
+Never restate the parent node in different words.${languageDirective(resolveLanguage(language).code)}`,
     input: `OVERALL TOPIC: ${topic}
 PATH TO THIS NODE: ${trail}
 NODE TO EXPAND: ${nodeLabel}
@@ -254,7 +262,7 @@ Make the "reply" warm, brief, and reassuring.`,
 }
 
 /** Conversational answer grounded in the map currently on screen. */
-async function answerAboutMap({ messages, map }) {
+async function answerAboutMap({ messages, map, language }) {
   const outline = map
     ? `CURRENT MIND MAP: ${map.title}
 SUMMARY: ${map.summary}
@@ -270,7 +278,7 @@ Answer using the mind map below as your primary context. Keep it to 2-4 short
 sentences in plain language. If the map does not cover the answer, say so and
 offer to research it as a new map.
 
-${outline}`,
+${outline}${replyLanguageNote(resolveLanguage(language).code)}`,
     messages: messages.slice(-8),
     temperature: 0.5
   });

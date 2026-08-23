@@ -11,13 +11,51 @@
  * without an explicit click from the user.
  */
 
-const { requestStructuredAI, requestText, describeImage } = require('./aiService');
+const {
+  requestStructuredAI,
+  requestText,
+  describeImage,
+  streamText,
+  parseJsonLoose
+} = require('./aiService');
+const { resolveLanguage } = require('../config/languages');
 
 /** Action verbs that can have real-world consequences on a live page. */
 const IRREVERSIBLE_ACTIONS = new Set(['submit', 'purchase', 'delete', 'send']);
 
 /** Label patterns that mean "this button does something you can't take back". */
 const IRREVERSIBLE_LABEL = /\b(submit|pay|purchase|buy|checkout|order|confirm|delete|remove|send|transfer|withdraw|deposit|apply now|sign up|register|book now|place order|unsubscribe|deactivate|close account)\b/i;
+
+/**
+ * Budgets for work with a human waiting on the other end.
+ *
+ * Every call in this module is in front of somebody staring at a panel on a
+ * live page, and every one of them has a deterministic in-page fallback to
+ * land on. Answering "I could not" in twenty seconds is worth far more here
+ * than answering well in three minutes.
+ *
+ * `deadlineMs` is the one that actually bounds the wait, and it is the fix for
+ * the worst latency bug in the service. `timeoutMs` caps a single HTTP call,
+ * but a structured request walks a five-model OpenRouter chain, retries, then
+ * does the same against Gemini and OpenAI — so a 20-second per-call timeout
+ * permitted a four-minute request. Measured against the live free-tier chain,
+ * a page map that previously ran past two minutes without returning now
+ * answers or gives up inside forty seconds.
+ */
+const INTERACTIVE = { timeoutMs: 18000, maxRetries: 1, deadlineMs: 40000 };
+
+/**
+ * The structure map is a heavier generation than the rest — branches, their
+ * children, a numeric series, and insights run to several hundred tokens,
+ * which is 20-30 seconds of body on a free model. It gets a longer per-model
+ * budget so a capable model is not cut off mid-answer, and a longer ceiling so
+ * two of them can be tried. The client is already showing a map read from the
+ * page itself while this runs, so the wait costs the reader nothing.
+ */
+const INTERACTIVE_MAP = { timeoutMs: 26000, maxRetries: 1, deadlineMs: 58000 };
+
+/** Vision is slower again, and more likely to hit a model that cannot do it. */
+const INTERACTIVE_VISION = { timeoutMs: 30000, deadlineMs: 55000 };
 
 const planSchema = {
   type: 'object',
@@ -169,7 +207,8 @@ ${(pageContext.text || '').slice(0, 2500) || '(no text captured)'}`;
     schema: planSchema,
     instructions: AGENT_SYSTEM,
     input: `USER GOAL: "${task}"\n\n${snapshot}`,
-    temperature: 0.3
+    temperature: 0.3,
+    ...INTERACTIVE
   });
 
   const steps = markConfirmations(pruneUnresolvableSteps(plan.steps || [], controls), controls);
@@ -183,22 +222,54 @@ ${(pageContext.text || '').slice(0, 2500) || '(no text captured)'}`;
 }
 
 /**
+ * The one prompt behind every plain-language explanation.
+ *
+ * Shared by the buffered and streamed paths so an answer does not change
+ * character depending on which transport the client happened to use.
+ */
+function explainerInstructions({ language = 'English', style = 'plain' } = {}) {
+  const styleGuide = {
+    plain: 'Explain in plain Grade 6 language using a short everyday analogy.',
+    simple: 'Explain as if to a bright 10-year-old. Two sentences maximum.',
+    detailed: 'Explain thoroughly but in short sentences, with one worked example.',
+    spoken:
+      'Write it to be listened to, not read: no headings, no bullet points, no markdown. ' +
+      'Short spoken sentences that flow into each other, at a Grade 6 level.'
+  }[style] || 'Explain in plain Grade 6 language.';
+
+  return `You are SETU's vernacular explainer for neurodivergent users.
+${styleGuide}
+Respond entirely in ${language}, in its native script, written naturally rather than
+translated word-for-word from English.
+Never use jargon without immediately defining it. Keep sentences under 20 words.`;
+}
+
+/**
  * Explain any page element, selection, or jargon in plain language —
  * optionally in the user's own language, per the Multilingual Vernacular
  * Explainer in the product spec.
  */
 async function explainContent({ text, language = 'English', style = 'plain' }) {
-  const styleGuide = {
-    plain: 'Explain in plain Grade 6 language using a short everyday analogy.',
-    simple: 'Explain as if to a bright 10-year-old. Two sentences maximum.',
-    detailed: 'Explain thoroughly but in short sentences, with one worked example.'
-  }[style] || 'Explain in plain Grade 6 language.';
-
   return requestText({
-    instructions: `You are SETU's vernacular explainer for neurodivergent users.
-${styleGuide}
-Respond entirely in ${language}.
-Never use jargon without immediately defining it. Keep sentences under 20 words.`,
+    instructions: explainerInstructions({ language, style }),
+    input: text,
+    temperature: 0.5,
+    ...INTERACTIVE
+  });
+}
+
+/**
+ * The same explanation, yielded token by token.
+ *
+ * SETU runs on free-tier models that take 20-40 seconds to finish a paragraph
+ * but emit their first words in about a second. Buffering the whole answer
+ * spends that entire difference on a spinner; streaming spends it on the user
+ * already reading. This is the single largest latency improvement available
+ * without changing model providers.
+ */
+async function* streamExplanation({ text, language = 'English', style = 'plain' }) {
+  yield* streamText({
+    instructions: explainerInstructions({ language, style }),
     input: text,
     temperature: 0.5
   });
@@ -254,7 +325,8 @@ HEADINGS: ${(pageContext.headings || []).join(' | ')}
 FORM FIELDS: ${(pageContext.controls || []).filter((c) => ['input', 'select', 'textarea'].includes(c.tag)).map((c) => c.label).join(', ') || 'none'}
 TEXT:
 ${(pageContext.text || '').slice(0, 4000)}`,
-    temperature: 0.4
+    temperature: 0.4,
+    ...INTERACTIVE
   });
 }
 
@@ -278,14 +350,306 @@ it is genuinely illegible, say which part instead of inventing it.
 Respond entirely in ${language}.`,
     prompt: context
       ? `Describe this image. Surrounding page context: ${context}`
-      : 'Describe this image.'
+      : 'Describe this image.',
+    ...INTERACTIVE_VISION
   });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Visual explainer — a picture of the thing, not a paragraph about it         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The structure a chart, table, diagram, or dense section gets turned into.
+ *
+ * Deliberately one schema for every input type. A user pointing at a bar chart
+ * and a user pointing at a wall of terms and conditions want the same thing —
+ * the shape of the information, laid out so it can be scanned instead of
+ * decoded — and giving each its own format would mean two renderers, two sets
+ * of bugs, and two different things to learn.
+ *
+ * `series` is what makes a chart readable rather than merely described: the
+ * numbers come back as data, so the client can redraw them large, labelled,
+ * and in the reader's own palette.
+ */
+const visualSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    title: { type: 'string', description: 'Short name for what this is. 2-7 words.' },
+    kind: {
+      type: 'string',
+      enum: ['mindmap', 'flow', 'comparison', 'timeline', 'data'],
+      description:
+        'data for charts and tables of numbers. flow for step-by-step processes. ' +
+        'timeline for anything ordered by date. comparison for A-vs-B. mindmap otherwise.'
+    },
+    summary: {
+      type: 'string',
+      description: 'One plain sentence: what this shows. Not a restatement of the axes or headings.'
+    },
+    branches: {
+      type: 'array',
+      description:
+        '3 to 6 top-level parts, each a genuinely distinct facet. Never overlapping. ' +
+        'For a flow these are the steps in order; for a timeline, the periods in order.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          label: { type: 'string', description: '2-5 words. Never a sentence.' },
+          detail: { type: 'string', description: 'One clear sentence at a Grade 6 reading level.' },
+          children: {
+            type: 'array',
+            description: '0 to 4 specifics that add detail rather than restating the parent.',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                label: { type: 'string', description: '2-5 words.' },
+                detail: { type: 'string', description: 'One short sentence. May be empty.' }
+              },
+              required: ['label', 'detail']
+            }
+          }
+        },
+        required: ['label', 'detail', 'children']
+      }
+    },
+    series: {
+      type: 'array',
+      description:
+        'Numbers actually readable in the source, for redrawing. Empty array when there are none. ' +
+        'Never estimate a value that is not legible.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          label: { type: 'string' },
+          value: { type: 'number' },
+          unit: { type: 'string', description: 'Empty string when unitless.' }
+        },
+        required: ['label', 'value', 'unit']
+      }
+    },
+    insights: {
+      type: 'array',
+      description: '2 to 4 takeaways a reader should leave with. Each one short and specific.',
+      items: { type: 'string' }
+    },
+    caution: {
+      type: 'string',
+      description:
+        'What was genuinely illegible or ambiguous in the source. Empty string when nothing was.'
+    }
+  },
+  required: ['title', 'kind', 'summary', 'branches', 'series', 'insights', 'caution']
+};
+
+const VISUAL_SYSTEM = `You turn one piece of a web page into a structured map for readers with
+dyslexia, ADHD, autism, or low vision. They are not asking for prose — prose is the thing they
+were already struggling with. They are asking for the shape underneath it.
+
+THE MAP IS THE ANSWER. A reply whose "branches" array is empty is a failed reply, however good
+the summary sentence is. Every response must contain at least 3 branches. If the source is short,
+break it down more finely rather than returning fewer.
+
+Rules:
+- Read values, labels, and steps off the source. Never invent one to make the map tidier.
+- If part of it is genuinely illegible or ambiguous, name that part in "caution" rather than
+  guessing. A stated gap is useful; a confident wrong number is not.
+- Branch labels are 2-5 words, never sentences. Details are one sentence, under 20 words.
+- Distinct branches only. Two branches that say the same thing differently is a failure.
+- Every number you can actually read goes in "series", as a real JSON number with its label —
+  and when the source is mostly numbers, set kind to "data". An empty "series" on a chart or a
+  table of figures is a failed reply.
+- "insights" carry the point: what changed, what is largest, what the reader should do.
+  Always give at least two.
+
+`;
+
+/**
+ * A fully-populated reply for the model to copy the shape of.
+ *
+ * This is doing more work than any instruction above it. The small free models
+ * SETU runs on reliably fill a schema's scalar fields and then hand back `[]`
+ * for every array — producing a valid object with a title, a summary, and no
+ * map at all. Prose rules did not fix it; being shown one complete example
+ * did.
+ */
+const VISUAL_EXAMPLE = {
+  title: 'Regional Sales This Quarter',
+  kind: 'data',
+  summary: 'East sold the most; South sold the least.',
+  branches: [
+    {
+      label: 'East leads',
+      detail: 'East sold 210 units, more than any other region.',
+      children: [{ label: 'New distributor', detail: 'A distributor deal opened in March.' }]
+    },
+    {
+      label: 'North steady',
+      detail: 'North sold 120 units, close to last quarter.',
+      children: []
+    },
+    {
+      label: 'South lagging',
+      detail: 'South sold 85 units, the lowest of the four.',
+      children: []
+    }
+  ],
+  series: [
+    { label: 'East', value: 210, unit: 'units' },
+    { label: 'North', value: 120, unit: 'units' },
+    { label: 'West', value: 96, unit: 'units' },
+    { label: 'South', value: 85, unit: 'units' }
+  ],
+  insights: [
+    'East outsold South by nearly three to one.',
+    'The distributor deal is the clearest cause of the gap.'
+  ],
+  caution: ''
+};
+
+/**
+ * Build the structure map for a page region or an image of one.
+ *
+ * Takes either `text` (a table, a section, a block of prose) or `imageBase64`
+ * (a chart, a diagram, a screenshot of an interface). Images go to the vision
+ * model; text does not, because text is exact, free, and far faster.
+ */
+async function visualiseContent({
+  text = '',
+  imageBase64 = '',
+  mimeType = 'image/jpeg',
+  context = '',
+  language = 'English'
+}) {
+  const languageName = resolveLanguage(language).name || language;
+  const instructions = `${VISUAL_SYSTEM}
+
+Write every human-readable string in ${languageName}, in its native script. JSON key names and
+enum values stay in English exactly as specified, and numbers stay as digits.`;
+
+  if (imageBase64) {
+    // Vision models will not reliably honour a response schema, so the schema
+    // goes in the prompt and the reply is recovered from loose JSON. That is
+    // the same approach the text path uses across the OpenRouter chain.
+    const raw = await describeImage({
+      imageBase64,
+      mimeType,
+      instructions: `${instructions}
+
+You must reply with a single raw JSON object and nothing else — no markdown, no code fence,
+no commentary. It must match this JSON Schema exactly:
+${JSON.stringify(visualSchema, null, 2)}
+
+Use these exact key names and nesting. Every key listed in "required" must be present, and every
+array must be populated — returning an empty [] for branches, series, or insights is a failed
+reply.
+
+A correctly shaped reply looks exactly like this:
+${JSON.stringify(VISUAL_EXAMPLE)}`,
+      prompt: context
+        ? `Map this image. Surrounding page context: ${context}`
+        : 'Map this image.',
+      ...INTERACTIVE_VISION
+    });
+
+    return assertUsable(normaliseVisual(parseJsonLoose(raw)));
+  }
+
+  const structured = await requestStructuredAI({
+    name: 'setu_visual_map',
+    schema: visualSchema,
+    instructions,
+    example: VISUAL_EXAMPLE,
+    // Checked inside the request rather than after it, so an empty map is
+    // never cached and counts as a failure worth trying another model for.
+    validate: (parsed) => {
+      const branches = Array.isArray(parsed?.branches) ? parsed.branches : [];
+      const series = Array.isArray(parsed?.series) ? parsed.series : [];
+      if (!branches.length && !series.length) {
+        return 'both "branches" and "series" are empty, so there is no map to draw';
+      }
+      return null;
+    },
+    input: `${context ? `PAGE CONTEXT: ${context}\n\n` : ''}CONTENT TO MAP:\n${String(text).slice(0, 12000)}`,
+    temperature: 0.25,
+    ...INTERACTIVE_MAP
+  });
+
+  return assertUsable(normaliseVisual(structured));
+}
+
+/**
+ * Repair a structure that is *almost* right.
+ *
+ * Free models drop an empty array or return a number as a string often enough
+ * that rejecting the whole answer over it would mean visibly failing on
+ * responses a reader would have been perfectly happy with.
+ *
+ * What is *not* repairable is a map with nothing in it. Free models will
+ * happily return a valid object carrying a title, a summary, and three empty
+ * arrays — schema-valid, and completely useless, because the map is the entire
+ * point of this endpoint. Treating that as success would render a blank panel;
+ * throwing sends the caller to its retry and then to the in-page structure
+ * reader, which always has something to show.
+ */
+function assertUsable(map) {
+  if (!map.branches.length && !map.series.length) {
+    const error = new Error(
+      'The model returned an empty map — no branches and no values.'
+    );
+    error.emptyMap = true;
+    throw error;
+  }
+  return map;
+}
+
+function normaliseVisual(raw) {
+  const branches = Array.isArray(raw?.branches) ? raw.branches : [];
+
+  return {
+    title: String(raw?.title || 'This section').slice(0, 120),
+    kind: ['mindmap', 'flow', 'comparison', 'timeline', 'data'].includes(raw?.kind)
+      ? raw.kind
+      : 'mindmap',
+    summary: String(raw?.summary || ''),
+    branches: branches.slice(0, 8).map((branch) => ({
+      label: String(branch?.label || '').slice(0, 80),
+      detail: String(branch?.detail || ''),
+      children: (Array.isArray(branch?.children) ? branch.children : [])
+        .slice(0, 6)
+        .map((child) => ({
+          label: String(child?.label || '').slice(0, 80),
+          detail: String(child?.detail || '')
+        }))
+        .filter((child) => child.label)
+    })).filter((branch) => branch.label),
+    series: (Array.isArray(raw?.series) ? raw.series : [])
+      .slice(0, 24)
+      .map((point) => ({
+        label: String(point?.label || '').slice(0, 60),
+        value: Number(point?.value),
+        unit: String(point?.unit || '')
+      }))
+      .filter((point) => point.label && Number.isFinite(point.value)),
+    insights: (Array.isArray(raw?.insights) ? raw.insights : [])
+      .slice(0, 6)
+      .map((line) => String(line))
+      .filter(Boolean),
+    caution: String(raw?.caution || '')
+  };
 }
 
 module.exports = {
   planPageTask,
   explainContent,
+  streamExplanation,
   chunkPageIntoTasks,
   describeVisual,
-  markConfirmations
+  visualiseContent,
+  markConfirmations,
+  visualSchema
 };

@@ -5,27 +5,42 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
+    "scheme": "setu",
     "userInterfaceStyle": "light",
+    "primaryColor": "#0088b0",
     "splash": {
-      "image": "./assets/icon.png",
+      "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#f3f2f2"
     },
+    "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.setu.sanctuary"
+      "bundleIdentifier": "com.setu.sanctuary",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "SETU records short clips so you can speak instead of type, and turns them into text.",
+        "NSCameraUsageDescription": "SETU uses the camera to read printed pages, letters and notices so they can be simplified or read aloud.",
+        "NSPhotoLibraryUsageDescription": "SETU reads text out of photos and screenshots you choose, so they can be simplified or read aloud."
+      }
     },
     "android": {
       "package": "com.setu.sanctuary",
+      "versionCode": 1,
+      "edgeToEdgeEnabled": true,
       "adaptiveIcon": {
         "backgroundColor": "#f3f2f2",
-        "foregroundImage": "./assets/android-icon-foreground.png"
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "permissions": [
-        "CAMERA",
-        "RECORD_AUDIO",
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE"
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET"
+      ],
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
       ]
     },
     "plugins": [
@@ -33,15 +48,22 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "SETU requires camera access to scan physical documents, book pages, and notes for OCR text simplification and mind mapping."
+          "cameraPermission": "SETU uses the camera to read printed pages, letters and notices so they can be simplified or read aloud."
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "SETU requires photo library access to import documents and screenshots for OCR and cognitive analysis."
+          "photosPermission": "SETU reads text out of photos and screenshots you choose, so they can be simplified or read aloud."
         }
-      ]
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "SETU records short clips so you can speak instead of type, and turns them into text."
+        }
+      ],
+      "expo-sharing"
     ],
     "web": {
       "favicon": "./assets/favicon.png"
