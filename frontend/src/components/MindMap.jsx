@@ -38,7 +38,6 @@ export default function MindMap({
   const [dragging, setDragging] = useState(false);
   const [speakOnHover, setSpeakOnHover] = useState(() => getPrefs().speakOnHover !== false);
   const [pictureMode, setPictureMode] = useState(() => Boolean(getPrefs().pictureMode));
-  const [readingRulerY, setReadingRulerY] = useState(null);
 
   const viewportRef = useRef(null);
   const dragRef = useRef(null);
@@ -106,20 +105,19 @@ export default function MindMap({
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
+  // Only a live drag may set state here. Anything unconditional in this handler
+  // re-renders every node and every edge on each mouse move across the canvas,
+  // which is what a stray cursor-tracking state did before it was removed —
+  // it was never read by anything, and it cost a full tree render per pixel.
   const onPointerMove = (event) => {
     const dragState = dragRef.current;
-    if (dragState) {
-      setView((current) => ({
-        ...current,
-        x: dragState.originX + (event.clientX - dragState.startX),
-        y: dragState.originY + (event.clientY - dragState.startY)
-      }));
-    }
+    if (!dragState) return;
 
-    if (viewportRef.current) {
-      const rect = viewportRef.current.getBoundingClientRect();
-      setReadingRulerY(event.clientY - rect.top);
-    }
+    setView((current) => ({
+      ...current,
+      x: dragState.originX + (event.clientX - dragState.startX),
+      y: dragState.originY + (event.clientY - dragState.startY)
+    }));
   };
 
   const endDrag = () => {
@@ -164,21 +162,20 @@ export default function MindMap({
     [cancelPendingSpeech]
   );
 
+  // Both toggles keep their side effects outside the updater: stopping speech
+  // and writing preferences are not idempotent, and StrictMode runs updaters
+  // twice in development.
   const toggleSpeakOnHover = () => {
-    setSpeakOnHover((current) => {
-      const next = !current;
-      if (!next) stopSpeaking();
-      savePrefs({ speakOnHover: next });
-      return next;
-    });
+    const next = !speakOnHover;
+    setSpeakOnHover(next);
+    if (!next) stopSpeaking();
+    savePrefs({ speakOnHover: next });
   };
 
   const togglePictureMode = () => {
-    setPictureMode((current) => {
-      const next = !current;
-      savePrefs({ pictureMode: next });
-      return next;
-    });
+    const next = !pictureMode;
+    setPictureMode(next);
+    savePrefs({ pictureMode: next });
   };
 
   const zoomBy = (factor) =>

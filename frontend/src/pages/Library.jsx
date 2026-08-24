@@ -156,6 +156,9 @@ export default function Library() {
   const [buildingFrom, setBuildingFrom] = useState(null);
   const [error, setError] = useState(null);
   const [bionicEnabled, setBionicEnabled] = useState(() => getPrefs().bionicReading === true);
+  // Read once per mount so a map opened here is drawn with the same palette,
+  // edges, and text scale the user chose on the mind map page.
+  const [mapPrefs] = useState(getPrefs);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -221,11 +224,9 @@ export default function Library() {
   };
 
   const toggleBionicReading = () => {
-    setBionicEnabled((prev) => {
-      const next = !prev;
-      savePrefs({ bionicReading: next });
-      return next;
-    });
+    const next = !bionicEnabled;
+    setBionicEnabled(next);
+    savePrefs({ bionicReading: next });
   };
 
   /**
@@ -287,6 +288,12 @@ export default function Library() {
         <div className="flex-1 min-h-[350px]">
           <MindMap
             map={openMap}
+            palette={mapPrefs.mapColorTheme}
+            edgeStyle={mapPrefs.mapEdgeStyle}
+            gridPattern={mapPrefs.mapGridPattern}
+            nodeStyle={mapPrefs.mapNodeStyle}
+            edgeWidth={mapPrefs.mapEdgeWidth}
+            textScale={mapPrefs.mapTextScale}
             onMapChange={(next) => {
               saveMap(next);
               setMaps(listMaps());

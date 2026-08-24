@@ -58,7 +58,7 @@ export default function CommandPalette({ isOpen, onClose, onStartFocus }) {
       group: 'Go',
       icon: 'ph-squares-four',
       label: 'Cognitive Modes',
-      hint: 'Seven cognitive disability tools',
+      hint: 'Eight cognitive disability tools',
       run: () => navigate('/modes')
     },
     {

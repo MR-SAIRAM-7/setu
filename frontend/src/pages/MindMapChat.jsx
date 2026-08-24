@@ -3,10 +3,14 @@ import { useSearchParams } from 'react-router-dom';
 import MindMap from '../components/MindMap';
 import FileUploadModal from '../components/FileUploadModal';
 import DocumentViewerModal from '../components/DocumentViewerModal';
+import MindMapCustomizerModal from '../components/MindMapCustomizerModal';
+import NodeEditorModal from '../components/NodeEditorModal';
 import { BionicText } from '../lib/bionic';
 import { tts } from '../lib/tts';
 import { streamChat, api } from '../lib/api';
-import { saveMap, listMaps, DEFAULT_WORKED_MAP, getPrefs } from '../lib/storage';
+import { saveMap, listMaps, DEFAULT_WORKED_MAP, getPrefs, savePrefs } from '../lib/storage';
+import { addNodeToTree, editNodeInTree, deleteNodeFromTree } from '../lib/layout';
+import { award } from '../lib/progress';
 import {
   exportMindMapToPDF,
   exportMindMapToPNG,
@@ -50,6 +54,14 @@ export default function MindMapChat() {
   const [bionicEnabled, setBionicEnabled] = useState(() => getPrefs().bionicReading === true);
   const [ttsPlaying, setTtsPlaying] = useState(false);
   const [conversationId, setConversationId] = useState(() => `conv_${Date.now()}`);
+
+  // Canvas appearance lives in preferences so it survives reloads and applies to
+  // every map, not just the one open when it was changed.
+  const [mapPrefs, setMapPrefs] = useState(getPrefs);
+  const [customizerOpen, setCustomizerOpen] = useState(false);
+
+  /** `{ mode: 'add' | 'edit', node?, parentNode? }`, or null when closed. */
+  const [nodeEditor, setNodeEditor] = useState(null);
 
   const abortRef = useRef(null);
   const logRef = useRef(null);
@@ -179,6 +191,9 @@ export default function MindMapChat() {
             onMap: (fresh) => {
               const stored = saveMap(fresh);
               setMap(stored || fresh);
+              // Researching a map is the headline action of the whole app; it
+              // has to pay out, or the Mapmaker milestone can never be reached.
+              award('mapCreated');
               setDetail(null);
               setMessages((current) => [
                 ...current,
@@ -250,6 +265,7 @@ export default function MindMapChat() {
         .then((fresh) => {
           const stored = saveMap({ ...fresh, isLensHandoff: true });
           setMap(stored || { ...fresh, isLensHandoff: true });
+          award('mapCreated');
           setMessages((current) => [
             ...current,
             { role: 'assistant', content: `Here's your map of **${fresh.title}**.` }
@@ -286,6 +302,7 @@ export default function MindMapChat() {
     const stored = saveMap(freshMap);
     setMap(stored || freshMap);
     setDetail(null);
+    award('mapCreated');
     setMessages([
       {
         role: 'user',
@@ -312,6 +329,51 @@ export default function MindMapChat() {
     [map]
   );
 
+  /**
+   * Commit an edited tree to the open canvas and the stored copy together.
+   *
+   * Everything that edits the map funnels through here so a hand edit is
+   * persisted exactly like a researched one — including picking up the stored
+   * record's id, which is what lets the next edit find and replace the same map
+   * instead of appending a duplicate to the library.
+   */
+  const applyRootChange = useCallback(
+    (nextRoot) => {
+      if (!map || !nextRoot) return;
+      const updated = { ...map, root: nextRoot };
+      const stored = saveMap(updated);
+      setMap(stored || updated);
+    },
+    [map]
+  );
+
+  const handleNodeSave = useCallback(
+    (values) => {
+      if (!map?.root || !nodeEditor) return;
+
+      if (nodeEditor.mode === 'add') {
+        applyRootChange(addNodeToTree(map.root, nodeEditor.parentNode.id, values));
+        return;
+      }
+
+      // `id` is dropped rather than merged: it already matches, and spreading it
+      // back would let a future change to the modal silently rewrite node ids.
+      const { id: _ignored, ...updates } = values;
+      applyRootChange(editNodeInTree(map.root, nodeEditor.node.id, updates));
+    },
+    [map, nodeEditor, applyRootChange]
+  );
+
+  const handleNodeDelete = useCallback(
+    (nodeId) => {
+      if (!map?.root) return;
+      applyRootChange(deleteNodeFromTree(map.root, nodeId));
+      // The detail panel may be showing the branch that just disappeared.
+      setDetail((current) => (current?.id === nodeId ? null : current));
+    },
+    [map, applyRootChange]
+  );
+
   const handleReadDetail = () => {
     if (!detail) return;
     if (ttsPlaying) {
@@ -321,13 +383,23 @@ export default function MindMapChat() {
     }
   };
 
+  // Reversed visually only: the transcript stays first in DOM order either way,
+  // so tab order and screen-reader sequence do not change with the side.
+  const chatOnRight = mapPrefs.chatPanelSide === 'right';
+
   return (
-    <div className="flex h-full w-full flex-col lg:flex-row overflow-hidden bg-[var(--color-bg)]">
+    <div
+      className={`flex h-full w-full flex-col overflow-hidden bg-[var(--color-bg)] ${
+        chatOnRight ? 'lg:flex-row-reverse' : 'lg:flex-row'
+      }`}
+    >
       {/* --------------------------- Conversation Pane (392px fixed) --------------------------- */}
       <section
-        className={`flex flex-col border-r border-[var(--color-divider)] bg-[var(--color-bg)] transition-all duration-200 ${
-          showChat ? 'lg:w-[392px] lg:shrink-0 w-full' : 'lg:w-12 lg:shrink-0 hidden lg:flex'
-        }`}
+        className={`flex flex-col bg-[var(--color-bg)] transition-all duration-200 ${
+          chatOnRight
+            ? 'border-[var(--color-divider)] lg:border-l'
+            : 'border-r border-[var(--color-divider)]'
+        } ${showChat ? 'lg:w-[392px] lg:shrink-0 w-full' : 'lg:w-12 lg:shrink-0 hidden lg:flex'}`}
         aria-label="Conversation"
       >
         {/* Header */}
@@ -675,11 +747,20 @@ export default function MindMapChat() {
             <div className="flex-1 basis-[300px] min-h-[300px] relative">
               <MindMap
                 map={map}
+                palette={mapPrefs.mapColorTheme}
+                edgeStyle={mapPrefs.mapEdgeStyle}
+                gridPattern={mapPrefs.mapGridPattern}
+                nodeStyle={mapPrefs.mapNodeStyle}
+                edgeWidth={mapPrefs.mapEdgeWidth}
+                textScale={mapPrefs.mapTextScale}
                 onMapChange={(next) => {
                   setMap(next);
                   saveMap(next);
                 }}
                 onNodeFocus={setDetail}
+                onOpenCustomizer={() => setCustomizerOpen(true)}
+                onAddChild={(node) => setNodeEditor({ mode: 'add', parentNode: node })}
+                onEditNode={(node) => setNodeEditor({ mode: 'edit', node })}
               />
             </div>
 
@@ -762,6 +843,31 @@ export default function MindMapChat() {
         documentId={viewingDocId}
         onClose={() => setViewingDocId(null)}
         onMindMapGenerated={handleMindMapFromFile}
+      />
+
+      {/* Canvas appearance — palette, edges, grid, node shape, text scale */}
+      <MindMapCustomizerModal
+        isOpen={customizerOpen}
+        currentPrefs={mapPrefs}
+        onClose={() => setCustomizerOpen(false)}
+        onUpdatePrefs={(next) => {
+          // savePrefs also re-applies the document-level tint and motion classes,
+          // so the sensory overlay in this modal takes effect immediately.
+          savePrefs(next);
+          setMapPrefs(next);
+        }}
+      />
+
+      {/* Hand editing: rename a branch, add one, or remove a subtree */}
+      <NodeEditorModal
+        isOpen={Boolean(nodeEditor)}
+        mode={nodeEditor?.mode || 'edit'}
+        node={nodeEditor?.node || null}
+        parentNode={nodeEditor?.parentNode || null}
+        paletteKey={mapPrefs.mapColorTheme}
+        onClose={() => setNodeEditor(null)}
+        onSave={handleNodeSave}
+        onDelete={handleNodeDelete}
       />
     </div>
   );

@@ -1,4 +1,22 @@
+import { useEffect, useRef } from 'react';
+
+/**
+ * End-of-session prompt.
+ *
+ * Deliberately an `alertdialog` with no Escape dismissal: it appears only after
+ * a full focus session and asks for one of two deliberate choices, and silently
+ * vanishing on a stray keypress would lose the moment it exists to mark. What it
+ * does owe a keyboard user is focus — without moving it here, the dialog opened
+ * behind wherever the caret happened to be and a screen reader user was left
+ * hunting for a dialog that had already been announced.
+ */
 export default function BreakDialog({ isOpen, onKeepGoing, onTakeFive }) {
+  const primaryRef = useRef(null);
+
+  useEffect(() => {
+    if (isOpen) primaryRef.current?.focus();
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   return (
@@ -25,7 +43,7 @@ export default function BreakDialog({ isOpen, onKeepGoing, onTakeFive }) {
           <button onClick={onKeepGoing} className="btn btn-secondary text-sm">
             Keep going
           </button>
-          <button onClick={onTakeFive} className="btn btn-primary text-sm">
+          <button ref={primaryRef} onClick={onTakeFive} className="btn btn-primary text-sm">
             Take five
           </button>
         </div>

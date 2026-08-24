@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { HashRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom';
 import MindMapChat from './pages/MindMapChat';
 import Library from './pages/Library';
@@ -18,6 +18,9 @@ import { api, setApiLanguage } from './lib/api';
 import { applyPrefs, getPrefs, savePrefs } from './lib/storage';
 import { award, mergeServerProgress } from './lib/progress';
 import { tts } from './lib/tts';
+
+const FOCUS_SECONDS = 25 * 60;
+const BREAK_SECONDS = 5 * 60;
 
 export default function App() {
   useEffect(() => {
@@ -62,76 +65,113 @@ function AppRoot() {
   const [readingRulerActive, setReadingRulerActive] = useState(() => Boolean(getPrefs().readingRuler));
 
   // 25-minute focus session timer state (1500 seconds)
-  const [focusSeconds, setFocusSeconds] = useState(25 * 60);
+  const [focusSeconds, setFocusSeconds] = useState(FOCUS_SECONDS);
   const [focusRunning, setFocusRunning] = useState(false);
-  const timerRef = useRef(null);
+
+  /**
+   * Which countdown is currently on the clock.
+   *
+   * The break reuses the same timer, so without this the five minutes after a
+   * session ended were indistinguishable from the session itself — they paid
+   * out a full focus award and re-opened a dialog announcing twenty-five
+   * minutes that had not happened.
+   */
+  const [focusPhase, setFocusPhase] = useState('focus');
+
+  /**
+   * Reading-ruler controls.
+   *
+   * The current value is mirrored on a ref so these can be stable across
+   * renders: the Alt+H listener is registered once with an empty dependency
+   * list, and a handler that closed over `readingRulerActive` directly would be
+   * frozen at its first-render value and toggle from the wrong state forever.
+   *
+   * `savePrefs` runs here rather than inside a state updater because it writes
+   * storage and fires a background sync, and StrictMode invokes updaters twice
+   * in development.
+   */
+  const rulerRef = useRef(readingRulerActive);
+
+  const setRuler = useCallback((next) => {
+    rulerRef.current = next;
+    setReadingRulerActive(next);
+    savePrefs({ readingRuler: next });
+  }, []);
+
+  const toggleRuler = useCallback(() => setRuler(!rulerRef.current), [setRuler]);
 
   // Global Keyboard Shortcuts (Ctrl+K / Cmd+K for palette, Alt+H for Reading Ruler)
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      // Compared case-insensitively, and against `code` as well, because
+      // `key` arrives as "K" under Caps Lock or Shift and as a dead character
+      // when Option is the modifier on macOS — both of which silently killed
+      // the shortcut for the users least able to reach for a mouse instead.
+      const key = typeof e.key === 'string' ? e.key.toLowerCase() : '';
+
+      if ((e.ctrlKey || e.metaKey) && (key === 'k' || e.code === 'KeyK')) {
         e.preventDefault();
         setPaletteOpen((prev) => !prev);
-      } else if (e.altKey && (e.key === 'h' || e.key === 'H')) {
+      } else if (e.altKey && (key === 'h' || e.code === 'KeyH')) {
         e.preventDefault();
-        setReadingRulerActive((prev) => {
-          const next = !prev;
-          savePrefs({ readingRuler: next });
-          return next;
-        });
+        toggleRuler();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [toggleRuler]);
 
-  // Focus Timer interval
+  // Focus timer tick. The updater only counts down — see the completion effect
+  // below for why nothing else may happen in here.
   useEffect(() => {
-    if (focusRunning) {
-      timerRef.current = setInterval(() => {
-        setFocusSeconds((prev) => {
-          if (prev <= 1) {
-            clearInterval(timerRef.current);
-            setFocusRunning(false);
-            setBreakOpen(true);
-            // Sitting through a whole session is the single most effortful
-            // thing the app asks for, so it is the largest single award.
-            award('focusSession');
-            return 25 * 60;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    } else {
-      clearInterval(timerRef.current);
-    }
-    return () => clearInterval(timerRef.current);
+    if (!focusRunning) return undefined;
+    const timer = setInterval(() => setFocusSeconds((prev) => Math.max(0, prev - 1)), 1000);
+    return () => clearInterval(timer);
   }, [focusRunning]);
+
+  /**
+   * Completion, handled as an effect rather than inside the tick.
+   *
+   * `award` writes to storage and fans out to toast listeners, and a state
+   * updater has to stay pure — StrictMode invokes it twice in development, so
+   * running the payout in there granted the points twice for one session.
+   */
+  useEffect(() => {
+    if (!focusRunning || focusSeconds > 0) return;
+
+    setFocusRunning(false);
+
+    if (focusPhase === 'focus') {
+      // Sitting through a whole session is the single most effortful thing the
+      // app asks for, so it is the largest single award. A finished break is
+      // not an achievement and pays nothing.
+      award('focusSession');
+      setBreakOpen(true);
+    }
+
+    setFocusPhase('focus');
+    setFocusSeconds(FOCUS_SECONDS);
+  }, [focusRunning, focusSeconds, focusPhase]);
 
   const toggleFocus = () => setFocusRunning((prev) => !prev);
   const resetFocus = () => {
     setFocusRunning(false);
-    setFocusSeconds(25 * 60);
+    setFocusPhase('focus');
+    setFocusSeconds(FOCUS_SECONDS);
   };
 
   const handleBreakKeepGoing = () => {
     setBreakOpen(false);
-    setFocusSeconds(25 * 60);
+    setFocusPhase('focus');
+    setFocusSeconds(FOCUS_SECONDS);
     setFocusRunning(true);
   };
 
   const handleBreakTakeFive = () => {
     setBreakOpen(false);
-    setFocusSeconds(5 * 60);
+    setFocusPhase('break');
+    setFocusSeconds(BREAK_SECONDS);
     setFocusRunning(true);
-  };
-
-  const toggleRuler = () => {
-    setReadingRulerActive((prev) => {
-      const next = !prev;
-      savePrefs({ readingRuler: next });
-      return next;
-    });
   };
 
   return (
@@ -146,6 +186,7 @@ function AppRoot() {
               onOpenPalette={() => setPaletteOpen(true)}
               focusSeconds={focusSeconds}
               focusRunning={focusRunning}
+              focusPhase={focusPhase}
               onToggleFocus={toggleFocus}
               onResetFocus={resetFocus}
               readingRulerActive={readingRulerActive}
@@ -169,10 +210,7 @@ function AppRoot() {
       {/* Global ADHD Reading Ruler */}
       <ReadingRuler
         enabled={readingRulerActive}
-        onClose={() => {
-          setReadingRulerActive(false);
-          savePrefs({ readingRuler: false });
-        }}
+        onClose={() => setRuler(false)}
       />
 
       <CommandPalette
@@ -216,6 +254,7 @@ function Shell({
   onOpenPalette,
   focusSeconds,
   focusRunning,
+  focusPhase,
   onToggleFocus,
   onResetFocus,
   readingRulerActive,
@@ -355,7 +394,9 @@ function Shell({
         {/* Focus Session Widget */}
         <div className="p-3 border-t border-[var(--color-divider)] space-y-2 text-left bg-[color-mix(in_srgb,var(--color-surface)_80%,transparent)]">
           <div className="flex items-center justify-between">
-            <span className="kicker text-[9.5px]">Focus Session</span>
+            <span className="kicker text-[9.5px]">
+              {focusPhase === 'break' ? 'Break' : 'Focus Session'}
+            </span>
             <span
               className={`font-mono text-[18px] font-bold ${
                 focusRunning

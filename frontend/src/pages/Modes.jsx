@@ -599,19 +599,24 @@ function RenderModeResult({ modeKey, data, bionicEnabled }) {
   if (!data) return null;
 
   const toggleStep = (stepId) => {
+    const wasChecked = checkedSteps.has(stepId);
+
     setCheckedSteps((prev) => {
       const next = new Set(prev);
-      if (next.has(stepId)) {
-        next.delete(stepId);
-      } else {
-        next.add(stepId);
-        // The chime fires here rather than through the reward toast because a
-        // ticked step should feel immediate even when points are switched off.
-        tts.playCelebrationChime();
-        award('stepChecked');
-      }
+      if (wasChecked) next.delete(stepId);
+      else next.add(stepId);
       return next;
     });
+
+    // Kept outside the updater: `award` writes to storage and notifies the toast
+    // host, and StrictMode invokes updaters twice in development — which paid
+    // out two lots of points and played the chime twice for one tick. The chime
+    // fires here rather than through the reward toast because a ticked step
+    // should feel immediate even when points are switched off.
+    if (!wasChecked) {
+      tts.playCelebrationChime();
+      award('stepChecked');
+    }
   };
 
   switch (modeKey) {

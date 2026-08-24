@@ -8,13 +8,7 @@
  */
 
 import { getUserId } from './identity';
-
-const BASE = (
-  import.meta.env.VITE_API_URL ||
-  (import.meta.env.PROD ? 'https://setu-37hl.onrender.com' : '')
-).replace(/\/+$/, '');
-
-const url = (path) => `${BASE}${path}`;
+import { apiUrl as url } from './apiBase';
 
 /** Timeouts, in ms. Research and file processing legitimately take a while. */
 const TIMEOUTS = {
@@ -305,7 +299,7 @@ export const api = {
   summarize: (text) => post('/api/summarize', { text }),
   explain: (text, language = 'English') => post('/api/agent/explain', { text, language }),
 
-  // Seven cognitive modes
+  // Eight cognitive modes
   start: (task, isStuck = false) => post('/api/start', { task, isStuck }),
   simplify: (text) => post('/api/simplify', { text }),
   learn: (text) => post('/api/learn', { text }),

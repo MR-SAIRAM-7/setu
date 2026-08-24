@@ -86,11 +86,12 @@ export default function NumberStory({ data, onSolved }) {
           </span>
           <button
             onClick={() => {
-              setNarrate((current) => {
-                if (current) tts.stop();
-                else tts.speak(step.narration);
-                return !current;
-              });
+              // Playback is started outside the updater so a double invocation
+              // cannot begin the narration twice over itself.
+              const next = !narrate;
+              setNarrate(next);
+              if (next) tts.speak(step.narration);
+              else tts.stop();
             }}
             className={`btn !min-h-[28px] !px-2.5 text-xs font-semibold ${
               narrate ? 'btn-primary' : 'btn-ghost'

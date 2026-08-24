@@ -12,8 +12,7 @@
 
 import { getUserId } from './identity';
 import { getApiLanguage } from './api';
-
-const BASE = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+import { API_BASE as BASE } from './apiBase';
 
 class STTEngine {
   constructor() {

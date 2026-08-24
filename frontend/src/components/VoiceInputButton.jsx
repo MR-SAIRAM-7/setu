@@ -22,6 +22,7 @@ export default function VoiceInputButton({
   const [audioLevel, setAudioLevel] = useState(0);
   const [errorMessage, setErrorMessage] = useState(null);
   const isRecordingRef = useRef(false);
+  const errorTimerRef = useRef(null);
 
   useEffect(() => {
     const unsubscribe = stt.subscribe((state) => {
@@ -33,13 +34,18 @@ export default function VoiceInputButton({
       }
       if (state.error) {
         setErrorMessage(state.error);
-        const t = setTimeout(() => setErrorMessage(null), 4000);
-        return () => clearTimeout(t);
+        // The subscriber is a plain callback, not an effect — a cleanup returned
+        // from here is simply dropped on the floor, so the auto-dismiss timer has
+        // to be tracked on a ref instead. Replacing the previous one also stops a
+        // stale timer from clearing a newer message four seconds early.
+        clearTimeout(errorTimerRef.current);
+        errorTimerRef.current = setTimeout(() => setErrorMessage(null), 4000);
       }
     });
 
     return () => {
       unsubscribe();
+      clearTimeout(errorTimerRef.current);
       if (isRecordingRef.current) {
         stt.stop();
       }

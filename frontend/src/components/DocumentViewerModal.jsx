@@ -54,6 +54,22 @@ export default function DocumentViewerModal({
     }
   }, [isOpen, documentId, initialDocument]);
 
+  /**
+   * Escape closes the reader.
+   *
+   * This is the one modal in the app that opens over a long read, so it is also
+   * the one a user is most likely to want out of quickly — and it was the only
+   * dialog with no keyboard exit at all.
+   */
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') onClose?.();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, onClose]);
+
   // Subscribe to TTS changes
   useEffect(() => {
     const unsubscribe = tts.subscribe((state) => {

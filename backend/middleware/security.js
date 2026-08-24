@@ -39,8 +39,20 @@ function securityHeaders(_req, res, next) {
  * Behind multiple instances this becomes per-instance rather than global —
  * acceptable, because its job is to stop one client burning the AI quota, not
  * to enforce billing.
+ *
+ * Two buckets are counted on every request:
+ *
+ *  - Per `x-user-id`, so one heavy browser cannot lock out everyone else behind
+ *    the same office NAT or mobile carrier gateway.
+ *  - Per source address, at `ipMultiplier` times the allowance.
+ *
+ * The second bucket is the one that actually protects the AI budget. `x-user-id`
+ * is a plain client-supplied header with nothing to verify it, so a caller that
+ * mints a fresh id per request would otherwise get an unlimited quota — which is
+ * precisely the traffic the AI limiter exists to stop. The address ceiling is
+ * deliberately loose so ordinary shared-IP use never reaches it.
  */
-function createRateLimiter({ windowMs, max, message, keyPrefix = '' }) {
+function createRateLimiter({ windowMs, max, message, keyPrefix = '', ipMultiplier = 6 }) {
   const hits = new Map();
 
   // Drop expired buckets periodically so the map cannot grow without bound.
@@ -52,31 +64,37 @@ function createRateLimiter({ windowMs, max, message, keyPrefix = '' }) {
   }, Math.max(windowMs, 60000));
   sweep.unref?.();
 
-  return function rateLimit(req, res, next) {
-    // Identity first so one shared NAT address cannot lock out every user.
-    const identity =
-      req.headers['x-user-id'] ||
-      req.ip ||
-      req.socket?.remoteAddress ||
-      'unknown';
-    const key = `${keyPrefix}:${identity}`;
-    const now = Date.now();
-
+  /** Count one hit against `key` and report the bucket's state. */
+  const bump = (key, limit, now) => {
     let entry = hits.get(key);
     if (!entry || entry.resetAt <= now) {
       entry = { count: 0, resetAt: now + windowMs };
       hits.set(key, entry);
     }
-
     entry.count += 1;
+    return { count: entry.count, resetAt: entry.resetAt, limit, exceeded: entry.count > limit };
+  };
 
-    const remaining = Math.max(0, max - entry.count);
-    res.setHeader('RateLimit-Limit', String(max));
-    res.setHeader('RateLimit-Remaining', String(remaining));
-    res.setHeader('RateLimit-Reset', String(Math.ceil((entry.resetAt - now) / 1000)));
+  return function rateLimit(req, res, next) {
+    const now = Date.now();
+    const address = req.ip || req.socket?.remoteAddress || 'unknown';
+    const userId = req.headers['x-user-id'];
 
-    if (entry.count > max) {
-      const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
+    const buckets = [bump(`${keyPrefix}:ip:${address}`, max * ipMultiplier, now)];
+    if (userId) buckets.push(bump(`${keyPrefix}:user:${userId}`, max, now));
+
+    // Report against whichever bucket the caller is closest to filling, so the
+    // advertised headers never promise more room than actually remains.
+    const tightest = buckets.reduce((worst, bucket) =>
+      bucket.limit - bucket.count < worst.limit - worst.count ? bucket : worst
+    );
+    const retryAfter = Math.ceil((tightest.resetAt - now) / 1000);
+
+    res.setHeader('RateLimit-Limit', String(tightest.limit));
+    res.setHeader('RateLimit-Remaining', String(Math.max(0, tightest.limit - tightest.count)));
+    res.setHeader('RateLimit-Reset', String(retryAfter));
+
+    if (buckets.some((bucket) => bucket.exceeded)) {
       res.setHeader('Retry-After', String(retryAfter));
       return res.status(429).json({
         error: message || `Too many requests. Try again in ${retryAfter} seconds.`,

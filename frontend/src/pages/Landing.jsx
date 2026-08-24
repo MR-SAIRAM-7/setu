@@ -115,7 +115,7 @@ export default function Landing() {
                 </p>
               </div>
               <div>
-                <p className="font-[var(--font-heading)] text-3xl font-bold text-[var(--color-text)]">7</p>
+                <p className="font-[var(--font-heading)] text-3xl font-bold text-[var(--color-text)]">8</p>
                 <p className="text-[12px] text-[color-mix(in_srgb,var(--color-text)_60%,transparent)] leading-tight">
                   cognitive modes
                 </p>
