@@ -4,8 +4,12 @@
  * Turns a plain-language topic or source document into an interactive, expandable mind map.
  *
  * Pipeline:
- *   1. RESEARCH  — grounded research via OpenRouter / Gemini with source citations.
+ *   1. RESEARCH  — Google Search-grounded research, with source citations.
  *   2. STRUCTURE — transforms research into a strict hierarchical cognitive node tree.
+ *
+ * Both passes run on the Pro model chain. This is the one place in SETU where
+ * nobody is watching a spinner — the client draws a placeholder map immediately
+ * and fills it in — so the extra seconds buy a genuinely better map.
  */
 
 const { requestStructuredAI, requestResearch, requestText } = require('./aiService');
@@ -174,7 +178,8 @@ async function researchMindMap({ topic, context = '', language, onProgress = () 
     schema: mindMapSchema,
     instructions: `${STRUCTURE_SYSTEM}${languageDirective(lang.code)}`,
     input: `TOPIC: ${cleanTopic}\n\nRESEARCH NOTES:\n${research.text}`,
-    temperature: 0.3
+    temperature: 0.3,
+    tier: 'pro'
   });
 
   onProgress({ stage: 'done', message: 'Map ready.' });
@@ -223,6 +228,11 @@ async function classifyTurn({ messages, hasMap, currentTopic, hasDocument }) {
     .join('\n');
 
   try {
+    // Deliberately the tightest budget in the codebase. Routing sits in front of
+    // every chat turn and produces nothing the user sees except an acknowledgement,
+    // so time spent here is time before any real work starts — and the heuristic
+    // fallback below is a perfectly serviceable answer. Fast and occasionally
+    // wrong beats correct and late.
     return await requestStructuredAI({
       name: 'setu_intent',
       schema: intentSchema,
@@ -241,7 +251,11 @@ Choose:
 
 Make the "reply" warm, brief, and reassuring.`,
       input: recent,
-      temperature: 0.2
+      temperature: 0.2,
+      thinkingLevel: 'minimal',
+      timeoutMs: 8000,
+      maxRetries: 0,
+      deadlineMs: 12000
     });
   } catch (_) {
     // Robust fallback intent

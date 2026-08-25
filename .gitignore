@@ -10,9 +10,15 @@ build/
 out/
 
 # Environment variables
+# Ignore all .env files across all directories, keeping only .env.example templates
 .env
+.env.*
 .env.local
-.env.production
+**/.env
+**/.env.*
+**/.env.local
+!**/.env.example
+!**/.env.local.example
 
 # System and logs
 .DS_Store

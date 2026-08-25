@@ -696,8 +696,8 @@ async function seedConversations() {
           sources: message.sources || [],
           mindMapData: null,
           fileAttachments: message.fileAttachments || [],
-          provider: message.role === 'assistant' ? 'openrouter' : null,
-          modelUsed: message.role === 'assistant' ? (config.openRouterModel || 'openrouter/free') : null,
+          provider: message.role === 'assistant' ? config.primaryProvider : null,
+          modelUsed: message.role === 'assistant' ? config.geminiModel || config.openAiModel : null,
           metadata: SEED_TAG,
           createdAt: sentAt,
           updatedAt: sentAt

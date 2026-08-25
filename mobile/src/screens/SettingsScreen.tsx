@@ -148,7 +148,7 @@ export const SettingsScreen: React.FC<{ navigation?: any }> = ({ navigation }) =
       const res = await api.healthAi();
       if (res && res.ok) {
         setAiTestResult(
-          `AI Probe Success! Provider: ${res.provider || 'OpenRouter'} · Model: ${res.model || 'active'}`
+          `AI Probe Success! Provider: ${res.provider || 'Gemini'} · Model: ${res.model || 'active'}`
         );
       } else {
         setAiTestResult(`AI Probe: ${res?.reason || 'Engine offline or fallback rule engine active.'}`);

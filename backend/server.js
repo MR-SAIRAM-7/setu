@@ -16,6 +16,7 @@ const cors = require('cors');
 const config = require('./config');
 const { connectDB, whenReady, closeDB } = require('./config/db');
 const apiRoutes = require('./routes/apiRoutes');
+const { warmup } = require('./services/aiService');
 const errorHandler = require('./middleware/errorHandler');
 const { securityHeaders, createRateLimiter } = require('./middleware/security');
 
@@ -192,13 +193,11 @@ app.use(errorHandler);
 
 // Vercel imports the app; only bind a port when run directly.
 if (require.main === module) {
-  const aiProviderInfo = config.openRouterApiKey
-    ? `OpenRouter (${config.openRouterModel}) [fallback chain active]`
-    : config.geminiApiKey
-      ? 'Google Gemini Direct'
-      : config.openAiApiKey
-        ? 'OpenAI Direct'
-        : 'Deterministic L0 offline rule engine';
+  const aiProviderInfo = config.geminiApiKey
+    ? `Google Gemini — ${config.geminiModel} (+${config.geminiModelChain.length - 1} in the fallback chain)`
+    : config.openAiApiKey
+      ? `OpenAI Direct (${config.openAiModel})`
+      : 'Deterministic L0 offline rule engine';
 
   const server = app.listen(config.port, () => {
     console.log('\n  ======================================================');
@@ -208,6 +207,7 @@ if (require.main === module) {
       : config.safeMongoUri || 'not configured — using local fallback storage';
     console.log(`  Database        : MongoDB (${dbInfo})`);
     console.log(`  AI Engine       : ${aiProviderInfo}`);
+    console.log(`  Deep chain      : ${config.geminiApiKey ? config.geminiProModelChain[0] : 'n/a'}`);
     console.log(`  Web app         : ${hasBuiltFrontend ? 'served from /frontend/dist' : 'run separately (npm run dev)'}`);
     console.log(`  Health Check    : http://localhost:${config.port}/api/health`);
     console.log('  ======================================================\n');
@@ -215,7 +215,21 @@ if (require.main === module) {
     for (const warning of config.warnings()) {
       console.warn(`  [SETU config] ${warning}`);
     }
+
+    // Resolve the live model list in the background, so the first user request
+    // does not pay for discovery and an unreachable chain shows up here rather
+    // than in whoever clicks first.
+    warmup().catch((err) => {
+      console.warn('[SETU] AI warmup failed:', err.message);
+    });
   });
+
+  // --- Production hardening: explicit server-level timeouts ---
+  // Without these, network partitions and stalled clients can leave dangling
+  // sockets open indefinitely, exhausting the file-descriptor budget.
+  server.keepAliveTimeout = 72000;   // 72 s — safely above typical proxy idle (60 s)
+  server.headersTimeout = 75000;     // must exceed keepAliveTimeout per Node docs
+  server.setTimeout(120000);         // 2 min absolute ceiling on any single request
 
   server.on('error', (error) => {
     if (error.code === 'EADDRINUSE') {
@@ -247,9 +261,12 @@ if (require.main === module) {
     process.on(signal, () => shutdown(signal));
   }
 
-  // A rejected promise must not take the engine down mid-demo.
+  // An unhandled rejection signals corrupted in-process state. Log it with full
+  // context and then exit so the container orchestrator can restart cleanly.
+  // Staying alive risks serving stale or broken responses from poisoned state.
   process.on('unhandledRejection', (reason) => {
-    console.error('[SETU] Unhandled promise rejection:', reason);
+    console.error('[SETU] Unhandled promise rejection — exiting to avoid corrupted state:', reason);
+    process.exit(1);
   });
 }
 

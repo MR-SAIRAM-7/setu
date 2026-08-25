@@ -50,7 +50,7 @@ nothing is sent on pages where you have not invoked an AI feature.
 | Send page to my Sanctuary | The page title, URL and readable text | Your configured Sanctuary web app |
 
 The SETU engine then forwards the request to whichever AI provider it is
-configured with (OpenRouter, Google Gemini, or OpenAI). Their handling of that
+configured with (Google Gemini, or OpenAI if a key for it is set). Their handling of that
 data is governed by their own privacy policies. If you point the extension at an
 engine you run yourself, you choose the provider and hold the API key.
 

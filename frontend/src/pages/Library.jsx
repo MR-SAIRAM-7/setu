@@ -219,8 +219,15 @@ export default function Library() {
 
   const removeFile = async (e, id) => {
     e.stopPropagation();
+    const previous = files;
     setFiles((prev) => prev.filter((f) => f.id !== id));
-    await api.deleteFile(id);
+    try {
+      await api.deleteFile(id);
+    } catch (err) {
+      console.error('[Library] Failed to delete file:', err);
+      setFiles(previous);
+      setError('Could not delete file from server. Please try again.');
+    }
   };
 
   const toggleBionicReading = () => {

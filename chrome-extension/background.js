@@ -128,7 +128,9 @@ async function warmEngine() {
  * accumulate in local storage for the life of the profile.
  */
 chrome.tabs.onRemoved.addListener((tabId) => {
-  chrome.storage.local.remove(`setu_agent_session:${tabId}`).catch(() => {});
+  chrome.storage.local.remove(`setu_agent_session:${tabId}`).catch((err) => {
+    console.debug('[SETU worker] Failed to clean agent session for tab', tabId, err.message);
+  });
 });
 
 /** Clear every agent session at browser start — none of those tabs still exist. */

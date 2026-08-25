@@ -179,7 +179,9 @@ async function saveMessage({
     await Conversation.findOneAndUpdate(
       { id: conversationId },
       { lastMessageAt: new Date(), updatedAt: new Date() }
-    ).catch(() => {});
+    ).catch((err) => {
+      console.warn('[MongoDB Service] Failed to update conversation timestamp:', err.message);
+    });
 
     return msg;
   } catch (err) {

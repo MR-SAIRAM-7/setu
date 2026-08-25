@@ -637,11 +637,20 @@ export default function Settings() {
               <dt className="text-[color-mix(in_srgb,var(--color-text)_60%,transparent)]">Active Fast Model Chain</dt>
               <dd className="font-semibold text-right">
                 {health?.aiConfigured ? (
+                  // Read from the health payload rather than hard-coded: the chain is
+                  // configurable and Google retires model IDs on its own schedule, so a
+                  // list written into this file goes stale silently and misreports what
+                  // is actually answering.
                   <span className="text-[var(--color-accent-700)]">
-                    OpenRouter (Gemini 2.0 Flash / 2.5 Flash / Llama 3.3 / Claude 3.5)
+                    Google Gemini · {health?.aiEngine?.model || 'resolving…'}
+                    {health?.aiEngine?.fallbackChain?.length > 1
+                      ? ` (+${health.aiEngine.fallbackChain.length - 1} fallback)`
+                      : ''}
                   </span>
                 ) : (
-                  <span className="text-[#edbb00]">Set OPENROUTER_API_KEY in .env</span>
+                  <span className="text-[#edbb00]">
+                    {health?.aiEngine?.setupHint || 'Set GEMINI_API_KEY in .env'}
+                  </span>
                 )}
               </dd>
             </div>

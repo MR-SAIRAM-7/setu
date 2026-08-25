@@ -8,8 +8,8 @@ This guide contains the manual setup steps and configuration details required to
 
 | Component | Technology | Description |
 | :--- | :--- | :--- |
-| **Primary AI Engine** | **OpenRouter AI** | Primary intelligent agent with automated multi-model fallback chain (`google/gemini-2.5-flash`, `claude-3.5-haiku`, `llama-3.3-70b`, `deepseek-chat`, `gpt-4o-mini`). Automatically steps down the chain on rate limit (429), balance limit (402), or provider downtime. |
-| **Secondary / Tertiary AI** | **Gemini & OpenAI** | Direct provider fallbacks if OpenRouter is unreachable. Degrades gracefully to offline deterministic L0 rule engine if all keys are unavailable. |
+| **AI Engine** | **Google Gemini** | Two model chains. Fast (`gemini-3.7-flash` → `3.6-flash` → `3.5-flash` → `3.5-flash-lite` → `2.5-flash` → `2.5-flash-lite`) serves every request a human is waiting on; Deep (`gemini-3.1-pro-preview` → `2.5-pro`) serves research and mind-map structuring. Steps down the chain on rate limit (429), 404, or provider downtime, and prunes unreachable IDs at boot. |
+| **Optional fallback** | **OpenAI** | Unset in most deployments. Degrades to the offline deterministic L0 rule engine when no key is reachable. |
 | **Database Persistence** | **MongoDB (Mongoose)** | Stores user conversations, message threads, uploaded document text & summaries, interactive mind maps, and accessibility settings. |
 | **File Processing** | **Multer + PDF-Parse + Mammoth** | Accepts PDF, Word (.docx), Markdown, TXT, CSV, JSON, and Images up to 25MB with instant OCR / text extraction, auto-summarization, and grounded Q&A. |
 | **Mind Map Visual Export** | **jsPDF + html2canvas + SVG** | Generates Broadsheet-styled visual PDF documents, 2.5× retina PNG images, standalone SVG vectors, Markdown, and JSON. |
@@ -21,11 +21,14 @@ This guide contains the manual setup steps and configuration details required to
 
 To make the application fully operational, please complete the following manual steps:
 
-### Step 1: Obtain an OpenRouter API Key
-1. Visit **[OpenRouter.ai](https://openrouter.ai/)** and sign up or sign in.
-2. Go to **[OpenRouter Keys](https://openrouter.ai/keys)** and click **Create Key**.
-3. Copy the generated API key (starts with `sk-or-v1-...`).
-4. Add credits to your OpenRouter account or select free-tier models (e.g. `google/gemini-2.0-flash-lite-preview-02-05:free`, `meta-llama/llama-3.3-70b-instruct:free`, `deepseek/deepseek-r1:free`).
+### Step 1: Obtain a Google Gemini API Key
+1. Visit **[Google AI Studio](https://aistudio.google.com/apikey)** and sign in with your Google account.
+2. Click **Create API key** and pick (or create) a Google Cloud project.
+3. Copy the generated key into `GEMINI_API_KEY`.
+4. The free tier is enough to run and demo SETU. For production throughput and no daily cap, enable **Cloud Billing** on that project.
+
+> **A Google AI Pro / Google One AI Premium subscription is not API access.** Those are consumer
+> plans for the Gemini app. The API key above is separate, and is what SETU uses.
 
 ### Step 2: Set Up MongoDB Database (Local or Cloud Atlas)
 
@@ -66,16 +69,19 @@ Create or update `.env` in the project root (`D:\PROJECTS\setu\.env`) and inside
 # SETU Sanctuary — Environment Configuration
 # ==============================================================================
 
-# --- 1. Primary AI Engine (OpenRouter) ---
-OPENROUTER_API_KEY=sk-or-v1-your-openrouter-key-here
-OPENROUTER_MODEL=google/gemini-2.5-flash
-OPENROUTER_MODEL_CHAIN=google/gemini-2.5-flash,anthropic/claude-3.5-haiku,meta-llama/llama-3.3-70b-instruct,deepseek/deepseek-chat,openai/gpt-4o-mini
-OPENROUTER_APP_NAME="SETU Cognitive Sanctuary"
-OPENROUTER_SITE_URL="https://setu-sanctuary.app"
+# --- 1. AI Engine (Google Gemini) ---
+GEMINI_API_KEY=your-gemini-api-key-here
 
-# --- 2. Secondary & Tertiary AI Fallbacks (Optional) ---
-GEMINI_API_KEY=
+# Leave GEMINI_MODEL blank to use the top of the chain.
 GEMINI_MODEL=
+GEMINI_MODEL_CHAIN=gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash,gemini-3.5-flash-lite,gemini-2.5-flash,gemini-2.5-flash-lite
+GEMINI_PRO_MODEL_CHAIN=gemini-3.1-pro-preview,gemini-2.5-pro
+GEMINI_THINKING_LEVEL=low
+GEMINI_PRO_THINKING_LEVEL=high
+GEMINI_WEB_SEARCH=true
+GEMINI_DISCOVER_MODELS=true
+
+# --- 2. Optional last-resort fallback ---
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
 
@@ -85,9 +91,10 @@ MONGODB_URI=mongodb+srv://setu_user:yourpassword@cluster0.abcde.mongodb.net/setu
 # --- 4. Engine Server Settings ---
 PORT=3000
 NODE_ENV=development
-AI_TIMEOUT_MS=60000
-AI_MAX_RETRIES=3
-AI_MAX_RETRY_WAIT_MS=15000
+AI_TIMEOUT_MS=45000
+AI_DEADLINE_MS=90000
+AI_MAX_RETRIES=2
+AI_MAX_RETRY_WAIT_MS=8000
 
 # --- 5. Web App (Production Only) ---
 # Leave blank in development (Vite proxies /api to PORT 3000 automatically)
@@ -100,16 +107,20 @@ VITE_API_URL=
 
 | Variable | Required? | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `OPENROUTER_API_KEY` | **Recommended** | `null` | Primary API key for OpenRouter engine. |
-| `OPENROUTER_MODEL` | Optional | `google/gemini-2.5-flash` | The preferred primary model identifier on OpenRouter. |
-| `OPENROUTER_MODEL_CHAIN` | Optional | Multi-model list | Comma-separated list of fallback models tried sequentially when limits or errors occur. |
+| `GEMINI_API_KEY` | **Required** | `null` | Gemini API key. Create one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey). |
+| `GEMINI_MODEL` | Optional | top of chain | Preferred model. Retired IDs (`gemini-1.5-*`, `gemini-2.0-*`) are rejected with a warning. |
+| `GEMINI_MODEL_CHAIN` | Optional | Flash chain | Comma-separated fallbacks, tried in order when a model 429s, 404s, or times out. |
+| `GEMINI_PRO_MODEL_CHAIN` | Optional | Pro chain | Models for research and map structuring. Falls through to the Flash chain. |
+| `GEMINI_THINKING_LEVEL` | Optional | `low` | Reasoning depth on the fast chain: `minimal`, `low`, `medium`, `high`. |
+| `GEMINI_WEB_SEARCH` | Optional | `true` | Google Search grounding on the research pass. Costs quota per grounded call. |
+| `GEMINI_DISCOVER_MODELS` | Optional | `true` | Ask the API at boot which models this key can reach, and skip the rest. |
 | `MONGODB_URI` | **Recommended** | `mongodb://127.0.0.1:27017/setu` | MongoDB database connection string (local or MongoDB Atlas). |
-| `GEMINI_API_KEY` | Optional | `null` | Google Gemini API key used as direct secondary fallback. |
-| `OPENAI_API_KEY` | Optional | `null` | OpenAI API key used as direct tertiary fallback. |
+| `OPENAI_API_KEY` | Optional | `null` | OpenAI key, used only if every Gemini model is unreachable. |
 | `PORT` | Optional | `3000` | Port for Express backend server. |
 | `NODE_ENV` | Optional | `development` | Environment mode (`development`, `production`, `test`). |
-| `AI_TIMEOUT_MS` | Optional | `60000` | Timeout per AI request in milliseconds (60 seconds). |
-| `AI_MAX_RETRIES` | Optional | `3` | Maximum retry attempts per model with exponential backoff. |
+| `AI_TIMEOUT_MS` | Optional | `45000` | Ceiling on a single HTTP call to a model. |
+| `AI_DEADLINE_MS` | Optional | `90000` | Ceiling on one logical request — chain walk and retries included. This is the wait a user actually experiences. |
+| `AI_MAX_RETRIES` | Optional | `2` | Retry attempts per provider, with exponential backoff. |
 | `VITE_API_URL` | Production | `""` | Backend API base URL when hosted on a different domain. |
 
 ---
@@ -125,7 +136,8 @@ You should see:
 ```text
   SETU API Server → http://localhost:3000
   Database        : MongoDB (Connected)
-  AI Engine       : OpenRouter (google/gemini-2.5-flash) [Fallback Chain Active]
+  AI Engine       : Google Gemini — gemini-3.7-flash (+5 in the fallback chain)
+  Deep chain      : gemini-3.1-pro-preview
   Health Check    : http://localhost:3000/api/health
 ```
 
@@ -155,8 +167,8 @@ This automatically verifies:
 
 ## 5. Summary of New Features Available
 
-1. **OpenRouter AI with Automatic Fallback**:
-   - Seamlessly switches to alternative models if quota, balance, or provider errors hit.
+1. **Google Gemini with Automatic Fallback**:
+   - Seamlessly switches to the next model in the chain on quota, 404, or provider errors, and prunes IDs the key cannot reach at boot.
 2. **Database Persistence**:
    - Saves conversations, message history, uploaded documents, mind maps, and user preferences directly to MongoDB.
 3. **File Upload & Document Processing**:

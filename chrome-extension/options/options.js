@@ -100,8 +100,8 @@ class Options {
     // Before the first paint, so the page never flashes the wrong palette.
     self.setuApplyAppearance(this.state.settings.appearance);
 
-    const currentApiHost = apiHost || self.SETU_DEFAULTS?.apiHost || 'https://setu-37hl.onrender.com';
-    const currentSanctuaryUrl = sanctuaryUrl || self.SETU_DEFAULTS?.sanctuaryUrl || 'https://setu-amber.vercel.app';
+    const currentApiHost = apiHost || self.SETU_DEFAULTS?.apiHost || '';
+    const currentSanctuaryUrl = sanctuaryUrl || self.SETU_DEFAULTS?.sanctuaryUrl || '';
 
     if ($('#api-host')) $('#api-host').value = currentApiHost;
     if ($('#sanctuary-url')) $('#sanctuary-url').value = currentSanctuaryUrl;
@@ -499,13 +499,13 @@ class Options {
 
     await chrome.storage.sync.clear();
     await chrome.storage.sync.set({
-      apiHost: self.SETU_DEFAULTS?.apiHost || 'https://setu-37hl.onrender.com',
-      sanctuaryUrl: self.SETU_DEFAULTS?.sanctuaryUrl || 'https://setu-amber.vercel.app'
+      apiHost: self.SETU_DEFAULTS?.apiHost || '',
+      sanctuaryUrl: self.SETU_DEFAULTS?.sanctuaryUrl || ''
     });
 
     this.state = { settings: { ...DEFAULT_SETTINGS } };
-    if ($('#api-host')) $('#api-host').value = self.SETU_DEFAULTS?.apiHost || 'https://setu-37hl.onrender.com';
-    if ($('#sanctuary-url')) $('#sanctuary-url').value = self.SETU_DEFAULTS?.sanctuaryUrl || 'https://setu-amber.vercel.app';
+    if ($('#api-host')) $('#api-host').value = self.SETU_DEFAULTS?.apiHost || '';
+    if ($('#sanctuary-url')) $('#sanctuary-url').value = self.SETU_DEFAULTS?.sanctuaryUrl || '';
     this.renderSettings();
 
     button.dataset.armed = 'false';

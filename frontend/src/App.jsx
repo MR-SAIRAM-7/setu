@@ -505,10 +505,10 @@ function EngineBadge({ state, dbState }) {
         state === 'down'
           ? 'Start the backend: npm start in /backend'
           : state === 'nokey'
-            ? 'Set OPENROUTER_API_KEY in your .env file'
+            ? 'Set GEMINI_API_KEY in your .env file — get one at aistudio.google.com/apikey'
             : dbState?.connected
-              ? 'Connected to OpenRouter fast AI and MongoDB database'
-              : 'Connected to OpenRouter with local storage fallback'
+              ? 'Connected to Google Gemini and MongoDB'
+              : 'Connected to Google Gemini with local storage fallback'
       }
     >
       <span

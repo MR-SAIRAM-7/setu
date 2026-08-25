@@ -44,11 +44,13 @@
       this.hovered = null;
       this.map = null;
       this.zoom = 1;
-      this.speakOnHover = true;
+      this.speakOnHover = false;
       this.hoverTimer = null;
       this.controller = null;
       this.stopSpotlight = null;
       this.collapsed = new Set();
+      this.geometry = null;
+      this.size = null;
     }
 
     /** Entry point — invoked from the popup, a shortcut, or the context menu. */
@@ -83,6 +85,8 @@
       this.body = null;
       this.map = null;
       this.collapsed.clear();
+      this.geometry = null;
+      this.size = null;
     }
 
     /* ------------------------------------------------------------------ */
@@ -533,7 +537,6 @@
         cancel.onclick = () => this.controller?.abort();
         this.body.appendChild(cancel);
       }
-      Dock.layout();
     }
 
     paint() {
@@ -572,7 +575,6 @@
       `;
 
       this.layoutMap(this.body.querySelector('.map'));
-      Dock.layout();
     }
 
     /** Horizontal bars: the one chart form that stays readable when small. */
@@ -808,18 +810,25 @@
       const style = document.createElement('style');
       style.textContent = `
         .panel {
-          position: fixed; left: 50%; transform: translateX(-50%);
-          width: min(760px, calc(100vw - 40px)); max-height: min(72vh, 720px);
+          position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+          width: min(840px, calc(100vw - 36px)); height: min(78vh, 760px);
+          min-width: 380px; min-height: 280px;
+          max-width: calc(100vw - 20px); max-height: calc(100vh - 20px);
           display: flex; flex-direction: column;
           background: var(--surface); border: 1px solid var(--border);
           border-radius: var(--radius-lg); box-shadow: var(--shadow);
           font-family: var(--font); color: var(--text); overflow: hidden;
+          resize: both; z-index: 2147483645;
+        }
+        .panel[data-dragging="true"], .panel[data-resizing="true"] {
+          user-select: none;
         }
         .head {
           display:flex; align-items:center; justify-content:space-between; gap:12px;
           padding:12px 16px; border-bottom:1px solid var(--border); background: var(--bg);
-          flex-shrink:0; cursor:move;
+          flex-shrink:0; cursor:grab; user-select:none;
         }
+        .head:active { cursor:grabbing; }
         .badge { font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--accent-700); }
         .acts { display:flex; gap:4px; align-items:center; }
         .acts button {
@@ -832,15 +841,15 @@
         .acts button[aria-pressed="true"] { color:var(--accent-900); background:var(--accent-100); border-color:var(--accent); }
         .zoom-value { font-size:11px; color:var(--text-dim); min-width:34px; text-align:center; font-variant-numeric:tabular-nums; }
 
-        .content { padding:16px; overflow-y:auto; background: var(--surface); }
-        .meta { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:10px; }
-        .title { font-size:19px; font-weight:700; line-height:1.3; margin-bottom:6px; color:var(--text); }
-        .summary { font-size:14px; line-height:1.6; color:var(--text-dim); margin-bottom:14px; }
-        .note { font-size:12px; color:var(--warn); margin-bottom:12px; }
+        .content { flex: 1; min-height: 0; padding: 18px 20px; overflow-y: auto; background: var(--surface); display: flex; flex-direction: column; }
+        .meta { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:10px; flex-shrink:0; }
+        .title { font-size:19px; font-weight:700; line-height:1.3; margin-bottom:6px; color:var(--text); flex-shrink:0; }
+        .summary { font-size:14px; line-height:1.6; color:var(--text-dim); margin-bottom:14px; flex-shrink:0; }
+        .note { font-size:12px; color:var(--warn); margin-bottom:12px; flex-shrink:0; }
 
         .canvas {
           overflow:auto; border:1px solid var(--border); border-radius:var(--radius);
-          background: var(--bg); padding:4px; margin-bottom:16px; max-height:46vh;
+          background: var(--bg); padding:8px; margin-bottom:16px; min-height:220px; flex: 1 1 auto;
         }
         .map { position:relative; }
         .edges { position:absolute; inset:0; pointer-events:none; overflow:visible; }
@@ -871,7 +880,7 @@
           font-size:10.5px; font-weight:700;
         }
 
-        .chart { margin-bottom:16px; }
+        .chart { margin-bottom:16px; flex-shrink:0; }
         .bars { list-style:none; margin-top:9px; display:flex; flex-direction:column; gap:7px; }
         .bar-row { display:grid; grid-template-columns: minmax(70px, 26%) 1fr auto; gap:10px; align-items:center; }
         .bar-label {
@@ -882,7 +891,7 @@
         .bar-fill { display:block; height:100%; background:var(--accent); }
         .bar-value { font-size:12.5px; font-variant-numeric:tabular-nums; color:var(--text); }
 
-        .insights { margin-bottom:12px; }
+        .insights { margin-bottom:12px; flex-shrink:0; }
         .insights ul { margin:8px 0 0 18px; }
         .insights li { font-size:13.5px; line-height:1.6; margin-bottom:6px; }
         .caution {
@@ -890,8 +899,26 @@
           font-size:12.5px; line-height:1.5; color:var(--warn);
           padding:9px 11px; border-radius:var(--radius);
           background:rgba(237,187,0,.12); border:1px solid rgba(237,187,0,.35);
+          flex-shrink:0;
         }
         .caution svg { flex-shrink:0; margin-top:2px; }
+
+        .resize-handle {
+          position: absolute; right: 0; bottom: 0; width: 18px; height: 18px;
+          cursor: nwse-resize; z-index: 20; display: grid; place-items: center;
+          user-select: none;
+        }
+        .resize-handle::after {
+          content: ''; position: absolute; right: 4px; bottom: 4px;
+          width: 8px; height: 8px;
+          border-right: 2px solid var(--text-dim);
+          border-bottom: 2px solid var(--text-dim);
+          opacity: 0.55;
+          transition: opacity 0.15s ease, border-color 0.15s ease;
+        }
+        .resize-handle:hover::after, .panel[data-resizing="true"] .resize-handle::after {
+          opacity: 1; border-color: var(--accent);
+        }
 
         .state { padding:26px 12px; text-align:center; font-size:13.5px; color:var(--text-dim); white-space:pre-wrap; }
         .state[data-tone="error"] { color:var(--danger); }
@@ -910,7 +937,7 @@
               <button data-act="zoom-out" aria-label="Zoom out" title="Zoom out">${icon('minus', { size: 16 })}</button>
               <span class="zoom-value">100%</span>
               <button data-act="zoom-in" aria-label="Zoom in" title="Zoom in">${icon('plus', { size: 16 })}</button>
-              <button data-act="hover-audio" aria-pressed="true" aria-label="Speak nodes on hover"
+              <button data-act="hover-audio" aria-pressed="false" aria-label="Speak nodes on hover"
                       title="Speak each node when you point at it">${icon('speaker-high', { size: 17 })}</button>
               <button data-act="read" aria-label="Read the whole map aloud" title="Read the whole map aloud">${icon('book-open', { size: 17 })}</button>
               <button data-act="sanctuary" aria-label="Send to Sanctuary" title="Send to my Sanctuary">${icon('arrow-square-in', { size: 17 })}</button>
@@ -919,6 +946,7 @@
             </div>
           </div>
           <div class="content"></div>
+          <div class="resize-handle" data-act="resize" title="Drag to resize"></div>
         </div>
       `;
       root.appendChild(scope);
@@ -927,8 +955,15 @@
       this.body = scope.querySelector('.content');
 
       const panel = scope.querySelector('.panel');
-      this.releaseDock = Dock.register('breakdown', 'bottom-left', panel);
-      Dock.observe(panel);
+      if (this.geometry) {
+        panel.style.transform = 'none';
+        panel.style.left = `${this.geometry.left}px`;
+        panel.style.top = `${this.geometry.top}px`;
+      }
+      if (this.size) {
+        panel.style.width = `${this.size.width}px`;
+        panel.style.height = `${this.size.height}px`;
+      }
 
       const act = (name, fn) => {
         const el = scope.querySelector(`[data-act="${name}"]`);
@@ -954,25 +989,34 @@
       });
 
       this.makeDraggable(scope.querySelector('.head'), panel);
+      this.makeResizable(scope.querySelector('.resize-handle'), panel);
+      this.listen(window, 'resize', () => this.clampIntoView(panel));
     }
 
     makeDraggable(handle, panel) {
       let origin = null;
 
       const onDown = (event) => {
-        if (event.target.closest('button')) return;
+        if (event.target.closest('button, .resize-handle')) return;
         const rect = panel.getBoundingClientRect();
+        if (!this.geometry) {
+          panel.style.transform = 'none';
+          panel.style.left = `${rect.left}px`;
+          panel.style.top = `${rect.top}px`;
+          this.geometry = { left: rect.left, top: rect.top };
+        }
         origin = { x: event.clientX, y: event.clientY, left: rect.left, top: rect.top };
         handle.setPointerCapture?.(event.pointerId);
+        panel.dataset.dragging = 'true';
       };
 
       const onMove = (event) => {
         if (!origin) return;
-        this.releaseDock?.();
-        this.releaseDock = null;
-
-        const left = Math.max(8, Math.min(window.innerWidth - panel.offsetWidth - 8, origin.left + event.clientX - origin.x));
-        const top = Math.max(8, Math.min(window.innerHeight - 80, origin.top + event.clientY - origin.y));
+        const width = panel.offsetWidth;
+        const height = panel.offsetHeight;
+        const left = Math.max(8, Math.min(window.innerWidth - width - 8, origin.left + event.clientX - origin.x));
+        const top = Math.max(8, Math.min(window.innerHeight - height - 8, origin.top + event.clientY - origin.y));
+        this.geometry = { left, top };
         Object.assign(panel.style, {
           left: `${left}px`,
           top: `${top}px`,
@@ -985,6 +1029,7 @@
       const onUp = (event) => {
         if (!origin) return;
         origin = null;
+        panel.dataset.dragging = 'false';
         handle.releasePointerCapture?.(event.pointerId);
       };
 
@@ -992,6 +1037,68 @@
       this.listen(handle, 'pointermove', onMove);
       this.listen(handle, 'pointerup', onUp);
       this.listen(handle, 'pointercancel', onUp);
+    }
+
+    makeResizable(grip, panel) {
+      if (!grip || !panel) return;
+      let origin = null;
+
+      const onDown = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = panel.getBoundingClientRect();
+        if (!this.geometry) {
+          panel.style.transform = 'none';
+          panel.style.left = `${rect.left}px`;
+          panel.style.top = `${rect.top}px`;
+          this.geometry = { left: rect.left, top: rect.top };
+        }
+        origin = {
+          x: event.clientX,
+          y: event.clientY,
+          width: rect.width,
+          height: rect.height
+        };
+        grip.setPointerCapture?.(event.pointerId);
+        panel.dataset.resizing = 'true';
+      };
+
+      const onMove = (event) => {
+        if (!origin) return;
+        const minW = 380;
+        const minH = 280;
+        const maxW = window.innerWidth - 24;
+        const maxH = window.innerHeight - 24;
+        const nextW = Math.max(minW, Math.min(maxW, origin.width + (event.clientX - origin.x)));
+        const nextH = Math.max(minH, Math.min(maxH, origin.height + (event.clientY - origin.y)));
+        this.size = { width: Math.round(nextW), height: Math.round(nextH) };
+        panel.style.width = `${this.size.width}px`;
+        panel.style.height = `${this.size.height}px`;
+      };
+
+      const onUp = (event) => {
+        if (!origin) return;
+        origin = null;
+        panel.dataset.resizing = 'false';
+        grip.releasePointerCapture?.(event.pointerId);
+        this.clampIntoView(panel);
+      };
+
+      this.listen(grip, 'pointerdown', onDown);
+      this.listen(grip, 'pointermove', onMove);
+      this.listen(grip, 'pointerup', onUp);
+      this.listen(grip, 'pointercancel', onUp);
+    }
+
+    clampIntoView(panel = this.panelScope?.querySelector('.panel')) {
+      if (!panel || !this.geometry) return;
+      const width = panel.offsetWidth;
+      const height = panel.offsetHeight;
+      const left = Math.max(8, Math.min(window.innerWidth - width - 8, this.geometry.left));
+      const top = Math.max(8, Math.min(window.innerHeight - height - 8, this.geometry.top));
+      this.geometry = { left, top };
+      panel.style.left = `${left}px`;
+      panel.style.top = `${top}px`;
     }
 
     /** The whole map as a spoken narration, in reading order. */

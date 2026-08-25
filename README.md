@@ -18,7 +18,7 @@ Built for Capgemini Hack4Positive 2026 · Disability Inclusion & Accessibility
 ```
                                 ┌───────────────────────────────────────┐
                                 │   Unified SETU Backend (Express.js)   │
-                                │   - OpenRouter / Gemini AI Fallback   │
+                                │   - Google Gemini + model fallback    │
                                 │   - MongoDB & Local Rule Engine       │
                                 │   - Identity via x-user-id header     │
                                 └──────────────────┬────────────────────┘
@@ -120,9 +120,14 @@ points. Journal entries are written to a local-only key and are **never** mirror
 
 ## Quick start
 
-You need **Node 18+** and one AI key — [OpenRouter](https://openrouter.ai/keys) is the primary
-provider, with Google Gemini and OpenAI as direct fallbacks. MongoDB is optional: without it the
-web and mobile apps keep everything in local storage and the engine keeps working.
+You need **Node 18+** and a **Google Gemini API key**. MongoDB is optional: without it the web
+and mobile apps keep everything in local storage and the engine keeps working.
+
+> **A Google AI Pro subscription is not an API key.** Google AI Pro (and Google One AI Premium)
+> is a consumer plan for the Gemini app; it does not grant access to the Gemini API. Create a
+> separate key at **[aistudio.google.com/apikey](https://aistudio.google.com/apikey)** — it has
+> its own free tier, and enabling Cloud Billing on the key's Google Cloud project lifts the
+> daily cap.
 
 ### 1. Configure
 
@@ -133,7 +138,7 @@ cp .env.example .env
 Put your key and optional MongoDB URI in `.env`:
 
 ```env
-OPENROUTER_API_KEY=sk-or-v1-your-key-here
+GEMINI_API_KEY=your-gemini-api-key-here
 MONGODB_URI=mongodb://127.0.0.1:27017/setu
 
 # Natural read-aloud voice — https://dashboard.sarvam.ai/
@@ -144,6 +149,24 @@ SARVAM_TTS_SPEAKER=priya
 
 With no key at all the engine still starts and every mode degrades to the deterministic
 offline rule engine, clearly labelled as such in the UI.
+
+### Which models it uses
+
+Two chains, picked per job rather than per request:
+
+| Chain | Models (in order) | Used for |
+|---|---|---|
+| **Fast** | `gemini-3.7-flash` → `3.6-flash` → `3.5-flash` → `3.5-flash-lite` → `2.5-flash` → `2.5-flash-lite` | Everything a human is waiting on: the in-page agent, explanations, the cognitive modes, summaries |
+| **Deep** | `gemini-3.1-pro-preview` → `2.5-pro` → falls through to Fast | Research and mind-map structuring, where the client has already drawn a placeholder |
+
+Both are overridable with `GEMINI_MODEL_CHAIN` / `GEMINI_PRO_MODEL_CHAIN`. At boot SETU asks the
+API which models your key can actually reach and skips the rest, so a retired or unreleased ID in
+the chain costs nothing. Retired IDs (`gemini-1.5-*`, `gemini-2.0-*`) are rejected outright with a
+warning even if you name them explicitly — Google has switched them off, so every request would 404.
+
+Reasoning depth is capped at `low` on the fast chain (`GEMINI_THINKING_LEVEL`). Gemini 3 thinks by
+default, and on an accessibility tool aimed at people who lose the thread while waiting, those
+seconds cost more than the extra reasoning buys.
 
 ### 2. Start the Engine (Backend)
 

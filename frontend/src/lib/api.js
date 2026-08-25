@@ -314,16 +314,24 @@ export const api = {
 
   // Natural-voice read-aloud and Speech-to-Text (Sarvam AI)
   speechVoices: () => get('/api/speech/voices', { timeoutMs: 8000 }),
-  transcribeAudio: (formData) =>
-    fetch(url('/api/speech/transcribe'), {
-      method: 'POST',
-      headers: { 'x-user-id': getUserId() },
-      body: formData
-    }).then(async (res) => {
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new ApiError(data.error || 'Transcription failed', res.status);
-      return data;
-    }),
+  transcribeAudio: async (formData) => {
+    let res;
+    try {
+      res = await fetch(url('/api/speech/transcribe'), {
+        method: 'POST',
+        headers: { 'x-user-id': getUserId() },
+        body: formData
+      });
+    } catch (networkError) {
+      throw new ApiError(
+        networkError.message || 'Network error during transcription — is the server reachable?',
+        0
+      );
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new ApiError(data.error || 'Transcription failed', res.status);
+    return data;
+  },
 
   // Reward progress mirror
   getProgress: () => get('/api/progress'),

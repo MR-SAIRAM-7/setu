@@ -110,7 +110,9 @@ async function handleChat(req, res) {
       role: 'user',
       content: lastUserText,
       fileAttachments: documentId ? [{ fileId: documentId }] : []
-    }).catch(() => {});
+    }).catch((err) => {
+      console.warn('[SETU Chat] Failed to persist message:', err.message);
+    });
 
     stream.send('status', { stage: 'thinking', message: 'Analyzing…' });
 
@@ -178,7 +180,9 @@ async function handleChat(req, res) {
         userId,
         conversationId,
         documentId: attachedDoc?.id || null
-      }).catch(() => {});
+      }).catch((err) => {
+      console.warn('[SETU Chat] Failed to persist message:', err.message);
+    });
     } else if (routedIntent === 'expand_map' && currentMap) {
       stream.send('status', { stage: 'researching', message: 'Going deeper into branches…' });
       generatedMap = await research.researchMindMap({
@@ -194,7 +198,9 @@ async function handleChat(req, res) {
         ...generatedMap,
         userId,
         conversationId
-      }).catch(() => {});
+      }).catch((err) => {
+      console.warn('[SETU Chat] Failed to persist message:', err.message);
+    });
     } else if (routedIntent === 'answer_question' || routedIntent === 'query_document') {
       // query_document lands here when the router expected an attachment that is
       // no longer present — answering from the open map beats a dead end.
@@ -212,7 +218,9 @@ async function handleChat(req, res) {
       intent: routedIntent,
       sources,
       mindMapData: generatedMap ? { title: generatedMap.title, summary: generatedMap.summary } : null
-    }).catch(() => {});
+    }).catch((err) => {
+      console.warn('[SETU Chat] Failed to persist message:', err.message);
+    });
 
     stream.send('done', { ok: true, conversationId });
   } catch (error) {

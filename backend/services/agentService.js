@@ -34,28 +34,28 @@ const IRREVERSIBLE_LABEL = /\b(submit|pay|purchase|buy|checkout|order|confirm|de
  * land on. Answering "I could not" in twenty seconds is worth far more here
  * than answering well in three minutes.
  *
- * `deadlineMs` is the one that actually bounds the wait, and it is the fix for
- * the worst latency bug in the service. `timeoutMs` caps a single HTTP call,
- * but a structured request walks a five-model OpenRouter chain, retries, then
- * does the same against Gemini and OpenAI — so a 20-second per-call timeout
- * permitted a four-minute request. Measured against the live free-tier chain,
- * a page map that previously ran past two minutes without returning now
- * answers or gives up inside forty seconds.
+ * `deadlineMs` is the one that actually bounds the wait. `timeoutMs` caps a
+ * single HTTP call, but a structured request walks the model chain and retries,
+ * so without an overall ceiling a per-call timeout permits a multi-minute
+ * request. These numbers are set for Flash-tier Gemini with reasoning held at
+ * "low": first token lands in about a second, and a full structured reply well
+ * inside the per-call budget, so the deadline is there for the pathological
+ * case rather than the normal one.
  */
-const INTERACTIVE = { timeoutMs: 18000, maxRetries: 1, deadlineMs: 40000 };
+const INTERACTIVE = { timeoutMs: 12000, maxRetries: 1, deadlineMs: 25000 };
 
 /**
  * The structure map is a heavier generation than the rest — branches, their
- * children, a numeric series, and insights run to several hundred tokens,
- * which is 20-30 seconds of body on a free model. It gets a longer per-model
- * budget so a capable model is not cut off mid-answer, and a longer ceiling so
- * two of them can be tried. The client is already showing a map read from the
- * page itself while this runs, so the wait costs the reader nothing.
+ * children, a numeric series, and insights run to several hundred tokens. It
+ * gets a longer per-model budget so a capable model is not cut off mid-answer,
+ * and a longer ceiling so a second one can be tried. The client is already
+ * showing a map read from the page itself while this runs, so the wait costs
+ * the reader nothing.
  */
-const INTERACTIVE_MAP = { timeoutMs: 26000, maxRetries: 1, deadlineMs: 58000 };
+const INTERACTIVE_MAP = { timeoutMs: 20000, maxRetries: 1, deadlineMs: 40000 };
 
-/** Vision is slower again, and more likely to hit a model that cannot do it. */
-const INTERACTIVE_VISION = { timeoutMs: 30000, deadlineMs: 55000 };
+/** Vision is slower again: a whole image has to be read before a token is written. */
+const INTERACTIVE_VISION = { timeoutMs: 25000, deadlineMs: 45000 };
 
 const planSchema = {
   type: 'object',
@@ -261,11 +261,10 @@ async function explainContent({ text, language = 'English', style = 'plain' }) {
 /**
  * The same explanation, yielded token by token.
  *
- * SETU runs on free-tier models that take 20-40 seconds to finish a paragraph
- * but emit their first words in about a second. Buffering the whole answer
- * spends that entire difference on a spinner; streaming spends it on the user
- * already reading. This is the single largest latency improvement available
- * without changing model providers.
+ * A model takes several seconds to finish a paragraph and about one to start
+ * it. Buffering the whole answer spends that entire difference on a spinner;
+ * streaming spends it on the user already reading. This is the single largest
+ * perceived-latency improvement available without changing models.
  */
 async function* streamExplanation({ text, language = 'English', style = 'plain' }) {
   yield* streamText({
@@ -532,9 +531,10 @@ Write every human-readable string in ${languageName}, in its native script. JSON
 enum values stay in English exactly as specified, and numbers stay as digits.`;
 
   if (imageBase64) {
-    // Vision models will not reliably honour a response schema, so the schema
-    // goes in the prompt and the reply is recovered from loose JSON. That is
-    // the same approach the text path uses across the OpenRouter chain.
+    // The vision helper returns prose rather than taking a response schema, so
+    // the shape has to be carried by the prompt and recovered from loose JSON.
+    // The text path below uses Gemini's server-enforced schema instead, which
+    // is why only this branch needs the instruction block spelled out.
     const raw = await describeImage({
       imageBase64,
       mimeType,

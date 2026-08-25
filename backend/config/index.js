@@ -1,18 +1,25 @@
 const path = require('path');
 const dotenv = require('dotenv');
 
-// Load environment variables from root and backend .env files.
+// Load environment variables.
+// Priority: backend/.env.local -> backend/.env -> root/.env.local -> root/.env -> process.env
 // Earlier calls win: dotenv never overwrites an already-defined key.
-dotenv.config({ path: path.resolve(__dirname, '../../.env.local') });
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 dotenv.config({ path: path.resolve(__dirname, '../.env.local') });
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
+dotenv.config({ path: path.resolve(__dirname, '../../.env.local') });
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 dotenv.config();
 
 const clean = (value) => {
   const trimmed = (value || '').trim();
   return trimmed.length ? trimmed : null;
 };
+
+const csv = (value) =>
+  (clean(value) || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 
 /** Database used when the connection string carries no path of its own. */
 const MONGO_DB_NAME = clean(process.env.MONGODB_DB) || 'setu';
@@ -54,135 +61,130 @@ function normalizeMongoUri(raw) {
   const credentialsEnd = authority.lastIndexOf('@') + 1;
   const pathStart = authority.indexOf('/', credentialsEnd);
 
-  const hasDbName =
-    pathStart !== -1 && authority.slice(pathStart + 1).length > 0;
+  const hasDbName = pathStart !== -1 && authority.slice(pathStart + 1).length > 0;
 
   if (hasDbName) return uri;
 
-  const hostPart =
-    pathStart === -1 ? authority : authority.slice(0, pathStart);
+  const hostPart = pathStart === -1 ? authority : authority.slice(0, pathStart);
 
   return `${base.slice(0, schemeEnd)}${hostPart}/${MONGO_DB_NAME}${query}`;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Google Gemini — the AI provider                                            */
+/* -------------------------------------------------------------------------- */
+
 /**
- * OpenRouter model fallback chain.
+ * The everyday chain, newest first.
  *
- * SETU priorities:
- * 1. Very low latency
- * 2. Free inference
- * 3. Tool/function calling
- * 4. Strong general reasoning
- * 5. Large-context support
+ * Every call SETU makes has a human waiting on it — someone mid-form, mid-page,
+ * or mid-sentence — so the default tier is Flash throughout. The chain exists
+ * because a single model ID is a single point of failure: a regional outage, a
+ * quota ceiling, or a retirement takes out one entry, not the product.
  *
- * Current primary:
- *   NVIDIA Nemotron 3 Nano 30B A3B (free)
- *
- * OpenRouter currently reports approximately:
- *   - 0.51s P50 latency
- *   - 142 tokens/sec throughput
- *   - 256K context
- *
- * Secondary:
- *   Google Gemma 4 26B A4B IT (free)
- *
- * Tertiary:
- *   NVIDIA Nemotron 3 Ultra (free)
- *
- * Final:
- *   OpenRouter dynamic free router
- *
- * IMPORTANT:
- * Free OpenRouter endpoints can have provider availability/rate limits.
- * The request layer should therefore continue to the next model on
- * 402/404/408/429/5xx/network failures.
+ * Ordering is newest-to-oldest rather than cheapest-first on purpose. The newer
+ * Flash models are both faster and markedly better at the structured-output
+ * work most of this app depends on, so walking down the chain degrades
+ * gracefully instead of starting from the weakest option.
  */
-const DEFAULT_OPENROUTER_CHAIN = [
-  'google/gemma-4-26b-a4b-it:free',
-  'nvidia/nemotron-3-nano-30b-a3b:free',
-  'nvidia/nemotron-3.5-lightning:free',
-  'openrouter/free',
-  'openai/gpt-oss-20b:free',
+const DEFAULT_GEMINI_CHAIN = [
+  'gemini-3.7-flash',
+  'gemini-3.6-flash',
+  'gemini-3.5-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite'
 ];
 
 /**
- * Legacy or defunct model IDs to remove from the automatic default fallback chain.
- * Note: If a model is explicitly specified in user environment variables (OPENROUTER_MODEL or
- * OPENROUTER_MODEL_CHAIN), the user's explicit preference is always honored.
+ * The considered chain, for work nobody is watching a spinner for: the research
+ * pass and the mind-map structuring that follows it. Falls through to the Flash
+ * chain, so a Pro outage costs quality rather than the whole feature.
  */
-const LEGACY_OPENROUTER_MODELS = new Set([
-  'google/gemini-2.0-flash-001',
-  'google/gemini-2.0-flash',
-  'google/gemini-2.5-flash',
-]);
+const DEFAULT_GEMINI_PRO_CHAIN = ['gemini-3.1-pro-preview', 'gemini-2.5-pro'];
 
 /**
- * Normalise and de-duplicate an OpenRouter model chain.
+ * Model IDs Google has switched off.
+ *
+ * These are dropped even when named explicitly in the environment, which is the
+ * opposite of how the rest of this file treats user configuration. The reason
+ * is that honouring them cannot possibly work: every request to a retired ID is
+ * a guaranteed 404, and putting one at the head of the chain means every call
+ * pays a wasted round trip before it can start. A loud warning at boot plus a
+ * working default beats an obedient broken deployment.
+ *
+ * Gemini 1.0 and 1.5 were shut down through 2025; the 2.0 series followed on
+ * 1 June 2026.
  */
-function normalizeOpenRouterChain(models, filterLegacy = true) {
-  return [
-    ...new Set(
-      models
-        .map((model) => clean(model))
-        .filter(Boolean)
-        .filter((model) => !filterLegacy || !LEGACY_OPENROUTER_MODELS.has(model))
-    ),
-  ];
+const RETIRED_GEMINI_MODELS = [
+  /^gemini-1\.0/,
+  /^gemini-1\.5/,
+  /^gemini-2\.0/,
+  /^gemini-pro$/,
+  /^gemini-pro-vision$/
+];
+
+const isRetired = (model) => RETIRED_GEMINI_MODELS.some((pattern) => pattern.test(model));
+
+/** Retired models the environment asked for, kept for the boot warning. */
+const retiredRequests = [];
+
+/**
+ * Build a model chain: explicit environment choices first, defaults behind them.
+ * De-duplicated, with retired IDs dropped and recorded.
+ */
+function buildChain(explicit, defaults) {
+  const seen = new Set();
+  const chain = [];
+
+  for (const model of [...explicit, ...defaults]) {
+    if (!model || seen.has(model)) continue;
+    seen.add(model);
+
+    if (isRetired(model)) {
+      if (explicit.includes(model) && !retiredRequests.includes(model)) {
+        retiredRequests.push(model);
+      }
+      continue;
+    }
+    chain.push(model);
+  }
+
+  return chain;
 }
 
-/** Comma-separated list of web origins permitted to call the API. */
-const allowedOrigins = (clean(process.env.CORS_ORIGINS) || '')
-  .split(',')
-  .map((origin) => origin.trim().replace(/\/+$/, ''))
-  .filter(Boolean);
+const GEMINI_MODEL_CHAIN = buildChain(
+  [
+    ...(clean(process.env.GEMINI_MODEL) ? [clean(process.env.GEMINI_MODEL)] : []),
+    ...csv(process.env.GEMINI_MODEL_CHAIN)
+  ],
+  DEFAULT_GEMINI_CHAIN
+);
+
+const GEMINI_PRO_MODEL_CHAIN = buildChain(
+  [
+    ...(clean(process.env.GEMINI_PRO_MODEL) ? [clean(process.env.GEMINI_PRO_MODEL)] : []),
+    ...csv(process.env.GEMINI_PRO_MODEL_CHAIN)
+  ],
+  // Pro work falls through to the Flash chain rather than failing outright.
+  [...DEFAULT_GEMINI_PRO_CHAIN, ...GEMINI_MODEL_CHAIN]
+);
 
 /**
- * Optional explicit primary model.
- * If OPENROUTER_MODEL is not supplied, SETU dynamically uses the first model
- * from the constructed chain.
- */
-const customOpenRouterModel = clean(process.env.OPENROUTER_MODEL);
-
-/**
- * Optional user-defined fallback chain.
- */
-const customOpenRouterChain = clean(process.env.OPENROUTER_MODEL_CHAIN)
-  ? process.env.OPENROUTER_MODEL_CHAIN
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
-  : [];
-
-/**
- * Build final OpenRouter chain dynamically:
- * Explicit user models are prioritized first, followed by default free fallback chain.
- */
-const explicitUserChain = normalizeOpenRouterChain([
-  ...(customOpenRouterModel ? [customOpenRouterModel] : []),
-  ...customOpenRouterChain,
-], false);
-
-const cleanedDefaultChain = normalizeOpenRouterChain(DEFAULT_OPENROUTER_CHAIN, true);
-
-const OPENROUTER_MODEL_CHAIN = [
-  ...new Set([...explicitUserChain, ...cleanedDefaultChain]),
-];
-
-/**
- * Direct Gemini model fallback chain (secondary provider).
+ * How much the model may think before answering.
  *
- * This is independent from OpenRouter.
+ * Gemini 3 reasons by default, and that is worth several seconds of latency
+ * SETU cannot spend: the whole product is an accommodation for people who lose
+ * the thread while waiting. "low" keeps enough reasoning for structured
+ * extraction to stay reliable while still returning promptly.
+ *
+ * Valid values: minimal (Flash only), low, medium, high.
  */
-const GEMINI_MODEL_CHAIN = (process.env.GEMINI_MODEL
-  ? [process.env.GEMINI_MODEL.trim()]
-  : []
-).concat([
-  'gemini-2.5-flash',
-  'gemini-2.0-flash',
-  'gemini-1.5-flash',
-  'gemini-1.5-flash-8b',
-  'gemini-1.5-pro',
-]);
+const GEMINI_THINKING_LEVEL = clean(process.env.GEMINI_THINKING_LEVEL) || 'low';
+const GEMINI_PRO_THINKING_LEVEL = clean(process.env.GEMINI_PRO_THINKING_LEVEL) || 'high';
+
+/** Comma-separated list of web origins permitted to call the API. */
+const allowedOrigins = csv(process.env.CORS_ORIGINS).map((origin) => origin.replace(/\/+$/, ''));
 
 module.exports = {
   port: Number(process.env.PORT || 3000),
@@ -190,79 +192,61 @@ module.exports = {
   nodeEnv: process.env.NODE_ENV || 'development',
 
   // ---------------------------------------------------------------------------
-  // OpenRouter - Primary AI Provider
+  // Google Gemini — primary (and normally only) AI provider
   // ---------------------------------------------------------------------------
 
-  openRouterApiKey: clean(process.env.OPENROUTER_API_KEY),
+  geminiApiKey: clean(process.env.GEMINI_API_KEY) || clean(process.env.GOOGLE_API_KEY),
 
   /**
-   * Primary SETU model resolved dynamically from environment or top of chain.
+   * The Gemini REST surface. `generateContent` under v1beta is the current
+   * documented endpoint and is what this service speaks.
    */
-  openRouterModel:
-    customOpenRouterModel ||
-    OPENROUTER_MODEL_CHAIN[0] ||
-    'google/gemma-4-26b-a4b-it:free',
+  geminiBaseUrl:
+    clean(process.env.GEMINI_BASE_URL) || 'https://generativelanguage.googleapis.com/v1beta',
 
-  /**
-   * Complete fallback chain.
-   */
-  openRouterModelChain: OPENROUTER_MODEL_CHAIN,
+  /** Everyday chain — everything with a human waiting on it. */
+  geminiModelChain: GEMINI_MODEL_CHAIN,
 
-  /**
-   * OpenRouter API endpoint.
-   */
-  openRouterBaseUrl:
-    clean(process.env.OPENROUTER_BASE_URL) ||
-    'https://openrouter.ai/api/v1',
+  /** Considered chain — research and map structuring. */
+  geminiProModelChain: GEMINI_PRO_MODEL_CHAIN,
 
-  /**
-   * Used by OpenRouter for rankings/identification.
-   */
-  openRouterSiteUrl:
-    clean(process.env.OPENROUTER_SITE_URL) ||
-    'https://setu-sanctuary.app',
-
-  openRouterAppName:
-    clean(process.env.OPENROUTER_APP_NAME) ||
-    'SETU Cognitive Sanctuary',
-
-  /**
-   * Web search support.
-   */
-  openRouterWebSearchEnabled:
-    process.env.OPENROUTER_WEB_SEARCH !== 'false',
-
-  openRouterWebFetchEnabled:
-    process.env.OPENROUTER_WEB_FETCH !== 'false',
-
-  /**
-   * Centralized web-search & fetch tool configuration.
-   */
-  openRouterWebTools: {
-    search: {
-      type: 'openrouter:web_search',
-      parameters: {
-        engine: clean(process.env.OPENROUTER_SEARCH_ENGINE) || 'native',
-        max_results: Number(process.env.OPENROUTER_SEARCH_MAX_RESULTS || 5)
-      }
-    },
-    fetch: {
-      type: 'openrouter:web_fetch',
-    },
+  /** Convenience accessor for logs and health payloads. */
+  get geminiModel() {
+    return GEMINI_MODEL_CHAIN[0] || null;
   },
 
+  geminiThinkingLevel: GEMINI_THINKING_LEVEL,
+  geminiProThinkingLevel: GEMINI_PRO_THINKING_LEVEL,
+
+  /**
+   * Google Search grounding for the research pass. It costs quota on every
+   * grounded request, so it is a switch rather than an assumption.
+   */
+  geminiGroundingEnabled: process.env.GEMINI_WEB_SEARCH !== 'false',
+
+  /**
+   * Ask Gemini which models this key can actually reach, at boot.
+   *
+   * Model IDs move — Google ships new ones and retires old ones on its own
+   * schedule, and a chain hard-coded in a file drifts out of date silently. One
+   * ListModels call at startup prunes whatever this key cannot call, which
+   * turns a class of production 404s into a log line nobody has to debug.
+   */
+  geminiDiscoverModels: process.env.GEMINI_DISCOVER_MODELS !== 'false',
+
   // ---------------------------------------------------------------------------
-  // Direct AI providers - Secondary / Tertiary fallbacks
+  // OpenAI — optional last-resort fallback
   // ---------------------------------------------------------------------------
 
-  geminiApiKey: clean(process.env.GEMINI_API_KEY),
-
-  geminiModelChain: [...new Set(GEMINI_MODEL_CHAIN)],
-
+  /**
+   * Entirely optional, and unset in most deployments. It exists so that a
+   * Gemini outage degrades to a slower answer rather than to no answer at all.
+   */
   openAiApiKey: clean(process.env.OPENAI_API_KEY),
 
-  openAiModel:
-    clean(process.env.OPENAI_MODEL) || 'gpt-4o-mini',
+  openAiBaseUrl: clean(process.env.OPENAI_BASE_URL) || 'https://api.openai.com/v1',
+
+  openAiModel: clean(process.env.OPENAI_MODEL) || 'gpt-4o-mini',
 
   // ---------------------------------------------------------------------------
   // Speech - Sarvam AI
@@ -275,34 +259,23 @@ module.exports = {
    */
   sarvamApiKey: clean(process.env.SARVAM_API_KEY),
 
-  sarvamBaseUrl:
-    clean(process.env.SARVAM_BASE_URL) ||
-    'https://api.sarvam.ai',
+  sarvamBaseUrl: clean(process.env.SARVAM_BASE_URL) || 'https://api.sarvam.ai',
 
   /**
    * bulbul:v3 is the natural-prosody model.
    */
-  sarvamTtsModel:
-    clean(process.env.SARVAM_TTS_MODEL) ||
-    'bulbul:v3',
+  sarvamTtsModel: clean(process.env.SARVAM_TTS_MODEL) || 'bulbul:v3',
 
-  sarvamTtsSpeaker:
-    clean(process.env.SARVAM_TTS_SPEAKER) ||
-    'priya',
+  sarvamTtsSpeaker: clean(process.env.SARVAM_TTS_SPEAKER) || 'priya',
 
-  sarvamTtsLanguage:
-    clean(process.env.SARVAM_TTS_LANGUAGE) ||
-    'en-IN',
+  sarvamTtsLanguage: clean(process.env.SARVAM_TTS_LANGUAGE) || 'en-IN',
 
   /**
    * saaras:v3 is the state-of-the-art speech-to-text model.
    */
-  sarvamSttModel:
-    clean(process.env.SARVAM_STT_MODEL) ||
-    'saaras:v3',
+  sarvamSttModel: clean(process.env.SARVAM_STT_MODEL) || 'saaras:v3',
 
-  sarvamTimeoutMs:
-    Number(process.env.SARVAM_TIMEOUT_MS || 30000),
+  sarvamTimeoutMs: Number(process.env.SARVAM_TIMEOUT_MS || 30000),
 
   // ---------------------------------------------------------------------------
   // Request shaping & limits
@@ -310,26 +283,27 @@ module.exports = {
 
   maxTextLength: 64000,
 
-  maxFileUploadSizeBytes:
-    25 * 1024 * 1024,
+  maxFileUploadSizeBytes: 25 * 1024 * 1024,
+
+  /** Ceiling on a single HTTP call to a model. */
+  aiTimeoutMs: Number(process.env.AI_TIMEOUT_MS || 45000),
 
   /**
-   * AI requests can take longer when reasoning or web search is used.
+   * Ceiling on one logical request — the whole chain walk, retries included.
+   *
+   * This is the number a user actually experiences, and no caller can exceed
+   * it. Callers with a person watching a panel pass something much smaller.
    */
-  aiTimeoutMs:
-    Number(process.env.AI_TIMEOUT_MS || 60000),
+  aiDeadlineMs: Number(process.env.AI_DEADLINE_MS || 90000),
 
   /**
-   * Number of retries handled by the AI service.
+   * Retries per provider. Deliberately small: the model chain is already the
+   * redundancy, so retrying only pays for transient 429s and 5xx.
    */
-  aiMaxRetries:
-    Number(process.env.AI_MAX_RETRIES || 3),
+  aiMaxRetries: Number(process.env.AI_MAX_RETRIES || 2),
 
-  /**
-   * Maximum wait between retries.
-   */
-  maxRetryWaitMs:
-    Number(process.env.AI_MAX_RETRY_WAIT_MS || 15000),
+  /** Maximum wait between retries. */
+  maxRetryWaitMs: Number(process.env.AI_MAX_RETRY_WAIT_MS || 8000),
 
   // ---------------------------------------------------------------------------
   // MongoDB
@@ -341,23 +315,20 @@ module.exports = {
    * The API can still run in degraded/offline mode when MongoDB
    * is unavailable.
    */
-  mongoUri:
-    normalizeMongoUri(process.env.MONGODB_URI),
+  mongoUri: normalizeMongoUri(process.env.MONGODB_URI),
 
-  mongoDbName:
-    MONGO_DB_NAME,
+  mongoDbName: MONGO_DB_NAME,
 
   /**
    * Resolvers used for SRV/TXT lookup required by mongodb+srv://.
    */
-  dnsFallbackServers:
-    (process.env.DNS_SERVERS === undefined
-      ? '8.8.8.8,1.1.1.1'
-      : process.env.DNS_SERVERS
-    )
-      .split(',')
-      .map((server) => server.trim())
-      .filter(Boolean),
+  dnsFallbackServers: (process.env.DNS_SERVERS === undefined
+    ? '8.8.8.8,1.1.1.1'
+    : process.env.DNS_SERVERS
+  )
+    .split(',')
+    .map((server) => server.trim())
+    .filter(Boolean),
 
   /**
    * Credentials stripped — safe to print in logs and health payloads.
@@ -365,10 +336,7 @@ module.exports = {
   get safeMongoUri() {
     if (!this.mongoUri) return null;
 
-    return this.mongoUri.replace(
-      /:\/\/[^@/]+@/,
-      '://***:***@'
-    );
+    return this.mongoUri.replace(/:\/\/[^@/]+@/, '://***:***@');
   },
 
   // ---------------------------------------------------------------------------
@@ -407,31 +375,16 @@ module.exports = {
         return callback(null, true);
       }
 
-      return callback(
-        new Error(
-          `Origin ${origin} is not allowed by CORS.`
-        )
-      );
+      return callback(new Error(`Origin ${origin} is not allowed by CORS.`));
     },
 
     credentials: false,
 
     maxAge: 86400,
 
-    methods: [
-      'GET',
-      'POST',
-      'PUT',
-      'DELETE',
-      'OPTIONS',
-    ],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 
-    allowedHeaders: [
-      'Content-Type',
-      'Authorization',
-      'x-user-id',
-      'x-conversation-id',
-    ],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id', 'x-conversation-id']
   },
 
   allowedOrigins,
@@ -443,58 +396,27 @@ module.exports = {
   /**
    * Serve the built SPA from the API process.
    */
-  serveStatic:
-    clean(process.env.SERVE_STATIC) !== 'false',
+  serveStatic: clean(process.env.SERVE_STATIC) !== 'false',
 
   // ---------------------------------------------------------------------------
   // Rate limiting
   // ---------------------------------------------------------------------------
 
   rateLimit: {
-    /**
-     * AI calls are quota-bound.
-     */
-    aiWindowMs:
-      Number(
-        process.env.RATE_LIMIT_AI_WINDOW_MS ||
-          60000
-      ),
+    /** AI calls are quota-bound. */
+    aiWindowMs: Number(process.env.RATE_LIMIT_AI_WINDOW_MS || 60000),
 
-    aiMax:
-      Number(
-        process.env.RATE_LIMIT_AI_MAX ||
-          30
-      ),
+    aiMax: Number(process.env.RATE_LIMIT_AI_MAX || 30),
 
-    /**
-     * General API calls.
-     */
-    generalWindowMs:
-      Number(
-        process.env.RATE_LIMIT_WINDOW_MS ||
-          60000
-      ),
+    /** General API calls. */
+    generalWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60000),
 
-    generalMax:
-      Number(
-        process.env.RATE_LIMIT_MAX ||
-          240
-      ),
+    generalMax: Number(process.env.RATE_LIMIT_MAX || 240),
 
-    /**
-     * Read-aloud.
-     */
-    speechWindowMs:
-      Number(
-        process.env.RATE_LIMIT_SPEECH_WINDOW_MS ||
-          60000
-      ),
+    /** Read-aloud. */
+    speechWindowMs: Number(process.env.RATE_LIMIT_SPEECH_WINDOW_MS || 60000),
 
-    speechMax:
-      Number(
-        process.env.RATE_LIMIT_SPEECH_MAX ||
-          200
-      ),
+    speechMax: Number(process.env.RATE_LIMIT_SPEECH_MAX || 200)
   },
 
   // ---------------------------------------------------------------------------
@@ -502,11 +424,7 @@ module.exports = {
   // ---------------------------------------------------------------------------
 
   get aiEnabled() {
-    return Boolean(
-      this.openRouterApiKey ||
-        this.geminiApiKey ||
-        this.openAiApiKey
-    );
+    return Boolean(this.geminiApiKey || this.openAiApiKey);
   },
 
   /**
@@ -524,22 +442,10 @@ module.exports = {
     return Boolean(this.sarvamApiKey);
   },
 
-  /**
-   * Determine primary AI provider.
-   */
+  /** Determine primary AI provider. */
   get primaryProvider() {
-    if (this.openRouterApiKey) {
-      return 'openrouter';
-    }
-
-    if (this.geminiApiKey) {
-      return 'gemini';
-    }
-
-    if (this.openAiApiKey) {
-      return 'openai';
-    }
-
+    if (this.geminiApiKey) return 'gemini';
+    if (this.openAiApiKey) return 'openai';
     return 'offline_l0';
   },
 
@@ -555,48 +461,43 @@ module.exports = {
   warnings() {
     const notes = [];
 
-    if (!this.aiEnabled) {
+    if (!this.geminiApiKey) {
       notes.push(
-        'No AI key set (OPENROUTER_API_KEY / GEMINI_API_KEY / OPENAI_API_KEY). ' +
-          'Running on the deterministic offline engine only.'
+        'GEMINI_API_KEY is not set — every AI feature is answering from the deterministic ' +
+          'offline engine. Create a key at https://aistudio.google.com/apikey. Note that a ' +
+          'Google AI Pro subscription does not by itself grant API access: the API key is separate.'
       );
     }
 
-    if (
-      this.nodeEnv === 'production' &&
-      !allowedOrigins.length
-    ) {
+    if (retiredRequests.length) {
       notes.push(
-        'CORS_ORIGINS is unset in production — ' +
-          'the API will accept any web origin.'
+        `Ignoring retired Gemini model(s) named in the environment: ${retiredRequests.join(', ')}. ` +
+          'Google has switched these off, so every request to them would 404. Using ' +
+          `${this.geminiModel} instead — update GEMINI_MODEL / GEMINI_MODEL_CHAIN to silence this.`
       );
     }
 
-    if (
-      !Number.isFinite(this.port) ||
-      this.port <= 0
-    ) {
+    if (!this.geminiModelChain.length) {
       notes.push(
-        `PORT "${process.env.PORT}" is not a valid port number.`
+        'No usable Gemini models remain in the chain. Check GEMINI_MODEL and GEMINI_MODEL_CHAIN.'
       );
     }
 
-    if (!this.openRouterApiKey) {
+    if (process.env.OPENROUTER_API_KEY) {
       notes.push(
-        'OPENROUTER_API_KEY is not configured. ' +
-          'OpenRouter models will be unavailable.'
+        'OPENROUTER_API_KEY is set but SETU no longer uses OpenRouter. The variable is ' +
+          'ignored and can be removed from your .env.'
       );
     }
 
-    if (
-      this.openRouterWebSearchEnabled &&
-      !this.openRouterApiKey
-    ) {
-      notes.push(
-        'OpenRouter web search is enabled but OPENROUTER_API_KEY is missing.'
-      );
+    if (this.nodeEnv === 'production' && !allowedOrigins.length) {
+      notes.push('CORS_ORIGINS is unset in production — the API will accept any web origin.');
+    }
+
+    if (!Number.isFinite(this.port) || this.port <= 0) {
+      notes.push(`PORT "${process.env.PORT}" is not a valid port number.`);
     }
 
     return notes;
-  },
+  }
 };

@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "SETU — Cognitive Companion & AI Copilot",
+  "name": "SETU - Cognitive Companion & AI Copilot",
   "version": "3.2.0",
   "description": "Reshape any website for how your brain reads: line focus, natural-voice read aloud, instant mind maps, and an AI page agent.",
   "minimum_chrome_version": "116",
@@ -14,7 +14,6 @@
     "activeTab",
     "storage",
     "scripting",
-    "tabs",
     "contextMenus",
     "alarms"
   ],

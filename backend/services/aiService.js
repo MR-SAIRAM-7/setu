@@ -1,28 +1,32 @@
 /**
  * SETU Shared AI Orchestration Engine
  * -----------------------------------
- * Primary Provider: OpenRouter (with automated multi-model fallback chain)
- * Secondary Provider: Google Gemini Direct
- * Tertiary Provider: OpenAI Direct
- * Offline Fallback: Deterministic L0 Cognitive Rule Engine
+ * Primary Provider:  Google Gemini (multi-model fallback chain)
+ * Optional Fallback: OpenAI Direct
+ * Offline Fallback:  Deterministic L0 Cognitive Rule Engine
  *
- * Design features:
- *  - Automated Model Fallback Chain: If OpenRouter rate limits (429), runs out of
- *    credits (402), or encounters provider overload (503/504), it walks down the
- *    prioritized model chain seamlessly without interrupting the user.
- *  - Multi-provider Redundancy: Falls over between OpenRouter -> Gemini -> OpenAI.
- *  - Multimodal Vision: Supports diagrams, PDFs screenshots, charts and visual OCR.
- *  - SSE Streaming & Strict Structured Schema extraction with loose JSON recovery.
+ * Design notes:
+ *  - Two chains, one purpose each. `fast` is Flash-tier and serves everything a
+ *    human is waiting on; `pro` is used for research and map structuring, where
+ *    quality matters more than the extra few seconds.
+ *  - Native structured output. Gemini enforces a response schema server-side,
+ *    which is what makes mode responses reliable rather than hopeful. When a
+ *    model rejects a schema the call degrades to JSON-mode with the schema in
+ *    the prompt instead of failing.
+ *  - Every logical request is bounded by a wall-clock deadline, not just a
+ *    per-call timeout, so a chain walk can never outlive the person waiting.
+ *  - Every model call is version-aware: Gemini 3 and Gemini 2.5 take different
+ *    reasoning parameters and want different temperatures, and sending the
+ *    wrong one is a 400 rather than a degraded answer.
  */
 
 const crypto = require('crypto');
 const config = require('../config');
 
-const OPENROUTER_BASE = config.openRouterBaseUrl || 'https://openrouter.ai/api/v1';
-const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
-const OPENAI_BASE = 'https://api.openai.com/v1';
+const GEMINI_BASE = config.geminiBaseUrl;
+const OPENAI_BASE = config.openAiBaseUrl;
 
-/** In-Memory High Speed AI Response Cache (TTL 1 hour, max 500 entries) */
+/** In-memory response cache (TTL 1 hour, max 500 entries). */
 const aiCache = new Map();
 const MAX_CACHE_SIZE = 500;
 const CACHE_TTL_MS = 60 * 60 * 1000;
@@ -50,51 +54,153 @@ function setToCache(key, value, ttl = CACHE_TTL_MS) {
   aiCache.set(key, { value, expiresAt: Date.now() + ttl });
 }
 
-/** Remembers the last working OpenRouter and Gemini models so we try them first */
-let resolvedOpenRouterModel = null;
-let resolvedGeminiModel = null;
+/* -------------------------------------------------------------------------- */
+/* Model chains, stickiness, and cooldowns                                    */
+/* -------------------------------------------------------------------------- */
 
-/** Model name -> epoch ms until which it is known to be quota-exhausted */
+/** Last model that worked, per tier — tried first next time. */
+const resolvedModel = { fast: null, pro: null };
+
+/** Model name -> epoch ms until which it is known to be unusable. */
 const exhaustedUntil = new Map();
 
 /**
- * Returns available OpenRouter models in order of priority, skipping cooldowns.
+ * Per-model structured-output capability, learned at runtime.
+ *
+ * 'native'  — the model accepted a server-enforced response schema.
+ * 'prompt'  — it rejected one, so the schema goes in the prompt and the reply
+ *             is recovered from JSON mode instead.
+ *
+ * Learned rather than declared because schema support varies by model version
+ * and by which keywords a particular schema happens to use, and a table in this
+ * file would be wrong within a release.
  */
-function openRouterChain() {
-  const now = Date.now();
-  const ordered = resolvedOpenRouterModel
-    ? [
-        resolvedOpenRouterModel,
-        ...config.openRouterModelChain.filter((m) => m !== resolvedOpenRouterModel)
-      ]
-    : [...config.openRouterModelChain];
+const schemaSupport = new Map();
 
-  const available = ordered.filter((model) => (exhaustedUntil.get(model) || 0) <= now);
-  return available.length ? available : ordered;
+/**
+ * Models this API key can actually reach, from ListModels. Null until the first
+ * discovery call resolves; a failed discovery leaves it null, which means "do
+ * not filter" rather than "nothing is available".
+ */
+let reachableModels = null;
+let discoveryPromise = null;
+
+function baseChain(tier) {
+  return tier === 'pro' ? config.geminiProModelChain : config.geminiModelChain;
 }
 
 /**
- * Returns available direct Gemini models in order of priority, skipping cooldowns.
+ * Models to try, in order: last known-good first, then the configured chain,
+ * with anything on cooldown or known-unreachable filtered out.
+ *
+ * If filtering would empty the chain we return it unfiltered. A stale cooldown
+ * must never turn into "SETU has no models" — better a call that probably fails
+ * than a feature that certainly does.
  */
-function geminiChain() {
+function geminiChain(tier = 'fast') {
   const now = Date.now();
-  const ordered = resolvedGeminiModel
-    ? [resolvedGeminiModel, ...config.geminiModelChain.filter((m) => m !== resolvedGeminiModel)]
-    : [...config.geminiModelChain];
+  const sticky = resolvedModel[tier];
+  const configured = baseChain(tier);
 
-  const available = ordered.filter((model) => (exhaustedUntil.get(model) || 0) <= now);
-  return available.length ? available : ordered;
+  const ordered = sticky ? [sticky, ...configured.filter((m) => m !== sticky)] : [...configured];
+
+  const usable = ordered.filter(
+    (model) =>
+      (exhaustedUntil.get(model) || 0) <= now &&
+      (!reachableModels || reachableModels.has(model))
+  );
+
+  if (usable.length) return usable;
+
+  // Nothing is both cool and known-reachable. Prefer dropping the reachability
+  // filter (discovery may simply be stale) before dropping the cooldowns.
+  const coolOnly = ordered.filter((model) => (exhaustedUntil.get(model) || 0) <= now);
+  return coolOnly.length ? coolOnly : ordered;
 }
+
+function rememberModel(tier, model) {
+  if (resolvedModel[tier] !== model) {
+    resolvedModel[tier] = model;
+    console.log(`[SETU AI] Gemini ${tier} model locked in: ${model}`);
+  }
+}
+
+function cooldown(tier, model, ms) {
+  exhaustedUntil.set(model, Date.now() + ms);
+  if (resolvedModel[tier] === model) resolvedModel[tier] = null;
+}
+
+/**
+ * Ask Gemini which models this key can call.
+ *
+ * Model IDs move on Google's schedule, not ours. A chain hard-coded in a config
+ * file drifts, and the symptom is a 404 on the first hop of every request —
+ * invisible in aggregate, and pure latency for the user. One ListModels call
+ * prunes those before they are ever attempted. Failure is non-fatal by design.
+ */
+async function discoverModels() {
+  if (!config.geminiApiKey || !config.geminiDiscoverModels) return null;
+  if (discoveryPromise) return discoveryPromise;
+
+  discoveryPromise = (async () => {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10000);
+
+      const response = await fetch(`${GEMINI_BASE}/models?pageSize=1000`, {
+        headers: { 'x-goog-api-key': config.geminiApiKey },
+        signal: controller.signal
+      }).finally(() => clearTimeout(timer));
+
+      if (!response.ok) {
+        console.warn(`[SETU AI] Model discovery returned HTTP ${response.status}; using the configured chain as-is.`);
+        return null;
+      }
+
+      const payload = await response.json();
+      const ids = new Set(
+        (payload?.models || [])
+          .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
+          .map((m) => String(m.name || '').replace(/^models\//, ''))
+          .filter(Boolean)
+      );
+
+      if (!ids.size) return null;
+      reachableModels = ids;
+
+      for (const tier of ['fast', 'pro']) {
+        const missing = baseChain(tier).filter((model) => !ids.has(model));
+        if (missing.length) {
+          console.warn(
+            `[SETU AI] These ${tier}-chain models are not available to this API key and will be skipped: ${missing.join(', ')}`
+          );
+        }
+      }
+
+      const live = geminiChain('fast');
+      console.log(`[SETU AI] Gemini models available: ${live.slice(0, 4).join(', ')}${live.length > 4 ? '…' : ''}`);
+      return ids;
+    } catch (error) {
+      console.warn(`[SETU AI] Model discovery failed (${error.message}); using the configured chain as-is.`);
+      return null;
+    }
+  })();
+
+  return discoveryPromise;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Deadlines                                                                  */
+/* -------------------------------------------------------------------------- */
 
 /**
  * A wall-clock budget for one logical request.
  *
- * Per-request timeouts are not a budget, and treating them as one was the
- * single worst latency bug in this service. `timeoutMs` bounds one HTTP call —
- * but a structured request walks a five-model OpenRouter chain, retries, and
- * then does the same against Gemini and OpenAI. At 20 seconds each, a request
- * nobody would describe as "slow" could legitimately run for four minutes
- * before returning, with a human watching a panel the whole time.
+ * Per-request timeouts are not a budget, and treating them as one was the worst
+ * latency bug this service has had. `timeoutMs` bounds one HTTP call — but a
+ * structured request walks a model chain and retries. At 45 seconds each, a
+ * request nobody would describe as slow could legitimately run for minutes with
+ * a human watching a panel the whole time.
  *
  * This is the ceiling on the whole operation. Every chain walk checks it before
  * starting another model, and every individual call is capped at whatever is
@@ -104,6 +210,7 @@ function makeDeadline(ms) {
   const at = Number.isFinite(ms) && ms > 0 ? Date.now() + ms : Number.POSITIVE_INFINITY;
   return {
     at,
+    totalMs: ms,
     remaining: () => at - Date.now(),
     expired: () => Date.now() >= at
   };
@@ -129,8 +236,27 @@ class AIError extends Error {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Schema translation & JSON Recovery                                         */
+/* Schema translation & JSON recovery                                         */
 /* -------------------------------------------------------------------------- */
+
+/**
+ * Keywords Gemini's response schema does not accept.
+ *
+ * Sending one is a 400 that takes down the whole call, so they are stripped
+ * rather than passed through and hoped for. The schemas in this codebase use
+ * `additionalProperties: false` throughout — meaningful to a JSON Schema
+ * validator, meaningless to a generator that is being constrained anyway.
+ */
+const UNSUPPORTED_SCHEMA_KEYS = new Set([
+  'additionalProperties',
+  'strict',
+  '$schema',
+  '$id',
+  'definitions',
+  '$defs',
+  'default',
+  'examples'
+]);
 
 function toGeminiSchema(schema) {
   if (!schema || typeof schema !== 'object') return schema;
@@ -138,9 +264,8 @@ function toGeminiSchema(schema) {
 
   const out = {};
   for (const [key, value] of Object.entries(schema)) {
-    if (['additionalProperties', 'minItems', 'maxItems', 'strict', '$schema'].includes(key)) {
-      continue;
-    }
+    if (UNSUPPORTED_SCHEMA_KEYS.has(key)) continue;
+
     if (key === 'properties' && value && typeof value === 'object') {
       out.properties = Object.fromEntries(
         Object.entries(value).map(([k, v]) => [k, toGeminiSchema(v)])
@@ -152,6 +277,9 @@ function toGeminiSchema(schema) {
     }
   }
 
+  // Field order is a quality lever, not a formatting one: a model that fills
+  // `summary` before `branches` writes better branches than one that does it
+  // the other way round, because it has already committed to a thesis.
   if (out.type === 'object' && out.properties && !out.propertyOrdering) {
     out.propertyOrdering = Object.keys(out.properties);
   }
@@ -161,12 +289,10 @@ function toGeminiSchema(schema) {
 /**
  * Render a JSON schema as an instruction block.
  *
- * OpenRouter's `json_object` response format only guarantees *valid* JSON, not
- * JSON matching a schema, and the chain spans models with very different levels
- * of structured-output support — asking for `json_schema` strict mode would 400
- * on several of them and burn the whole fallback chain. Putting the schema in
- * the prompt is the one approach every model in the chain honours, and it is
- * what keeps field names stable across providers.
+ * Only used on the degraded path — a model that rejected a server-enforced
+ * schema, or a vision call, where the schema cannot be attached to the request.
+ * Native schema enforcement is always preferred: it is the difference between
+ * a guarantee and a strong suggestion.
  */
 function schemaInstruction(schema, name, example = null) {
   const required = Array.isArray(schema?.required) ? schema.required : [];
@@ -186,9 +312,8 @@ function schemaInstruction(schema, name, example = null) {
     'Use these exact key names and nesting. Do not rename, add, or omit keys.',
     required.length ? `Every one of these keys is required: ${required.join(', ')}.` : '',
     'Where a property lists an "enum", the value must be one of those strings verbatim.',
-    // Smaller models reliably fill the scalar fields and then hand back `[]`
-    // for every array — a schema-valid reply carrying no content at all. Naming
-    // the arrays explicitly is what stops that, and it costs a single line.
+    // A schema-valid reply carrying nothing but empty arrays is the classic
+    // failure here — naming the arrays explicitly is what stops it.
     arrayKeys.length
       ? `Populate every array. Returning an empty [] for ${arrayKeys.join(', ')} is a failed reply — ` +
         'fill each one with real entries drawn from the input.'
@@ -239,7 +364,7 @@ function parseJsonLoose(raw) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* HTTP Transport                                                             */
+/* HTTP transport                                                             */
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -249,20 +374,24 @@ function parseJsonLoose(raw) {
  *   Response. Use this for everything that is not a stream.
  *
  * The distinction matters more than it looks. `fetch` resolves as soon as the
- * *headers* arrive, and an LLM sends those immediately and then takes as long
+ * *headers* arrive, and a model sends those immediately and then takes as long
  * as it likes to generate the body. Clearing the abort timer when `postJson`
- * returned meant the timeout only ever bounded time-to-first-byte: a model
- * that answered in 0.3s and then spent fourteen seconds writing was completely
- * unbounded, and no per-call or overall budget could see it. Parsing inside
- * the timed region is what makes `timeoutMs` mean what it says.
+ * returned meant the timeout only ever bounded time-to-first-byte: a model that
+ * answered in 0.3s and then spent fourteen seconds writing was completely
+ * unbounded, and no per-call or overall budget could see it. Parsing inside the
+ * timed region is what makes `timeoutMs` mean what it says.
+ *
+ * Streaming callers get the live Response and own the abort controller through
+ * `onAbort`, because for them the body arriving slowly is the point.
  */
 async function postJson(
   url,
   body,
-  { headers = {}, timeoutMs = config.aiTimeoutMs, provider, model, parse = false } = {}
+  { headers = {}, timeoutMs = config.aiTimeoutMs, provider, model, parse = false, onAbort } = {}
 ) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  onAbort?.(() => controller.abort());
 
   try {
     const response = await fetch(url, {
@@ -296,15 +425,17 @@ async function postJson(
       if (response.status === 429) {
         const wait = retryAfterMs ? Math.ceil(retryAfterMs / 1000) : null;
         throw new AIError(
-          `Rate limit reached on ${provider}${model ? ` (${model})` : ''}${wait ? ` — retry in ${wait}s` : ''}`,
+          `Rate limit or quota reached on ${provider}${model ? ` (${model})` : ''}${wait ? ` — retry in ${wait}s` : ''}`,
           { provider, model, status: 429, retryable: true, retryAfterMs }
         );
       }
 
-      if (response.status === 402) {
+      if (response.status === 401 || response.status === 403) {
+        // Not retryable and not a model problem: the key is wrong, missing a
+        // permission, or restricted. Retrying it just delays the real message.
         throw new AIError(
-          `Insufficient credits or quota on ${provider}${model ? ` for model ${model}` : ''}`,
-          { provider, model, status: 402, retryable: true }
+          `${provider} rejected the API key (HTTP ${response.status}): ${message}`,
+          { provider, model, status: response.status, retryable: false }
         );
       }
 
@@ -312,7 +443,7 @@ async function postJson(
         provider,
         model,
         status: response.status,
-        retryable: response.status >= 500 || response.status === 429 || response.status === 402,
+        retryable: response.status >= 500 || response.status === 429,
         retryAfterMs
       });
     }
@@ -325,263 +456,100 @@ async function postJson(
         { provider, model, retryable: true }
       );
       // Flagged so the chain walk can tell "this model is too slow, try the
-      // next one" apart from "this request failed". Without it, a slow model
-      // was retried into the same timeout instead of being stepped over.
+      // next one" apart from "this request failed". Without it, a slow model is
+      // retried into the same timeout instead of being stepped over.
       timeout.timedOut = true;
       throw timeout;
     }
     throw error;
   } finally {
-    clearTimeout(timer);
+    if (parse || !onAbort) clearTimeout(timer);
   }
 }
 
 /* -------------------------------------------------------------------------- */
-/* 1. OpenRouter (Primary Engine with automated model fallback chain)          */
+/* Gemini transport                                                           */
 /* -------------------------------------------------------------------------- */
 
-function readOpenRouterSources(payload, text) {
-  const sources = [];
-  const seen = new Set();
+const geminiHeaders = () => ({ 'x-goog-api-key': config.geminiApiKey });
 
-  // 1. Annotations (e.g. url_citation)
-  const annotations = payload?.choices?.[0]?.message?.annotations || [];
-  for (const ann of annotations) {
-    const url = ann?.url_citation?.url || ann?.url || ann?.uri;
-    const title = ann?.url_citation?.title || ann?.title || url;
-    if (url && typeof url === 'string' && !seen.has(url)) {
-      seen.add(url);
-      sources.push({ title: String(title).trim(), url: String(url).trim() });
-    }
+const isGemini3 = (model) => /^gemini-3/.test(model);
+
+/**
+ * How much reasoning to ask for, in whichever dialect this model speaks.
+ *
+ * Gemini 3 takes `thinkingLevel` (minimal | low | medium | high); Gemini 2.5
+ * takes a numeric `thinkingBudget`. Sending both in one request is a 400, and
+ * sending the wrong one for the model family is a 400 too — so this is not a
+ * cosmetic normalisation, it is the difference between a working call and a
+ * failing one.
+ *
+ * Returns null when the model has no usable knob, which leaves Google's default
+ * in place. Gemini 2.5 Pro in particular cannot have thinking disabled.
+ */
+function thinkingConfigFor(model, level) {
+  if (!level) return null;
+
+  if (isGemini3(model)) {
+    // "minimal" exists only on Flash-tier Gemini 3 models.
+    const resolved = level === 'minimal' && !/flash/.test(model) ? 'low' : level;
+    return { thinkingLevel: resolved };
   }
 
-  // 2. Direct citations array
-  const citations = payload?.citations || payload?.choices?.[0]?.citations || [];
-  for (const cit of citations) {
-    const url = typeof cit === 'string' ? cit : cit?.url || cit?.uri;
-    const title = typeof cit === 'object' ? cit?.title || url : url;
-    if (url && typeof url === 'string' && !seen.has(url)) {
-      seen.add(url);
-      sources.push({ title: String(title).trim(), url: String(url).trim() });
-    }
+  if (/^gemini-2\.5-pro/.test(model)) return null;
+
+  if (/^gemini-2\.5/.test(model)) {
+    const budget = { minimal: 0, low: 0, medium: 4096, high: 12288 }[level];
+    return Number.isFinite(budget) ? { thinkingBudget: budget } : null;
   }
 
-  // 3. Fallback to markdown links in text
-  if (text && typeof text === 'string') {
-    const mdRegex = /\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g;
-    let match;
-    while ((match = mdRegex.exec(text)) !== null) {
-      const title = match[1].trim();
-      const url = match[2].trim();
-      if (url && !seen.has(url)) {
-        seen.add(url);
-        sources.push({ title, url });
-      }
-    }
-  }
-
-  return sources.slice(0, 12);
+  return null;
 }
 
-async function callOpenRouter({
+/**
+ * Gemini 3 is documented as degrading below its default temperature of 1.0 —
+ * looping and weaker reasoning, particularly on structured tasks. That is the
+ * reverse of the 2.5-era advice this codebase was originally written against,
+ * where 0.2-0.4 was the right choice for extraction. Both are honoured here so
+ * a single call site can target either family without knowing which it got.
+ */
+function temperatureFor(model, requested) {
+  if (isGemini3(model)) return 1;
+  return typeof requested === 'number' ? requested : 0.7;
+}
+
+function buildGeminiBody({
+  model,
   system,
   messages,
   schema,
+  schemaMode,
   name,
   example,
   temperature,
-  timeoutMs,
-  deadline,
-  webSearch = false,
-  withSources = false
+  thinkingLevel,
+  grounded,
+  maxOutputTokens
 }) {
-  if (!config.openRouterApiKey) {
-    throw new AIError('No OpenRouter API key configured.', { provider: 'openrouter' });
-  }
+  const generationConfig = { temperature: temperatureFor(model, temperature) };
 
-  const chain = openRouterChain();
-  let lastError;
+  if (Number.isFinite(maxOutputTokens)) generationConfig.maxOutputTokens = maxOutputTokens;
 
-  for (const model of chain) {
-    // Starting another 20-second model call with two seconds of budget left
-    // is how a bounded request becomes an unbounded one.
-    if (deadline?.expired()) {
-      throw lastError || new AIError('Ran out of time before any model answered.', {
-        provider: 'openrouter',
-        retryable: false
-      });
-    }
+  const thinking = thinkingConfigFor(model, thinkingLevel);
+  if (thinking) generationConfig.thinkingConfig = thinking;
 
-    try {
-      const systemContent = schema
-        ? `${system || ''}\n${schemaInstruction(schema, name, example)}`.trim()
-        : system;
-
-      const body = {
-        model,
-        messages: [
-          ...(systemContent ? [{ role: 'system', content: systemContent }] : []),
-          ...messages
-        ],
-        temperature: temperature ?? 0.7
-      };
-
-      if (schema) {
-        body.response_format = { type: 'json_object' };
-      }
-
-      if (webSearch && config.openRouterWebSearchEnabled) {
-        body.tools = [config.openRouterWebTools.search];
-      }
-
-      const payload = await postJson(`${OPENROUTER_BASE}/chat/completions`, body, {
-        provider: 'openrouter',
-        model,
-        timeoutMs: budgetFor(timeoutMs, deadline),
-        parse: true,
-        headers: {
-          Authorization: `Bearer ${config.openRouterApiKey}`,
-          'HTTP-Referer': config.openRouterSiteUrl,
-          'X-Title': config.openRouterAppName
-        }
-      });
-
-      const message = payload?.choices?.[0]?.message;
-      const text = message?.content || message?.reasoning;
-
-      if (!text && !message?.tool_calls) {
-        throw new AIError(`OpenRouter model ${model} returned empty content.`, {
-          provider: 'openrouter',
-          model,
-          retryable: true
-        });
-      }
-
-      if (resolvedOpenRouterModel !== model) {
-        resolvedOpenRouterModel = model;
-        console.log(`[SETU AI] OpenRouter active model locked in: ${model}`);
-      }
-
-      if (withSources) {
-        const sources = readOpenRouterSources(payload, text || '');
-        return { text: text || '', sources };
-      }
-
-      return text || '';
-    } catch (error) {
-      lastError = error;
-
-      // Rate limited, out of credit, unavailable, 5xx, or simply too slow:
-      // mark a cooldown and try the next model. Timeouts belong in this list —
-      // a model that cannot answer inside the budget will not answer inside
-      // the budget on the next attempt either, and retrying it burns the whole
-      // deadline on one bad endpoint.
-      if (
-        error.timedOut ||
-        error.status === 429 ||
-        error.status === 402 ||
-        error.status === 404 ||
-        error.status === 400 ||
-        error.status >= 500
-      ) {
-        const cooldown = error.retryAfterMs && error.retryAfterMs > 30000 ? error.retryAfterMs : 45000;
-        exhaustedUntil.set(model, Date.now() + cooldown);
-        if (resolvedOpenRouterModel === model) resolvedOpenRouterModel = null;
-        console.warn(
-          `[SETU AI] OpenRouter model "${model}" failed (${error.status || error.message}) — falling back to next model in chain.`
-        );
-        continue;
-      }
-
-      throw error;
-    }
-  }
-
-  throw lastError || new AIError('All OpenRouter fallback models failed.', { provider: 'openrouter' });
-}
-
-async function* streamOpenRouter({ system, messages, temperature }) {
-  if (!config.openRouterApiKey) {
-    throw new AIError('No OpenRouter API key configured.', { provider: 'openrouter' });
-  }
-
-  const chain = openRouterChain();
-  let lastError;
-
-  for (const model of chain) {
-    try {
-      const response = await postJson(
-        `${OPENROUTER_BASE}/chat/completions`,
-        {
-          model,
-          messages: [...(system ? [{ role: 'system', content: system }] : []), ...messages],
-          temperature: temperature ?? 0.7,
-          stream: true
-        },
-        {
-          provider: 'openrouter',
-          model,
-          headers: {
-            Authorization: `Bearer ${config.openRouterApiKey}`,
-            'HTTP-Referer': config.openRouterSiteUrl,
-            'X-Title': config.openRouterAppName
-          }
-        }
-      );
-
-      resolvedOpenRouterModel = model;
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      for await (const chunk of response.body) {
-        buffer += decoder.decode(chunk, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data:')) continue;
-          const payload = line.slice(5).trim();
-          if (!payload || payload === '[DONE]') continue;
-          try {
-            const delta = JSON.parse(payload)?.choices?.[0]?.delta?.content;
-            if (delta) yield delta;
-          } catch (_) {
-            /* partial frame */
-          }
-        }
-      }
-      return;
-    } catch (error) {
-      lastError = error;
-      if (
-        error.status === 429 ||
-        error.status === 402 ||
-        error.status === 404 ||
-        error.status === 400 ||
-        error.status >= 500
-      ) {
-        exhaustedUntil.set(model, Date.now() + 45000);
-        if (resolvedOpenRouterModel === model) resolvedOpenRouterModel = null;
-        console.warn(`[SETU AI] OpenRouter streaming model "${model}" failed — trying next model in chain.`);
-        continue;
-      }
-      throw error;
-    }
-  }
-
-  throw lastError || new AIError('All OpenRouter models failed to stream.', { provider: 'openrouter' });
-}
-
-/* -------------------------------------------------------------------------- */
-/* 2. Google Gemini Direct (Secondary Provider)                               */
-/* -------------------------------------------------------------------------- */
-
-function buildGeminiBody({ system, messages, schema, temperature, grounded }) {
-  const generationConfig = { temperature: temperature ?? 0.7 };
+  let systemText = system || '';
 
   if (schema && !grounded) {
     generationConfig.responseMimeType = 'application/json';
-    generationConfig.responseSchema = toGeminiSchema(schema);
+
+    if (schemaMode === 'native') {
+      generationConfig.responseSchema = toGeminiSchema(schema);
+    } else {
+      // Degraded path: JSON mode is still on, but the shape has to be carried
+      // by the prompt because this model would not accept the schema itself.
+      systemText = `${systemText}\n${schemaInstruction(schema, name, example)}`.trim();
+    }
   }
 
   const body = {
@@ -592,25 +560,50 @@ function buildGeminiBody({ system, messages, schema, temperature, grounded }) {
     generationConfig
   };
 
-  if (grounded) {
-    body.tools = [{ google_search: {} }];
-  }
+  // Grounding and a response schema are mutually exclusive: the search tool
+  // needs to answer in prose with citations attached.
+  if (grounded) body.tools = [{ google_search: {} }];
 
-  if (system) {
-    body.systemInstruction = { parts: [{ text: system }] };
-  }
+  if (systemText) body.systemInstruction = { parts: [{ text: systemText }] };
+
   return body;
 }
 
+/**
+ * Pull the answer text out of a Gemini response.
+ *
+ * Thought parts are excluded explicitly. They only appear when thought
+ * summaries are requested, but if one ever arrives it is the model's private
+ * reasoning, and showing that to a reader who asked for a plain-language
+ * explanation would be worse than showing nothing.
+ */
 function readGeminiText(payload) {
   const candidate = payload?.candidates?.[0];
   const parts = candidate?.content?.parts || [];
-  const text = parts.map((p) => p.text || '').join('');
+  const text = parts
+    .filter((part) => part && part.thought !== true)
+    .map((part) => part.text || '')
+    .join('');
 
-  if (!text && candidate?.finishReason === 'SAFETY') {
+  if (text) return text;
+
+  const blocked = payload?.promptFeedback?.blockReason;
+  if (blocked) {
+    throw new AIError(`Gemini declined the prompt (${blocked}).`, { provider: 'gemini' });
+  }
+
+  if (candidate?.finishReason === 'SAFETY' || candidate?.finishReason === 'PROHIBITED_CONTENT') {
     throw new AIError('Gemini blocked the response for safety reasons.', { provider: 'gemini' });
   }
-  return text;
+
+  if (candidate?.finishReason === 'MAX_TOKENS') {
+    throw new AIError('Gemini hit the output limit before writing anything usable.', {
+      provider: 'gemini',
+      retryable: true
+    });
+  }
+
+  return '';
 }
 
 function readGeminiSources(payload) {
@@ -629,111 +622,239 @@ function readGeminiSources(payload) {
     .slice(0, 12);
 }
 
+/** A 400 that is specifically about the response schema, not the prompt. */
+function isSchemaRejection(error) {
+  if (error.status !== 400) return false;
+  return /schema|responseSchema|response_schema|propertyOrdering|json/i.test(error.message || '');
+}
+
+/** A 400 that is specifically about the thinking parameters. */
+function isThinkingRejection(error) {
+  if (error.status !== 400) return false;
+  return /thinking|thought/i.test(error.message || '');
+}
+
+/**
+ * Call Gemini, walking the chain until one model answers.
+ *
+ * Each model gets up to two shapes of the same request: the native
+ * server-enforced schema, and — only if that is rejected — JSON mode with the
+ * schema in the prompt. Anything else (rate limit, timeout, 5xx) moves straight
+ * to the next model, because those do not get better on a second attempt
+ * against the same endpoint.
+ */
 async function callGemini({
   system,
   messages,
   schema,
+  name,
+  example,
   temperature,
   timeoutMs,
   deadline,
-  grounded,
-  withSources = false
+  tier = 'fast',
+  thinkingLevel,
+  grounded = false,
+  withSources = false,
+  maxOutputTokens
 }) {
-  if (!config.geminiApiKey) throw new AIError('No Gemini API key configured.', { provider: 'gemini' });
+  if (!config.geminiApiKey) {
+    throw new AIError(
+      'No Gemini API key configured. Set GEMINI_API_KEY — create one at https://aistudio.google.com/apikey',
+      { provider: 'gemini' }
+    );
+  }
 
-  const chain = geminiChain();
-  const body = buildGeminiBody({ system, messages, schema, temperature, grounded });
+  // Non-blocking: the first request does not wait for discovery, it just
+  // benefits from it once it has landed.
+  discoverModels();
+
+  const chain = geminiChain(tier);
+  const level = thinkingLevel || (tier === 'pro' ? config.geminiProThinkingLevel : config.geminiThinkingLevel);
   let lastError;
 
   for (const model of chain) {
+    // Starting another 45-second model call with two seconds of budget left is
+    // how a bounded request becomes an unbounded one.
     if (deadline?.expired()) {
-      throw lastError || new AIError('Ran out of time before any model answered.', {
-        provider: 'gemini',
-        retryable: false
-      });
-    }
-
-    try {
-      const payload = await postJson(
-        `${GEMINI_BASE}/models/${model}:generateContent?key=${config.geminiApiKey}`,
-        body,
-        { provider: 'gemini', model, timeoutMs: budgetFor(timeoutMs, deadline), parse: true }
+      throw (
+        lastError ||
+        new AIError('Ran out of time before any model answered.', { provider: 'gemini', retryable: false })
       );
-      const text = readGeminiText(payload);
-      if (!text) throw new AIError('Gemini returned no text.', { provider: 'gemini', model, retryable: true });
-
-      if (resolvedGeminiModel !== model) {
-        resolvedGeminiModel = model;
-        console.log(`[SETU AI] Gemini model locked in: ${model}`);
-      }
-      return withSources ? { text, sources: readGeminiSources(payload) } : text;
-    } catch (error) {
-      lastError = error;
-
-      if (error.status === 404 || error.status === 400 || error.timedOut) {
-        if (error.timedOut) exhaustedUntil.set(model, Date.now() + 45000);
-        if (resolvedGeminiModel === model) resolvedGeminiModel = null;
-        continue;
-      }
-
-      if (error.status === 429) {
-        const cooldown = error.retryAfterMs && error.retryAfterMs > 60000 ? error.retryAfterMs : 60000;
-        exhaustedUntil.set(model, Date.now() + cooldown);
-        if (resolvedGeminiModel === model) resolvedGeminiModel = null;
-        console.warn(`[SETU AI] Gemini model "${model}" rate-limited — falling through to next model.`);
-        continue;
-      }
-
-      throw error;
     }
+
+    let mode = schema ? schemaSupport.get(model) || 'native' : 'none';
+    let allowThinking = true;
+
+    // At most two shapes per model: the preferred one, then the degraded one.
+    for (let shape = 0; shape < 2; shape += 1) {
+      if (deadline?.expired()) break;
+
+      try {
+        const body = buildGeminiBody({
+          model,
+          system,
+          messages,
+          schema,
+          schemaMode: mode,
+          name,
+          example,
+          temperature,
+          thinkingLevel: allowThinking ? level : null,
+          grounded,
+          maxOutputTokens
+        });
+
+        const payload = await postJson(`${GEMINI_BASE}/models/${model}:generateContent`, body, {
+          provider: 'gemini',
+          model,
+          timeoutMs: budgetFor(timeoutMs, deadline),
+          parse: true,
+          headers: geminiHeaders()
+        });
+
+        const text = readGeminiText(payload);
+        if (!text) {
+          throw new AIError(`Gemini model ${model} returned no text.`, {
+            provider: 'gemini',
+            model,
+            retryable: true
+          });
+        }
+
+        if (schema) schemaSupport.set(model, mode);
+        rememberModel(tier, model);
+
+        return withSources ? { text, sources: readGeminiSources(payload), model } : text;
+      } catch (error) {
+        lastError = error;
+
+        // Rejected the schema: retry this same model with the schema in the
+        // prompt instead. Worth one extra round trip — a working model on a
+        // degraded path beats stepping down the chain.
+        if (schema && mode === 'native' && isSchemaRejection(error)) {
+          schemaSupport.set(model, 'prompt');
+          mode = 'prompt';
+          console.warn(
+            `[SETU AI] ${model} rejected the response schema — falling back to prompt-carried JSON for this model.`
+          );
+          continue;
+        }
+
+        // Rejected the reasoning parameters: retry once without them.
+        if (allowThinking && isThinkingRejection(error)) {
+          allowThinking = false;
+          console.warn(`[SETU AI] ${model} rejected thinking config — retrying with provider defaults.`);
+          continue;
+        }
+
+        break;
+      }
+    }
+
+    const error = lastError;
+
+    // A bad key is not a model problem and no other model will fix it.
+    if (error?.status === 401 || error?.status === 403) throw error;
+
+    // Rate limited, missing, unavailable, or simply too slow: cool this model
+    // down and move on. Timeouts belong in this list — a model that cannot
+    // answer inside the budget will not answer inside it on a second attempt
+    // either, and retrying burns the whole deadline on one bad endpoint.
+    if (
+      error?.timedOut ||
+      error?.status === 429 ||
+      error?.status === 404 ||
+      error?.status === 400 ||
+      error?.status >= 500 ||
+      error?.retryable
+    ) {
+      const wait =
+        error.status === 429
+          ? Math.max(error.retryAfterMs || 0, 60000)
+          : 45000;
+      cooldown(tier, model, wait);
+      console.warn(
+        `[SETU AI] Gemini model "${model}" failed (${error.status || error.message}) — trying the next model in the chain.`
+      );
+      continue;
+    }
+
+    throw error;
   }
 
   throw lastError || new AIError('No usable Gemini model found.', { provider: 'gemini' });
 }
 
-async function* streamGemini({ system, messages, temperature }) {
-  const chain = geminiChain();
-  const body = buildGeminiBody({ system, messages, temperature });
+/**
+ * Streamed Gemini generation.
+ *
+ * The stream carries its own idle watchdog rather than relying on the request
+ * timeout: `postJson` can only bound time-to-first-byte for a stream, so a
+ * connection that opens and then stalls would otherwise hang until the client
+ * gave up.
+ */
+async function* streamGemini({ system, messages, temperature, tier = 'fast', thinkingLevel, idleMs = 30000 }) {
+  if (!config.geminiApiKey) {
+    throw new AIError('No Gemini API key configured.', { provider: 'gemini' });
+  }
+
+  const chain = geminiChain(tier);
+  const level = thinkingLevel || config.geminiThinkingLevel;
   let lastError;
 
   for (const model of chain) {
     let response;
+    let abort = () => {};
+
     try {
       response = await postJson(
-        `${GEMINI_BASE}/models/${model}:streamGenerateContent?alt=sse&key=${config.geminiApiKey}`,
-        body,
-        { provider: 'gemini', model }
+        `${GEMINI_BASE}/models/${model}:streamGenerateContent?alt=sse`,
+        buildGeminiBody({ model, system, messages, temperature, thinkingLevel: level }),
+        {
+          provider: 'gemini',
+          model,
+          headers: geminiHeaders(),
+          onAbort: (fn) => {
+            abort = fn;
+          }
+        }
       );
     } catch (error) {
       lastError = error;
-      if (error.status === 404 || error.status === 400 || error.status === 429) {
-        if (error.status === 429) exhaustedUntil.set(model, Date.now() + 60000);
-        if (resolvedGeminiModel === model) resolvedGeminiModel = null;
-        continue;
-      }
-      throw error;
+      if (error.status === 401 || error.status === 403) throw error;
+      cooldown(tier, model, error.status === 429 ? Math.max(error.retryAfterMs || 0, 60000) : 45000);
+      console.warn(`[SETU AI] Gemini streaming model "${model}" failed — trying the next model.`);
+      continue;
     }
 
-    resolvedGeminiModel = model;
+    rememberModel(tier, model);
+
+    const watchdog = setTimeout(abort, idleMs);
     const decoder = new TextDecoder();
     let buffer = '';
 
-    for await (const chunk of response.body) {
-      buffer += decoder.decode(chunk, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
+    try {
+      for await (const chunk of response.body) {
+        watchdog.refresh();
+        buffer += decoder.decode(chunk, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
 
-      for (const line of lines) {
-        if (!line.startsWith('data:')) continue;
-        const payload = line.slice(5).trim();
-        if (!payload || payload === '[DONE]') continue;
-        try {
-          const text = readGeminiText(JSON.parse(payload));
-          if (text) yield text;
-        } catch (_) {
-          /* partial frame */
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const frame = line.slice(5).trim();
+          if (!frame || frame === '[DONE]') continue;
+          try {
+            const text = readGeminiText(JSON.parse(frame));
+            if (text) yield text;
+          } catch (_) {
+            /* partial frame, or a safety stop mid-stream */
+          }
         }
       }
+    } finally {
+      clearTimeout(watchdog);
     }
     return;
   }
@@ -742,7 +863,7 @@ async function* streamGemini({ system, messages, temperature }) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* 3. OpenAI Direct (Tertiary Fallback)                                       */
+/* OpenAI transport (optional fallback)                                       */
 /* -------------------------------------------------------------------------- */
 
 async function callOpenAI({ system, messages, schema, name, temperature, timeoutMs, deadline }) {
@@ -774,7 +895,9 @@ async function callOpenAI({ system, messages, schema, name, temperature, timeout
   return text;
 }
 
-async function* streamOpenAI({ system, messages, temperature }) {
+async function* streamOpenAI({ system, messages, temperature, idleMs = 30000 }) {
+  let abort = () => {};
+
   const response = await postJson(
     `${OPENAI_BASE}/chat/completions`,
     {
@@ -783,45 +906,73 @@ async function* streamOpenAI({ system, messages, temperature }) {
       temperature: temperature ?? 0.7,
       stream: true
     },
-    { provider: 'openai', model: config.openAiModel, headers: { Authorization: `Bearer ${config.openAiApiKey}` } }
+    {
+      provider: 'openai',
+      model: config.openAiModel,
+      headers: { Authorization: `Bearer ${config.openAiApiKey}` },
+      onAbort: (fn) => {
+        abort = fn;
+      }
+    }
   );
 
+  const watchdog = setTimeout(abort, idleMs);
   const decoder = new TextDecoder();
   let buffer = '';
 
-  for await (const chunk of response.body) {
-    buffer += decoder.decode(chunk, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
+  try {
+    for await (const chunk of response.body) {
+      watchdog.refresh();
+      buffer += decoder.decode(chunk, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
 
-    for (const line of lines) {
-      if (!line.startsWith('data:')) continue;
-      const payload = line.slice(5).trim();
-      if (!payload || payload === '[DONE]') continue;
-      try {
-        const delta = JSON.parse(payload)?.choices?.[0]?.delta?.content;
-        if (delta) yield delta;
-      } catch (_) {
-        /* partial frame */
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const frame = line.slice(5).trim();
+        if (!frame || frame === '[DONE]') continue;
+        try {
+          const delta = JSON.parse(frame)?.choices?.[0]?.delta?.content;
+          if (delta) yield delta;
+        } catch (_) {
+          /* partial frame */
+        }
       }
     }
+  } finally {
+    clearTimeout(watchdog);
   }
 }
 
 /* -------------------------------------------------------------------------- */
-/* Public Multi-Provider Orchestrator                                         */
+/* Public multi-provider orchestrator                                         */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Normalise chat input.
+ *
+ * The `input`/`messages` split exists because callers have both shapes, and the
+ * fallback to `input` matters: a `messages` array whose entries are all blank
+ * would otherwise produce an empty `contents`, which Gemini rejects with a 400
+ * that reads like a server fault rather than an empty prompt.
+ */
 function normalizeMessages(input, messages) {
   if (Array.isArray(messages) && messages.length) {
-    return messages
+    const usable = messages
       .filter((m) => m && typeof m.content === 'string' && m.content.trim())
       .map((m) => ({
         role: m.role === 'assistant' || m.role === 'model' ? 'assistant' : 'user',
         content: m.content
       }));
+
+    if (usable.length) return usable;
   }
-  return [{ role: 'user', content: String(input ?? '') }];
+
+  const text = String(input ?? '').trim();
+  if (!text) {
+    throw new AIError('Nothing to send to the model — the prompt was empty.', { retryable: false });
+  }
+  return [{ role: 'user', content: text }];
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -844,40 +995,40 @@ function trace(message) {
 }
 
 /**
- * Runs `attempt` across the provider hierarchy:
- *  1. OpenRouter (Primary with multi-model fallback chain)
- *  2. Gemini (Secondary with multi-model fallback chain)
- *  3. OpenAI (Tertiary)
+ * Runs `attempt` across the provider hierarchy: Gemini, then OpenAI if a key
+ * for it happens to be configured.
  *
  * `maxRetries` is a per-call budget rather than a global constant because the
  * two kinds of work here want opposite things. A background research pass
  * should keep trying — it has nobody waiting on it. An in-page explanation has
- * a human staring at a panel, and four attempts across three providers, each
- * walking a five-model chain, is the difference between "slow" and "the
- * extension is broken". Interactive callers pass a small budget and fall back
- * to the in-page engine instead.
+ * a human staring at a panel, and retrying across providers, each walking a
+ * model chain, is the difference between "slow" and "the extension is broken".
+ * Interactive callers pass a small budget and fall back to the in-page engine.
  */
 async function withProviders(attempt, { maxRetries = config.aiMaxRetries, deadlineMs } = {}) {
   const providers = [];
-  if (config.openRouterApiKey) providers.push('openrouter');
   if (config.geminiApiKey) providers.push('gemini');
   if (config.openAiApiKey) providers.push('openai');
 
   if (!providers.length) {
-    throw new AIError('No AI provider configured. Set OPENROUTER_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY.');
+    throw new AIError(
+      'No AI provider configured. Set GEMINI_API_KEY (create one at https://aistudio.google.com/apikey).'
+    );
   }
 
   const errors = [];
   const budget = Math.max(0, Number(maxRetries) || 0);
-  const deadline = makeDeadline(deadlineMs);
+  // Every request is bounded, whether or not the caller thought about it.
+  const totalMs = Number.isFinite(deadlineMs) && deadlineMs > 0 ? deadlineMs : config.aiDeadlineMs;
+  const deadline = makeDeadline(totalMs);
 
   for (const provider of providers) {
     for (let tryIndex = 0; tryIndex <= budget; tryIndex += 1) {
       if (deadline.expired()) {
-        throw new AIError(
-          `The AI providers did not answer within ${Math.round(deadlineMs / 1000)}s.`,
-          { retryable: false, status: 504 }
-        );
+        throw new AIError(`The AI provider did not answer within ${Math.round(totalMs / 1000)}s.`, {
+          retryable: false,
+          status: 504
+        });
       }
 
       try {
@@ -901,12 +1052,12 @@ async function withProviders(attempt, { maxRetries = config.aiMaxRetries, deadli
     }
   }
 
-  const actionable = errors.find((error) => error.status === 429 || error.status === 402);
+  // A bad key or an exhausted quota is the actionable message; surface it over
+  // the generic "everything failed" summary.
+  const actionable = errors.find((error) => [401, 403, 429].includes(error.status));
   if (actionable) throw actionable;
 
-  throw new AIError(
-    `All AI providers failed — ${errors.map((error) => error.message).join(' | ')}`
-  );
+  throw new AIError(`All AI providers failed — ${errors.map((error) => error.message).join(' | ')}`);
 }
 
 /**
@@ -940,13 +1091,33 @@ function findContractViolation(value, schema) {
 }
 
 /**
+ * Take the model that just answered out of rotation briefly.
+ *
+ * Model selection is sticky — the chain remembers whichever model last worked
+ * and tries it first — which is right for latency and wrong when that model is
+ * producing well-formed rubbish. This unsticks it.
+ */
+const OFF_CONTRACT_COOLDOWN_MS = 90000;
+
+function penaliseCurrentModel(provider, tier) {
+  if (provider !== 'gemini') return;
+  const model = resolvedModel[tier];
+  if (!model) return;
+
+  console.warn(
+    `[SETU AI] Gemini model "${model}" returned an unusable structure — trying the next model in the chain.`
+  );
+  cooldown(tier, model, OFF_CONTRACT_COOLDOWN_MS);
+}
+
+/**
  * Structured JSON generation against a schema.
  *
  * @param {(parsed: object) => (string|null)} [options.validate] caller-supplied
  *   contract check, returning a description of what is wrong or null. This
  *   belongs here rather than at the call site for two reasons: a rejected
- *   response must not be written to the cache (or every later attempt is
- *   served the same bad answer instantly), and it must count as a failure the
+ *   response must not be written to the cache (or every later attempt is served
+ *   the same bad answer instantly), and it must count as a failure the
  *   retry-and-fallback machinery can act on.
  */
 async function requestStructuredAI({
@@ -958,44 +1129,58 @@ async function requestStructuredAI({
   example,
   validate,
   temperature = 0.3,
+  tier = 'fast',
+  thinkingLevel,
   timeoutMs,
   maxRetries,
-  deadlineMs
+  deadlineMs,
+  maxOutputTokens,
+  noCache = false
 }) {
   const chat = normalizeMessages(input, messages);
-  const cacheKey = getCacheKey('struct', { name, schema, instructions, chat, temperature });
-  const cached = getFromCache(cacheKey);
-  if (cached) return cached;
+  const cacheKey = getCacheKey('struct', { name, schema, instructions, chat, temperature, tier });
+
+  if (!noCache) {
+    const cached = getFromCache(cacheKey);
+    if (cached) return cached;
+  }
 
   const result = await withProviders(
     async (provider, deadline) => {
-      let raw;
-      if (provider === 'openrouter') {
-        raw = await callOpenRouter({
-          system: instructions, messages: chat, schema, name, example, temperature, timeoutMs, deadline
-        });
-      } else if (provider === 'gemini') {
-        raw = await callGemini({
-          system: instructions, messages: chat, schema, temperature, timeoutMs, deadline
-        });
-      } else {
-        raw = await callOpenAI({
-          system: instructions, messages: chat, schema, name, temperature, timeoutMs, deadline
-        });
-      }
+      const raw =
+        provider === 'gemini'
+          ? await callGemini({
+              system: instructions,
+              messages: chat,
+              schema,
+              name,
+              example,
+              temperature,
+              tier,
+              thinkingLevel,
+              timeoutMs,
+              deadline,
+              maxOutputTokens
+            })
+          : await callOpenAI({
+              system: instructions,
+              messages: chat,
+              schema,
+              name,
+              temperature,
+              timeoutMs,
+              deadline
+            });
 
       const parsed = parseJsonLoose(raw);
       const violation = findContractViolation(parsed, schema) || validate?.(parsed) || null;
 
       if (violation) {
         // Skip whichever model produced this for a while. Without it, a model
-        // that reliably returns the right keys and empty arrays — which the
-        // small free ones do — is retried into the same failure and the rest
-        // of the chain is never reached.
-        penaliseCurrentModel(provider);
+        // that reliably returns the right keys and empty arrays is retried into
+        // the same failure and the rest of the chain is never reached.
+        penaliseCurrentModel(provider, tier);
 
-        // Retryable: the retry loop gets another sample from another model,
-        // then the next provider.
         throw new AIError(`${provider} returned an off-contract response — ${violation}.`, {
           provider,
           retryable: true
@@ -1007,31 +1192,8 @@ async function requestStructuredAI({
     { maxRetries, deadlineMs }
   );
 
-  setToCache(cacheKey, result);
+  if (!noCache) setToCache(cacheKey, result);
   return result;
-}
-
-/**
- * Take the model that just answered out of rotation briefly.
- *
- * Model selection is sticky — the chain remembers whichever model last worked
- * and tries it first — which is right for latency and wrong when that model is
- * producing well-formed rubbish. This unsticks it.
- */
-const OFF_CONTRACT_COOLDOWN_MS = 90000;
-
-function penaliseCurrentModel(provider) {
-  if (provider === 'openrouter' && resolvedOpenRouterModel) {
-    exhaustedUntil.set(resolvedOpenRouterModel, Date.now() + OFF_CONTRACT_COOLDOWN_MS);
-    console.warn(
-      `[SETU AI] OpenRouter model "${resolvedOpenRouterModel}" returned an unusable structure — ` +
-        'trying the next model in the chain.'
-    );
-    resolvedOpenRouterModel = null;
-  } else if (provider === 'gemini' && resolvedGeminiModel) {
-    exhaustedUntil.set(resolvedGeminiModel, Date.now() + OFF_CONTRACT_COOLDOWN_MS);
-    resolvedGeminiModel = null;
-  }
 }
 
 /** Free-form prose generation. */
@@ -1040,105 +1202,128 @@ async function requestText({
   input,
   messages,
   temperature = 0.7,
+  tier = 'fast',
+  thinkingLevel,
   timeoutMs,
   maxRetries,
-  deadlineMs
+  deadlineMs,
+  maxOutputTokens,
+  noCache = false
 }) {
   const chat = normalizeMessages(input, messages);
-  const cacheKey = getCacheKey('text', { instructions, chat, temperature });
-  const cached = getFromCache(cacheKey);
-  if (cached) return cached;
+  const cacheKey = getCacheKey('text', { instructions, chat, temperature, tier });
+
+  if (!noCache) {
+    const cached = getFromCache(cacheKey);
+    if (cached) return cached;
+  }
 
   const result = await withProviders(
-    async (provider, deadline) => {
-      if (provider === 'openrouter') {
-        return callOpenRouter({ system: instructions, messages: chat, temperature, timeoutMs, deadline });
-      } else if (provider === 'gemini') {
-        return callGemini({ system: instructions, messages: chat, temperature, timeoutMs, deadline });
-      } else {
-        return callOpenAI({ system: instructions, messages: chat, temperature, timeoutMs, deadline });
-      }
-    },
+    async (provider, deadline) =>
+      provider === 'gemini'
+        ? callGemini({
+            system: instructions,
+            messages: chat,
+            temperature,
+            tier,
+            thinkingLevel,
+            timeoutMs,
+            deadline,
+            maxOutputTokens
+          })
+        : callOpenAI({ system: instructions, messages: chat, temperature, timeoutMs, deadline }),
     { maxRetries, deadlineMs }
   );
 
-  setToCache(cacheKey, result);
+  if (!noCache) setToCache(cacheKey, result);
   return result;
 }
 
 /**
- * Web-grounded / deep research pass.
+ * Web-grounded research pass.
+ *
+ * Runs on the Pro chain with Google Search grounding: this is the one place in
+ * SETU where nobody is watching a spinner — the client has already drawn a
+ * placeholder map — so it is worth spending the extra seconds on a better
+ * source pass. Degrades to ungrounded model knowledge rather than failing,
+ * with `grounded: false` so the caller can say so honestly.
  */
-async function requestResearch({ instructions, input, messages, temperature = 0.4 }) {
+async function requestResearch({
+  instructions,
+  input,
+  messages,
+  temperature = 0.4,
+  deadlineMs,
+  timeoutMs
+}) {
   const chat = normalizeMessages(input, messages);
   const cacheKey = getCacheKey('research', { instructions, chat, temperature });
   const cached = getFromCache(cacheKey);
   if (cached) return cached;
 
-  // 1. OpenRouter (Primary Provider with real-time web search tool)
-  if (config.openRouterApiKey && config.openRouterWebSearchEnabled) {
-    try {
-      const { text, sources } = await callOpenRouter({
-        system: instructions,
-        messages: chat,
-        temperature,
-        webSearch: true,
-        withSources: true
-      });
-      if (text) {
-        const res = { text, sources: sources || [], grounded: true };
-        setToCache(cacheKey, res);
-        return res;
-      }
-    } catch (error) {
-      console.warn('[SETU AI] OpenRouter web search research failed, falling back to next provider:', error.message);
-    }
-  }
-
-  // 2. Google Gemini Direct (Secondary Provider with search grounding)
-  if (config.geminiApiKey) {
+  if (config.geminiApiKey && config.geminiGroundingEnabled) {
     try {
       const { text, sources } = await callGemini({
         system: instructions,
         messages: chat,
         temperature,
+        tier: 'pro',
         grounded: true,
-        withSources: true
+        withSources: true,
+        deadline: makeDeadline(deadlineMs || config.aiDeadlineMs),
+        timeoutMs
       });
-      const res = { text, sources: sources || [], grounded: true };
-      setToCache(cacheKey, res);
-      return res;
+
+      if (text) {
+        const result = { text, sources: sources || [], grounded: true };
+        setToCache(cacheKey, result);
+        return result;
+      }
     } catch (error) {
-      console.warn('[SETU AI] Gemini grounded research unavailable, falling back to model knowledge:', error.message);
+      console.warn(
+        `[SETU AI] Grounded research unavailable, falling back to model knowledge: ${error.message}`
+      );
     }
   }
 
-  // 3. Model knowledge fallback
-  const text = await requestText({ instructions, messages: chat, temperature });
-  const res = { text, sources: [], grounded: false };
-  setToCache(cacheKey, res);
-  return res;
+  const text = await requestText({
+    instructions,
+    messages: chat,
+    temperature,
+    tier: 'pro',
+    deadlineMs,
+    timeoutMs
+  });
+
+  const result = { text, sources: [], grounded: false };
+  setToCache(cacheKey, result);
+  return result;
 }
 
-/** Streaming prose generation — yields text chunks. */
-async function* streamText({ instructions, input, messages, temperature = 0.7 }) {
+/**
+ * Streaming prose generation — yields text chunks.
+ *
+ * Falling through to another provider is only safe *before* the first chunk has
+ * been handed to the caller. Once text is on the wire the client has already
+ * rendered it, and starting a second provider from the top would append a whole
+ * second answer to a half-written first one. After that point a failure is the
+ * caller's to handle — which the SSE route does, by closing out with the
+ * offline rewrite rather than restarting.
+ */
+async function* streamText({ instructions, input, messages, temperature = 0.7, tier = 'fast' }) {
   const chat = normalizeMessages(input, messages);
-
-  if (config.openRouterApiKey) {
-    try {
-      yield* streamOpenRouter({ system: instructions, messages: chat, temperature });
-      return;
-    } catch (error) {
-      console.warn('[SETU AI] OpenRouter stream failed, attempting next provider:', error.message);
-    }
-  }
+  let delivered = false;
 
   if (config.geminiApiKey) {
     try {
-      yield* streamGemini({ system: instructions, messages: chat, temperature });
+      for await (const chunk of streamGemini({ system: instructions, messages: chat, temperature, tier })) {
+        delivered = true;
+        yield chunk;
+      }
       return;
     } catch (error) {
-      console.warn('[SETU AI] Gemini stream failed, attempting next provider:', error.message);
+      if (delivered) throw error;
+      console.warn(`[SETU AI] Gemini stream failed before any output, attempting next provider: ${error.message}`);
     }
   }
 
@@ -1151,173 +1336,199 @@ async function* streamText({ instructions, input, messages, temperature = 0.7 })
 }
 
 /**
- * Describe an image (chart, document screenshot, visual graphic) in plain language.
+ * Describe an image — a chart, a document screenshot, a dense interface region.
+ *
+ * Vision is the slowest thing this service does, so the whole chain walk is
+ * bounded rather than each hop.
  */
 async function describeImage({
   imageBase64,
   mimeType = 'image/jpeg',
   instructions,
   prompt,
+  temperature = 0.3,
+  tier = 'fast',
   timeoutMs,
-  deadlineMs
+  deadlineMs,
+  maxOutputTokens
 }) {
-  const cacheKey = getCacheKey('img', { mimeType, prompt, instructions, len: imageBase64?.length, slice: imageBase64?.slice(0, 100) });
+  if (!imageBase64) {
+    throw new AIError('No image supplied.', { retryable: false });
+  }
+
+  const cacheKey = getCacheKey('img', {
+    mimeType,
+    prompt,
+    instructions,
+    len: imageBase64.length,
+    slice: imageBase64.slice(0, 100)
+  });
   const cached = getFromCache(cacheKey);
   if (cached) return cached;
 
-  // Vision calls are the slowest thing this service does and the most likely
-  // to be attempted against a model that cannot do them at all, so the whole
-  // walk is bounded rather than each hop.
-  const deadline = makeDeadline(deadlineMs);
-
-  if (config.openRouterApiKey) {
-    const chain = openRouterChain();
-    for (const model of chain) {
-      if (deadline.expired()) break;
-      try {
-        const payload = await postJson(
-          `${OPENROUTER_BASE}/chat/completions`,
-          {
-            model,
-            messages: [
-              ...(instructions ? [{ role: 'system', content: instructions }] : []),
-              {
-                role: 'user',
-                content: [
-                  { type: 'text', text: prompt || 'Describe this image clearly and extract key information.' },
-                  { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageBase64}` } }
-                ]
-              }
-            ],
-            temperature: 0.3
-          },
-          {
-            provider: 'openrouter',
-            model,
-            timeoutMs: budgetFor(timeoutMs, deadline),
-            parse: true,
-            headers: {
-              Authorization: `Bearer ${config.openRouterApiKey}`,
-              'HTTP-Referer': config.openRouterSiteUrl,
-              'X-Title': config.openRouterAppName
-            }
-          }
-        );
-
-        const text = payload?.choices?.[0]?.message?.content;
-        if (text) {
-          resolvedOpenRouterModel = model;
-          setToCache(cacheKey, text);
-          return text;
-        }
-      } catch (error) {
-        if (error.status === 429 || error.status === 402 || error.status >= 500) {
-          exhaustedUntil.set(model, Date.now() + 45000);
-          continue;
-        }
-      }
-    }
-  }
+  const deadline = makeDeadline(deadlineMs || config.aiDeadlineMs);
+  const question = prompt || 'Describe this image clearly and extract the key information.';
+  let lastError;
 
   if (config.geminiApiKey) {
-    const chain = geminiChain();
-    for (const model of chain) {
+    discoverModels();
+
+    for (const model of geminiChain(tier)) {
       if (deadline.expired()) break;
+
       try {
-        const payload = await postJson(
-          `${GEMINI_BASE}/models/${model}:generateContent?key=${config.geminiApiKey}`,
-          {
-            contents: [
-              {
-                role: 'user',
-                parts: [{ text: prompt }, { inlineData: { mimeType, data: imageBase64 } }]
-              }
-            ],
-            systemInstruction: { parts: [{ text: instructions }] },
-            generationConfig: { temperature: 0.3 }
-          },
-          { provider: 'gemini', model, timeoutMs: budgetFor(timeoutMs, deadline), parse: true }
-        );
+        const generationConfig = { temperature: temperatureFor(model, temperature) };
+        if (Number.isFinite(maxOutputTokens)) generationConfig.maxOutputTokens = maxOutputTokens;
+
+        const thinking = thinkingConfigFor(model, config.geminiThinkingLevel);
+        if (thinking) generationConfig.thinkingConfig = thinking;
+
+        const body = {
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: question }, { inlineData: { mimeType, data: imageBase64 } }]
+            }
+          ],
+          generationConfig
+        };
+
+        // Guarded: an undefined systemInstruction serialises to {text: null},
+        // which Gemini rejects with a 400 on an otherwise valid request.
+        if (instructions) body.systemInstruction = { parts: [{ text: instructions }] };
+
+        const payload = await postJson(`${GEMINI_BASE}/models/${model}:generateContent`, body, {
+          provider: 'gemini',
+          model,
+          timeoutMs: budgetFor(timeoutMs, deadline),
+          parse: true,
+          headers: geminiHeaders()
+        });
 
         const text = readGeminiText(payload);
         if (text) {
-          resolvedGeminiModel = model;
+          rememberModel(tier, model);
           setToCache(cacheKey, text);
           return text;
         }
+        lastError = new AIError(`Gemini model ${model} returned no description.`, {
+          provider: 'gemini',
+          model,
+          retryable: true
+        });
       } catch (error) {
-        if (error.status === 404 || error.status === 400 || error.status === 429) {
-          if (error.status === 429) exhaustedUntil.set(model, Date.now() + 60000);
-          continue;
-        }
-        throw error;
+        lastError = error;
+        if (error.status === 401 || error.status === 403) throw error;
+        cooldown(tier, model, error.status === 429 ? Math.max(error.retryAfterMs || 0, 60000) : 45000);
       }
     }
   }
 
   if (config.openAiApiKey && !deadline.expired()) {
-    const payload = await postJson(
-      `${OPENAI_BASE}/chat/completions`,
-      {
-        model: config.openAiModel,
-        messages: [
-          { role: 'system', content: instructions },
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: prompt },
-              { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageBase64}` } }
-            ]
-          }
-        ],
-        temperature: 0.3
-      },
-      {
-        provider: 'openai',
-        model: config.openAiModel,
-        timeoutMs: budgetFor(timeoutMs, deadline),
-        parse: true,
-        headers: { Authorization: `Bearer ${config.openAiApiKey}` }
-      }
-    );
+    try {
+      const payload = await postJson(
+        `${OPENAI_BASE}/chat/completions`,
+        {
+          model: config.openAiModel,
+          messages: [
+            ...(instructions ? [{ role: 'system', content: instructions }] : []),
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: question },
+                { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageBase64}` } }
+              ]
+            }
+          ],
+          temperature
+        },
+        {
+          provider: 'openai',
+          model: config.openAiModel,
+          timeoutMs: budgetFor(timeoutMs, deadline),
+          parse: true,
+          headers: { Authorization: `Bearer ${config.openAiApiKey}` }
+        }
+      );
 
-    const text = payload?.choices?.[0]?.message?.content;
-    if (text) {
-      setToCache(cacheKey, text);
-      return text;
+      const text = payload?.choices?.[0]?.message?.content;
+      if (text) {
+        setToCache(cacheKey, text);
+        return text;
+      }
+    } catch (error) {
+      lastError = error;
     }
   }
 
-  throw new AIError('No provider could describe this image.');
+  throw lastError || new AIError('No provider could describe this image.');
 }
 
-/** Live provider probe used by /api/health and /api/health/ai. */
+/**
+ * Live provider probe used by /api/health/ai.
+ *
+ * `noCache` is the whole point. The previous version went through the ordinary
+ * cached text path, so the first probe was real and every probe after it was a
+ * cache hit — a health check that reported "ok" indefinitely after the provider
+ * had stopped answering, which is worse than having no health check at all.
+ */
 async function checkHealth() {
   if (!config.aiEnabled) {
-    return { ok: false, provider: null, model: null, reason: 'No API key configured (set OPENROUTER_API_KEY or GEMINI_API_KEY)' };
+    return {
+      ok: false,
+      provider: null,
+      model: null,
+      reason:
+        'No API key configured. Set GEMINI_API_KEY — create one at https://aistudio.google.com/apikey',
+      fallbackChain: config.geminiModelChain
+    };
   }
+
+  const startedAt = Date.now();
+
   try {
-    const primary = config.primaryProvider;
-    await requestText({ instructions: 'Reply with the single word: ok', input: 'ping', temperature: 0 });
+    await requestText({
+      instructions: 'Reply with the single word: ok',
+      input: 'ping',
+      temperature: 0,
+      thinkingLevel: 'minimal',
+      maxOutputTokens: 16,
+      maxRetries: 0,
+      deadlineMs: 20000,
+      noCache: true
+    });
+
+    const provider = config.primaryProvider;
+
     return {
       ok: true,
-      provider: primary,
-      model:
-        primary === 'openrouter'
-          ? resolvedOpenRouterModel || config.openRouterModelChain[0]
-          : primary === 'gemini'
-            ? resolvedGeminiModel || config.geminiModelChain[0]
-            : config.openAiModel,
-      fallbackChain:
-        primary === 'openrouter'
-          ? config.openRouterModelChain
-          : primary === 'gemini'
-            ? config.geminiModelChain
-            : [config.openAiModel]
+      provider,
+      model: provider === 'gemini' ? resolvedModel.fast || config.geminiModel : config.openAiModel,
+      latencyMs: Date.now() - startedAt,
+      fallbackChain: provider === 'gemini' ? geminiChain('fast') : [config.openAiModel],
+      proChain: provider === 'gemini' ? config.geminiProModelChain : []
     };
   } catch (error) {
-    return { ok: false, provider: config.primaryProvider, model: null, reason: error.message };
+    return {
+      ok: false,
+      provider: config.primaryProvider,
+      model: null,
+      latencyMs: Date.now() - startedAt,
+      reason: error.message,
+      fallbackChain: config.geminiModelChain
+    };
   }
+}
+
+/**
+ * Resolve the live model list once at boot.
+ *
+ * Called from server startup so the first real user request does not pay for
+ * discovery, and so an unreachable chain is reported in the boot log rather
+ * than discovered by whoever clicks first.
+ */
+function warmup() {
+  return discoverModels();
 }
 
 module.exports = {
@@ -1328,5 +1539,6 @@ module.exports = {
   describeImage,
   streamText,
   checkHealth,
-  parseJsonLoose
+  parseJsonLoose,
+  warmup
 };

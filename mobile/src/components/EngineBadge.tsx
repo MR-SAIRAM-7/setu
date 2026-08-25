@@ -33,13 +33,13 @@ const BADGE_CONFIGS: Record<EngineState, BadgeConfig> = {
     dotColor: COLORS.cyan,
     label: 'Engine ready', // overridden below if DB is also connected
     pulse: true,
-    hint: 'Connected to OpenRouter AI',
+    hint: 'Connected to Google Gemini',
   },
   nokey: {
     dotColor: COLORS.yellowDark,
     label: 'No AI key set',
     pulse: false,
-    hint: 'Set OPENROUTER_API_KEY in backend .env',
+    hint: 'Set GEMINI_API_KEY in backend .env',
   },
   down: {
     dotColor: COLORS.magenta,

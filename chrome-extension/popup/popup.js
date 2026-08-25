@@ -41,7 +41,7 @@ class Popup {
     this.tabId = null;
     this.tabUrl = '';
     this.reachable = false;
-    this.apiHost = self.SETU_DEFAULTS?.apiHost || 'https://setu-37hl.onrender.com';
+    this.apiHost = self.SETU_DEFAULTS?.apiHost || '';
   }
 
   async init() {

@@ -13,7 +13,7 @@ Living single source of truth for the SETU Android Mobile Application (React Nat
 ```
                                 ┌───────────────────────────────────────┐
                                 │   Unified SETU Backend (Express.js)   │
-                                │   - OpenRouter / Gemini AI Fallback   │
+                                │   - Google Gemini + model fallback    │
                                 │   - MongoDB & Local Rule Engine       │
                                 │   - Identity via x-user-id header     │
                                 └──────────────────┬────────────────────┘

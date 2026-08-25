@@ -31,7 +31,10 @@ export default function CommandPalette({ isOpen, onClose, onStartFocus }) {
       setNotice('No maps saved yet — research a topic first.');
       return false;
     }
-    exportMindMapToPDF(latest).catch(() => {});
+    exportMindMapToPDF(latest).catch((err) => {
+      console.error('[CommandPalette] PDF export failed:', err);
+      setNotice('PDF export failed. Please try again.');
+    });
     return true;
   };
 

@@ -1,8 +1,8 @@
 /**
  * SETU Production API Routes
  * --------------------------
- * Integrates OpenRouter AI agent, MongoDB persistence, document parsing,
- * conversation threads, and 7 cognitive accessibility modes.
+ * Integrates the Gemini-backed AI agent, MongoDB persistence, document parsing,
+ * conversation threads, and the cognitive accessibility modes.
  */
 
 const express = require('express');
@@ -40,6 +40,23 @@ router.get('/health', (_req, res) => {
     version: '3.0.0',
     primaryProvider: config.primaryProvider,
     aiConfigured: config.aiEnabled,
+    // Named `aiEngine`, not `ai`: the web app merges the deep probe from
+    // /api/health/ai into its own `health.ai` slot, and a static block landing
+    // on the same key makes the latency row render an empty result before the
+    // probe has run.
+    aiEngine: {
+      provider: config.primaryProvider,
+      configured: config.aiEnabled,
+      model: config.geminiApiKey ? config.geminiModel : config.openAiApiKey ? config.openAiModel : null,
+      fallbackChain: config.geminiApiKey ? config.geminiModelChain : [],
+      proChain: config.geminiApiKey ? config.geminiProModelChain : [],
+      grounding: Boolean(config.geminiApiKey && config.geminiGroundingEnabled),
+      // Surfaced so the web app and the extension can tell a misconfigured
+      // server apart from an unreachable one without a second round trip.
+      setupHint: config.aiEnabled
+        ? null
+        : 'Set GEMINI_API_KEY in the backend .env — create a key at https://aistudio.google.com/apikey'
+    },
     speech: {
       provider: config.speechEnabled ? 'sarvam' : 'browser',
       configured: config.speechEnabled,

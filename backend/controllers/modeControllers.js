@@ -156,6 +156,18 @@ person, warm but not saccharine.`,
 };
 
 /**
+ * The wait a mode is allowed to impose before falling back.
+ *
+ * Every mode has a person watching a panel and a deterministic L0 answer ready
+ * to show them, which changes what "give up" costs: it is not an error page,
+ * it is a slightly worse answer arriving sooner. Left unbounded these inherited
+ * the service-wide 90s ceiling, so a bad provider day meant a minute and a half
+ * of spinner in front of a reader who — by definition of who this is for — has
+ * likely lost the thread by second twenty.
+ */
+const MODE_BUDGET = { timeoutMs: 25000, maxRetries: 1, deadlineMs: 45000 };
+
+/**
  * Build an Express handler for one mode.
  * Always answers 200 with usable content; `fallback` tells the client whether
  * it is looking at AI output or the deterministic local engine, and
@@ -188,7 +200,8 @@ function runMode(modeKey) {
           name: mode.name,
           schema: mode.schema,
           instructions: `${mode.instructions}${languageDirective(language.code)}`,
-          input: mode.input(req.body)
+          input: mode.input(req.body),
+          ...MODE_BUDGET
         });
         res.json({ ...result, fallback: false, language: language.code });
       } catch (error) {
@@ -263,7 +276,8 @@ async function handleSummarize(req, res, next) {
         instructions: `Summarise the page for a reader with limited working memory. Give a one-line
 gist, then 3-5 key points, each a single self-contained sentence that makes sense
 without the others. Then estimate the reading time in minutes.`,
-        input: text
+        input: text,
+        ...MODE_BUDGET
       });
       res.json({ ...result, points: result.points || [], fallback: false });
     } catch (error) {
