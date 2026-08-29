@@ -77,9 +77,74 @@
     wakeTimeoutMs: 75000
   };
 
+  /**
+   * The languages SETU explains and speaks in.
+   *
+   * Lives here, next to the other deployment constants, because every context
+   * already loads this file: the service worker, the popup, the options page,
+   * and every content script. That matters more than it sounds.
+   *
+   * Every language picker in the product used to be populated from
+   * `/api/speech/voices`. So whenever the engine was asleep, offline, or
+   * simply had no Sarvam key, all eleven options collapsed to a single
+   * "English" — and a reader who wanted an explanation in Hindi was told, by
+   * the dropdown itself, that SETU does not speak Hindi. The language of an
+   * *explanation* is a model decision, not a voice-service one, so it must
+   * never depend on the voice service answering.
+   *
+   * Kept in step with `backend/config/languages.js`, which is bounded by what
+   * Sarvam Bulbul can actually speak — offering a language the voice cannot
+   * pronounce would give this audience text they cannot use.
+   */
+  const LANGUAGES = [
+    { code: 'en-IN', name: 'English', native: 'English' },
+    { code: 'hi-IN', name: 'Hindi', native: 'हिन्दी' },
+    { code: 'bn-IN', name: 'Bengali', native: 'বাংলা' },
+    { code: 'gu-IN', name: 'Gujarati', native: 'ગુજરાતી' },
+    { code: 'kn-IN', name: 'Kannada', native: 'ಕನ್ನಡ' },
+    { code: 'ml-IN', name: 'Malayalam', native: 'മലയാളം' },
+    { code: 'mr-IN', name: 'Marathi', native: 'मराठी' },
+    { code: 'od-IN', name: 'Odia', native: 'ଓଡ଼ିଆ' },
+    { code: 'pa-IN', name: 'Punjabi', native: 'ਪੰਜਾਬੀ' },
+    { code: 'ta-IN', name: 'Tamil', native: 'தமிழ்' },
+    { code: 'te-IN', name: 'Telugu', native: 'తెలుగు' }
+  ];
+
   // Works in a service worker (self), a page (window), and a content script.
   const scope = typeof self !== 'undefined' ? self : globalThis;
   scope.SETU_DEFAULTS = DEFAULTS;
+  scope.SETU_LANGUAGES = LANGUAGES;
+
+  /**
+   * Normalise anything language-shaped to one entry in the table.
+   *
+   * Accepts a full code ('hi-IN'), a bare tag ('hi'), or an English name
+   * ('Hindi'). All three occur in practice, because the read-aloud setting
+   * stores a code while the older AI-language setting stores a name, and both
+   * feed the same requests. Anything unrecognised resolves to English rather
+   * than being passed through to a service that would reject it outright.
+   */
+  scope.setuResolveLanguage = function setuResolveLanguage(requested) {
+    const raw = String(requested || '').trim();
+    if (!raw) return LANGUAGES[0];
+
+    const lower = raw.toLowerCase();
+    return (
+      LANGUAGES.find((entry) => entry.code.toLowerCase() === lower) ||
+      LANGUAGES.find((entry) => entry.name.toLowerCase() === lower) ||
+      LANGUAGES.find((entry) => entry.native.toLowerCase() === lower) ||
+      LANGUAGES.find((entry) => entry.code.split('-')[0] === lower.split(/[-_]/)[0]) ||
+      LANGUAGES[0]
+    );
+  };
+
+  /** A label a speaker of the language recognises first, then its English name. */
+  scope.setuLanguageLabel = function setuLanguageLabel(entry) {
+    if (!entry) return '';
+    return entry.native && entry.native !== entry.name
+      ? `${entry.native} — ${entry.name}`
+      : entry.name;
+  };
 
   /**
    * Paint the popup / options page in the chosen palette.

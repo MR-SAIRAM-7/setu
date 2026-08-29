@@ -65,7 +65,12 @@ sandbox.document = {
 };
 
 vm.createContext(sandbox);
-for (const file of [['shared', 'setu-config.js'], ['shared', 'setu-core.js'], ['content', 'eye-tracker.js']]) {
+for (const file of [
+  ['shared', 'setu-config.js'],
+  ['shared', 'gaze-detector.js'],
+  ['shared', 'setu-core.js'],
+  ['content', 'eye-tracker.js']
+]) {
   vm.runInContext(fs.readFileSync(path.join(EXT, ...file), 'utf8'), sandbox, { filename: file[1] });
 }
 
@@ -98,10 +103,6 @@ function run(offset, { dt = 1 / 60, sensitivity = 1, invert = false, seconds = 2
   gaze.enabled = true;
   gaze.sensitivity = sensitivity;
   gaze.invert = invert;
-  gaze.confidence = 1;
-  gaze.calibrated = true;
-  gaze.neutralY = 0.5;
-  gaze.paint = () => {};
   gaze.setStatus = () => {};
 
   scroller.scrollTop = START;
@@ -109,15 +110,23 @@ function run(offset, { dt = 1 / 60, sensitivity = 1, invert = false, seconds = 2
 
   const frames = Math.round(seconds / dt);
   for (let i = 0; i < frames; i += 1) {
-    const noise = jitter ? (Math.sin(i * 7.3) * jitter) : 0;
-    gaze.headY = 0.5 + offset + noise;
+    const noise = jitter ? Math.sin(i * 7.3) * jitter : 0;
+    const drift = offset + noise;
 
-    // Stand in for the dwell the sampler would have accumulated.
-    if (Math.abs(gaze.headY - gaze.neutralY) >= 0.045) {
-      if (!gaze.outsideSince) gaze.outsideSince = sandbox.performance.now() - 500;
-    } else {
-      gaze.outsideSince = 0;
-    }
+    // Stand in for the sample the tracker would have delivered — from the
+    // detector in the camera frame in normal use, or from the in-page tracker
+    // on the fallback path. Both produce exactly this shape, which is the
+    // point of having one detector behind both.
+    gaze.reading = {
+      drift,
+      magnitude: Math.abs(drift),
+      dwelled: Math.abs(drift) >= 0.045,
+      confidence: 1,
+      calibrated: true,
+      lost: false,
+      headY: 0.5 + drift,
+      neutralY: 0.5
+    };
 
     gaze.integrate(dt);
   }
@@ -181,18 +190,163 @@ check('a mid-speed scroll does not stall on sub-pixel frames', fromTop > 100, `m
 const gaze = new GazeScroll();
 gaze.enabled = true;
 gaze.sensitivity = 1;
-gaze.confidence = 1;
-gaze.calibrated = true;
-gaze.neutralY = 0.5;
-gaze.paint = () => {};
 gaze.setStatus = () => {};
-gaze.headY = 0.63;
-gaze.outsideSince = sandbox.performance.now() - 500;
+gaze.reading = {
+  drift: 0.13,
+  magnitude: 0.13,
+  dwelled: true,
+  confidence: 1,
+  calibrated: true,
+  lost: false,
+  headY: 0.63,
+  neutralY: 0.5
+};
 
 scroller.scrollTop = scroller.scrollHeight - scroller.clientHeight;
 for (let i = 0; i < 120; i += 1) gaze.integrate(1 / 60);
 check('reaching the bottom stops the run', gaze.velocity === 0, `velocity=${gaze.velocity}`);
 check('it does not scroll past the end', scroller.scrollTop === 11200, `top=${scroller.scrollTop}`);
+
+/* ---- detector ------------------------------------------------------------- */
+
+const { SAMPLE_W, SAMPLE_H, detectInFrame, createTracker } = sandbox.self.SETU_GAZE;
+
+/** A frame with a skin-coloured band `width` px wide over `rows` rows. */
+function frameWith({ top = 12, rows = 20, width = 40, rgb = [200, 150, 120] } = {}) {
+  const data = new Uint8ClampedArray(SAMPLE_W * SAMPLE_H * 4);
+  // Everything else is a mid-grey wall, which must not read as skin.
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = 90;
+    data[i + 1] = 90;
+    data[i + 2] = 92;
+    data[i + 3] = 255;
+  }
+  const left = Math.floor((SAMPLE_W - width) / 2);
+  for (let y = top; y < top + rows; y += 1) {
+    for (let x = left; x < left + width; x += 1) {
+      const i = (y * SAMPLE_W + x) * 4;
+      data[i] = rgb[0];
+      data[i + 1] = rgb[1];
+      data[i + 2] = rgb[2];
+    }
+  }
+  return { data };
+}
+
+console.log('\nDetector');
+
+const wellLit = detectInFrame(frameWith());
+check('a well-lit face is found', wellLit !== null);
+check(
+  'the face sits where it was drawn',
+  wellLit && Math.abs(wellLit.headY - 22 / SAMPLE_H) < 0.05,
+  wellLit && `headY=${wellLit.headY.toFixed(3)}`
+);
+
+// Moving the band down must move the reading down.
+const lower = detectInFrame(frameWith({ top: 32 }));
+check('a lower face reads lower', lower && wellLit && lower.headY > wellLit.headY);
+
+// A small or distant face: 6px of skin per row is under the old fixed bar of
+// 10% of frame width, so it was never found at all.
+const smallFace = detectInFrame(frameWith({ width: 6, rows: 20 }));
+check('a small or distant face is still found', smallFace !== null);
+
+// A dim room halves every channel; the chroma test still holds.
+const dim = detectInFrame(frameWith({ rgb: [100, 75, 60] }));
+check('a dimly lit face is still found', dim !== null);
+
+// An empty room must not produce a phantom head.
+check('an empty frame finds nothing', detectInFrame(frameWith({ rows: 0, width: 0 })) === null);
+
+// A wall of skin tone is the background, not a face.
+check(
+  'a frame filled with skin tone finds nothing',
+  detectInFrame(frameWith({ top: 0, rows: SAMPLE_H, width: SAMPLE_W })) === null
+);
+
+/* ---- calibration ---------------------------------------------------------- */
+
+console.log('\nCalibration');
+
+// The bug that made Gaze Scroll look completely dead: auto-calibration fired
+// once, found no face because the camera was still adjusting, cleared its own
+// timer, and never tried again.
+{
+  let frame = frameWith({ rows: 0, width: 0 }); // no face yet
+  const video = { readyState: 2 };
+  sandbox.document.createElement = () => ({
+    width: 0,
+    height: 0,
+    getContext: () => ({ drawImage() {}, getImageData: () => frame })
+  });
+
+  const tracker = createTracker(video);
+  tracker.armAutoCalibration(0, 100);
+
+  // Past the deadline, with nothing to see.
+  tracker.update(200);
+  check('calibration does not succeed with no face', tracker.state.calibrated === false);
+  check('a failed auto-calibration re-arms itself', tracker.state.autoCalibrateAt > 0);
+
+  // The face arrives. performance.now() drives the retry deadline, so step
+  // well past it.
+  frame = frameWith();
+  let calibrated = false;
+  for (let t = 300; t <= 4000 && !calibrated; t += 50) {
+    calibrated = tracker.update(t).calibrated;
+  }
+  check('calibration succeeds once the face appears', calibrated === true);
+  check('the rest position was adopted', tracker.state.neutralY > 0 && tracker.state.neutralY < 1);
+}
+
+/* ---- watchdog ------------------------------------------------------------- */
+
+console.log('\nGaze Scroll — camera silence');
+
+// A reading is a held value. If the frame stops reporting — camera revoked
+// from the address bar, another app takes the device — the last "head is
+// down, keep scrolling" sample would otherwise stay true forever.
+{
+  const gaze = new GazeScroll();
+  gaze.enabled = true;
+  gaze.sensitivity = 1;
+  gaze.setStatus = () => {};
+  gaze.mode = 'frame';
+  gaze.reading = {
+    drift: 0.13, magnitude: 0.13, dwelled: true,
+    confidence: 1, calibrated: true, lost: false, headY: 0.63, neutralY: 0.5
+  };
+
+  scroller.scrollTop = START;
+  Scroll.reset();
+
+  const now = sandbox.performance.now();
+  gaze.lastSampleAt = now;
+  gaze.lastFrame = now;
+
+  // Samples still arriving: it scrolls.
+  for (let i = 1; i <= 60; i += 1) {
+    gaze.lastSampleAt = now + i * 16;
+    gaze.tick(now + i * 16);
+  }
+  const whileReporting = scroller.scrollTop - START;
+  check('it scrolls while the camera reports', whileReporting > 0, `moved=${whileReporting}`);
+
+  // The frame goes silent. Nothing further should move.
+  const wentQuietAt = now + 60 * 16;
+  const before = scroller.scrollTop;
+  for (let i = 1; i <= 240; i += 1) gaze.tick(wentQuietAt + i * 16);
+
+  check('a silent camera stops the scroll', gaze.velocity === 0, `velocity=${gaze.velocity}`);
+  // Bounded by the stale threshold, not by the much longer "camera is really
+  // gone" one — at full tilt a second of coasting is most of a screen.
+  check(
+    'it does not coast on after going quiet',
+    scroller.scrollTop - before < 250,
+    `drifted=${scroller.scrollTop - before}`
+  );
+}
 
 /* ---- report --------------------------------------------------------------- */
 

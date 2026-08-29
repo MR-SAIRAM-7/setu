@@ -206,13 +206,48 @@ async function discoverModels() {
  * starting another model, and every individual call is capped at whatever is
  * left, so the caller's stated budget is the budget.
  */
+/**
+ * The smallest slice of time worth spending a model call on.
+ *
+ * "Not expired" and "enough time to succeed" are different questions, and
+ * conflating them produced a real and expensive failure. A plan request would
+ * spend 12 seconds timing out on one model and ~11 more on a model returning
+ * 503, then start a *third* call with 2.1 seconds left — which of course timed
+ * out, because no cold structured generation completes in two seconds. That
+ * attempt could never have worked. It cost a request against a metered daily
+ * quota, added two seconds to a wait the user was already sitting through, and
+ * logged `model "gemini-3.5-flash" failed (timed out after 2111ms)`, which
+ * blames the model for a budget we set.
+ *
+ * Below this, stop walking the chain and report honestly instead.
+ */
+const MIN_VIABLE_CALL_MS = 5000;
+
 function makeDeadline(ms) {
   const at = Number.isFinite(ms) && ms > 0 ? Date.now() + ms : Number.POSITIVE_INFINITY;
   return {
     at,
     totalMs: ms,
     remaining: () => at - Date.now(),
-    expired: () => Date.now() >= at
+    expired: () => Date.now() >= at,
+
+    /**
+     * Is there room for another attempt that could plausibly finish?
+     *
+     * Three quarters of the slice the caller intended, capped at the viable
+     * floor. Both halves of that matter. Demanding the *whole* intended slice
+     * would refuse an attempt with 1.8 of its 2 seconds left, which is very
+     * nearly what it asked for and would almost certainly have worked. Not
+     * scaling at all would hold a caller that deliberately wants two-second
+     * calls to a five-second floor it never asked for, and it would never
+     * attempt anything.
+     */
+    hasRoomFor(timeoutMs) {
+      if (!Number.isFinite(at)) return true;
+      const asked = Number(timeoutMs) || config.aiTimeoutMs;
+      const need = Math.min(asked * 0.75, MIN_VIABLE_CALL_MS);
+      return at - Date.now() >= need;
+    }
   };
 }
 
@@ -674,9 +709,16 @@ async function callGemini({
   let lastError;
 
   for (const model of chain) {
-    // Starting another 45-second model call with two seconds of budget left is
-    // how a bounded request becomes an unbounded one.
-    if (deadline?.expired()) {
+    // Starting another model call with a sliver of budget left is not caution,
+    // it is a guaranteed failure that still costs a request. Stop instead, and
+    // say plainly that we ran out of room rather than blaming the model we
+    // never really tried.
+    if (deadline && !deadline.hasRoomFor(timeoutMs)) {
+      if (!deadline.expired()) {
+        console.warn(
+          `[SETU AI] Not attempting "${model}" — only ${Math.max(0, Math.round(deadline.remaining()))}ms of the budget is left.`
+        );
+      }
       throw (
         lastError ||
         new AIError('Ran out of time before any model answered.', { provider: 'gemini', retryable: false })
@@ -688,7 +730,7 @@ async function callGemini({
 
     // At most two shapes per model: the preferred one, then the degraded one.
     for (let shape = 0; shape < 2; shape += 1) {
-      if (deadline?.expired()) break;
+      if (deadline && !deadline.hasRoomFor(timeoutMs)) break;
 
       try {
         const body = buildGeminiBody({
@@ -1005,7 +1047,10 @@ function trace(message) {
  * model chain, is the difference between "slow" and "the extension is broken".
  * Interactive callers pass a small budget and fall back to the in-page engine.
  */
-async function withProviders(attempt, { maxRetries = config.aiMaxRetries, deadlineMs } = {}) {
+async function withProviders(
+  attempt,
+  { maxRetries = config.aiMaxRetries, deadlineMs, timeoutMs = config.aiTimeoutMs } = {}
+) {
   const providers = [];
   if (config.geminiApiKey) providers.push('gemini');
   if (config.openAiApiKey) providers.push('openai');
@@ -1024,11 +1069,18 @@ async function withProviders(attempt, { maxRetries = config.aiMaxRetries, deadli
 
   for (const provider of providers) {
     for (let tryIndex = 0; tryIndex <= budget; tryIndex += 1) {
-      if (deadline.expired()) {
-        throw new AIError(`The AI provider did not answer within ${Math.round(totalMs / 1000)}s.`, {
-          retryable: false,
-          status: 504
-        });
+      if (!deadline.hasRoomFor(timeoutMs)) {
+        // Report what actually went wrong underneath, not just the elapsed
+        // time. "did not answer within 25s" is true and useless; "two models
+        // timed out and one was overloaded" is the thing worth knowing, and it
+        // is the difference between tuning a budget and chasing a phantom.
+        const because = errors.length
+          ? ` Last problem: ${errors[errors.length - 1].message}`
+          : '';
+        throw new AIError(
+          `The AI provider did not answer within ${Math.round(totalMs / 1000)}s.${because}`,
+          { retryable: false, status: 504 }
+        );
       }
 
       try {
@@ -1189,7 +1241,7 @@ async function requestStructuredAI({
 
       return parsed;
     },
-    { maxRetries, deadlineMs }
+    { maxRetries, deadlineMs, timeoutMs }
   );
 
   if (!noCache) setToCache(cacheKey, result);
@@ -1232,7 +1284,7 @@ async function requestText({
             maxOutputTokens
           })
         : callOpenAI({ system: instructions, messages: chat, temperature, timeoutMs, deadline }),
-    { maxRetries, deadlineMs }
+    { maxRetries, deadlineMs, timeoutMs }
   );
 
   if (!noCache) setToCache(cacheKey, result);
@@ -1374,7 +1426,7 @@ async function describeImage({
     discoverModels();
 
     for (const model of geminiChain(tier)) {
-      if (deadline.expired()) break;
+      if (!deadline.hasRoomFor(timeoutMs)) break;
 
       try {
         const generationConfig = { temperature: temperatureFor(model, temperature) };
@@ -1424,7 +1476,7 @@ async function describeImage({
     }
   }
 
-  if (config.openAiApiKey && !deadline.expired()) {
+  if (config.openAiApiKey && deadline.hasRoomFor(timeoutMs)) {
     try {
       const payload = await postJson(
         `${OPENAI_BASE}/chat/completions`,

@@ -31,7 +31,7 @@ SETU Lens — Cognitive Accessibility
 
 ## Short description (132 characters max)
 
-> Bionic text, line focus, read aloud, and an AI agent that reads any page and walks you through it, one step at a time.
+> Bionic text, line focus, spoken explanations in your own language, and an AI agent that reads any page and walks you through it, one step at a time.
 
 (117 characters.)
 
@@ -57,7 +57,8 @@ English
 > • **Line Focus** — dims the page and lights the line you are on, snapping to real text, not a fixed band
 > • **Reading Ruler** — a highlight that follows your cursor by line, word, or paragraph
 > • **Focus Mode** — a clean reader view with the ads, popups and sidebars removed
-> • **Read Aloud** — reads the page or just your selection, highlighting each word as it goes
+> • **Explain This** — explains your selection, or what the page is about, in plain language and in your own language, then reads that explanation aloud in a natural voice. Ten Indian languages plus English. It can also just read the words verbatim if that is what you want.
+> • **Map This** — turns a chart, table or dense section into a mind map, and clicking any node explains that node in your language, out loud
 > • **Auto Scroll** — hands-free scrolling at your reading pace
 > • **Gaze Scroll** — scrolls with your head position, using your webcam
 > • **Reading themes** — sepia, calm, dark, high contrast, and a dyslexia-friendly setting with adjustable letter spacing and line height
@@ -87,7 +88,7 @@ English
 >
 > The AI features connect to a SETU engine that you run and configure — your own machine, or your own deployment. SETU Lens has no servers of its own, no analytics, and no advertising. The reading tools work entirely offline.
 >
-> Keyboard shortcuts throughout: Alt+B bionic, Alt+F focus mode, Alt+L line focus, Alt+T read aloud, Alt+Shift+C the Commander, Alt+X to turn everything off.
+> Keyboard shortcuts throughout: Alt+B bionic, Alt+F focus mode, Alt+L line focus, Alt+T Explain This, Alt+Shift+C the Commander, Alt+X to turn everything off.
 
 ---
 
@@ -179,3 +180,9 @@ Suggested screenshots, in order:
 > through the standard browser dialog. Frames are sampled in memory to estimate
 > head position for hands-free scrolling and discarded immediately; no video is
 > stored or transmitted.
+>
+> Note for review: the camera is opened by an extension page loaded in a frame
+> (camera/frame.html), never by the host site. That is why the permission is
+> requested once for the extension rather than repeatedly for each site the
+> reader visits, and it means no website obtains camera access through this
+> extension. Only a single head-offset number crosses back into the page.

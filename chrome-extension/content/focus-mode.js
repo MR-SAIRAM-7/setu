@@ -13,7 +13,7 @@
  */
 
 (() => {
-  const { Feature, UI, Store, Text, Scroll, icon } = window.SETU;
+  const { Feature, UI, Store, Text, Scroll, Bus, icon } = window.SETU;
 
   /** Tags carried into the reader. Everything else is unwrapped or dropped. */
   const KEEP = new Set([
@@ -61,6 +61,11 @@
         document.documentElement.style.overflow = this.previousOverflow;
       });
 
+      // The text every other reading feature works on has just been replaced.
+      // Bionic Reading in particular has to re-anchor onto the reader, and it
+      // has no other way to hear that the article moved.
+      Bus.emit('reading-surface');
+
       UI.toast('Focus Mode on — press Esc to exit', { tone: 'success' });
     }
 
@@ -68,6 +73,8 @@
       UI.destroyHost('focus');
       this.scope = null;
       this.surface = null;
+      // Announce after the host is gone, so listeners resolve the page itself.
+      Bus.emit('reading-surface');
     }
 
     /**
@@ -99,6 +106,8 @@
       this.cleanup(() => {
         document.documentElement.style.overflow = this.previousOverflow;
       });
+
+      Bus.emit('reading-surface');
     }
 
     /* ------------------------------------------------------------------ */
@@ -211,7 +220,11 @@
     /* ------------------------------------------------------------------ */
 
     build({ title, body }) {
-      const root = UI.host('focus', { layer: 'reader', interactive: true });
+      // `readable` lets the reading aids see the article inside this shadow
+      // root. Without it Bionic Reading, read-aloud, the ruler and the line
+      // band all treat the reader as extension chrome and refuse to touch it,
+      // which is why none of them appeared to work in Focus Mode.
+      const root = UI.host('focus', { layer: 'reader', readable: true });
       root.appendChild(this.styleSheet());
 
       const scope = document.createElement('div');
@@ -225,12 +238,12 @@
               <button class="setu-btn" data-act="font-down" aria-label="Smaller text" title="Smaller text">${icon('minus', { size: 16 })}<span class="a">A</span></button>
               <button class="setu-btn" data-act="font-up" aria-label="Larger text" title="Larger text">${icon('plus', { size: 16 })}<span class="a">A</span></button>
               <button class="setu-btn" data-act="theme">${icon('palette', { size: 16 })}Theme</button>
-              <button class="setu-btn" data-act="tts" aria-label="Read aloud">${icon('speaker-high', { size: 16 })}Read aloud</button>
+              <button class="setu-btn" data-act="tts" aria-label="Read this article aloud">${icon('speaker-high', { size: 16 })}Read aloud</button>
               <button class="setu-btn" data-variant="danger" data-act="close" aria-label="Close Focus Mode">${icon('x', { size: 16 })}Close</button>
             </div>
           </header>
           <main class="surface" tabindex="0">
-            <article class="doc"><h1 class="doc-title"></h1></article>
+            <article class="doc" data-setu-content="article"><h1 class="doc-title"></h1></article>
           </main>
         </div>
       `;

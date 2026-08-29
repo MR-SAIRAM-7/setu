@@ -17,7 +17,7 @@
  */
 
 (() => {
-  const { Feature, UI, Store, Text } = window.SETU;
+  const { Feature, UI, Store, Text, Reading, Bus } = window.SETU;
 
   class BionicReading extends Feature {
     static key = 'bionic';
@@ -36,7 +36,32 @@
       this.injectStyle();
       this.processAll();
       this.watch();
+
+      // Focus Mode replaces the article wholesale with its own copy in a
+      // shadow root. Re-anchoring onto it is the whole reason the two can be
+      // used together — previously turning Focus Mode on left bionic text
+      // bolded on a page nobody could see any more, and the reader itself
+      // completely unstyled, which read as "bionic does not work in Focus
+      // Mode".
+      this.cleanup(Bus.on('reading-surface', () => this.reanchor()));
+
       UI.toast('Bionic Reading on', { tone: 'success' });
+    }
+
+    /**
+     * Re-apply to whatever surface is now showing the article.
+     *
+     * Restores first: the nodes we wrapped may belong to a document that is
+     * now hidden behind the reader, and leaving them wrapped would mean
+     * unbolding them later against text that has since been re-rendered.
+     */
+    reanchor() {
+      if (!this.enabled) return;
+      this.mutate(() => {
+        this.restoreAll();
+        this.processAll();
+      });
+      this.watchSurface();
     }
 
     onDisable() {
@@ -103,8 +128,10 @@
     }
 
     processAll() {
+      const surface = Reading.root();
+      if (!surface) return;
       this.mutate(() => {
-        for (const node of Text.collect(document.body, { minLength: 3 })) {
+        for (const node of Text.collect(surface, { minLength: 3 })) {
           this.wrap(node);
         }
       });
@@ -202,7 +229,36 @@
       });
 
       this.observer.observe(document.body, { childList: true, subtree: true });
-      this.cleanup(() => this.observer?.disconnect());
+      this.watchSurface();
+      this.cleanup(() => {
+        this.observer?.disconnect();
+        this.surfaceObserver?.disconnect();
+      });
+    }
+
+    /**
+     * Also watch the hosted reading surface when there is one.
+     *
+     * A MutationObserver on `document.body` never sees inside a shadow root,
+     * so without this the reader's own lazy-loaded content — images resolving,
+     * a Focus Mode re-extract after an SPA navigation — arrived unbolded.
+     */
+    watchSurface() {
+      this.surfaceObserver?.disconnect();
+      this.surfaceObserver = null;
+
+      const surface = Reading.surface();
+      if (!surface || !this.observer) return;
+
+      this.surfaceObserver = new MutationObserver((records) => {
+        if (this.muted) return;
+        const added = records.some((record) => record.addedNodes.length);
+        if (!added) return;
+
+        clearTimeout(this.pending);
+        this.pending = setTimeout(() => this.mutate(() => this.processAll()), 160);
+      });
+      this.surfaceObserver.observe(surface, { childList: true, subtree: true });
     }
   }
 

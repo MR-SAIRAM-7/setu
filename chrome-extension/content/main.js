@@ -372,6 +372,19 @@
                 await this.speak(request.text || Text.selection());
                 return sendResponse({ ok: true });
 
+              case 'explainAloud': {
+                // Explain rather than recite. Opens the Explain This panel so
+                // the reader can see — and change — which language they are
+                // hearing, instead of an explanation arriving from nowhere.
+                await this.toggle('tts', true, { source: request.source || 'message' });
+                const tts = this.features.get('tts');
+                const text = String(request.text || '').trim() || Text.selection();
+                if (!tts) return sendResponse({ ok: false, error: 'Explain This is unavailable.' });
+
+                await tts.speakExplanation(text || Text.pageText(6000), { whole: !text });
+                return sendResponse({ ok: true });
+              }
+
               case 'sendToSanctuary': {
                 const result = await this.features.get('sanctuary')?.send();
                 return sendResponse({ ok: Boolean(result?.ok), error: result?.error });

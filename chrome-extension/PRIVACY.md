@@ -1,6 +1,6 @@
 # SETU Lens — Privacy Policy
 
-_Last updated: 18 August 2026_
+_Last updated: 29 August 2026_
 
 SETU Lens is an accessibility extension for people with ADHD, dyslexia, autism,
 or memory difficulties. This document states exactly what it reads, what it
@@ -30,7 +30,7 @@ your browser and stop there.
 - Line Focus and the Reading Ruler
 - Reading themes
 - Auto Scroll
-- Read Aloud, when using the browser's built-in voices
+- Explain This, when it falls back to the browser's built-in voices
 - The Breathe Protocol's overwhelm detection
 
 ---
@@ -43,10 +43,13 @@ nothing is sent on pages where you have not invoked an AI feature.
 
 | You do this | What is sent | Where it goes |
 | --- | --- | --- |
+| Press play in Explain This, or choose "Explain this out loud" | The text you selected, or up to 6,000 characters of the page's main text if you selected nothing, plus your chosen language | Your configured SETU engine |
+| Have Explain This speak with the natural voice | The sentences of the explanation, one clip at a time, so they can be turned into audio. With no engine configured, your browser's own voice is used and nothing is sent | Your configured SETU engine |
 | Ask the Commander to do something | Your typed or spoken request, the page title and URL, its headings, up to 3,000 characters of visible text, and a list of the visible interactive controls with their labels | Your configured SETU engine |
 | Ask the Commander a question, or press Summarise | Your question plus your current selection, or up to 6,000 characters of the page's main text | Your configured SETU engine |
 | Request the 3-step path | Page title, URL, headings, form field labels, and up to 4,000 characters of text | Your configured SETU engine |
-| Explain a chart or image | A cropped screenshot of the element you picked, or its text if it is text-based, plus the page title | Your configured SETU engine |
+| Click a node on a mind map to have it explained | That node's label and detail line, the map's title, and your chosen language | Your configured SETU engine |
+| Explain a chart or image, or change a mind map's language | A cropped screenshot of the element you picked, or its text if it is text-based, plus the page title and your chosen language | Your configured SETU engine |
 | Send page to my Sanctuary | The page title, URL and readable text | Your configured Sanctuary web app |
 
 The SETU engine then forwards the request to whichever AI provider it is
@@ -73,10 +76,18 @@ Gaze Scroll uses your webcam to estimate head position so the page can scroll
 hands-free. It is off by default and requires an explicit browser permission
 prompt.
 
-Frames are drawn into an in-memory canvas, reduced to a 96×72 sample, measured
+The camera is opened by a page belonging to the extension itself, not by the
+website you are reading. That means the permission you grant is granted to SETU
+once, rather than to each individual site, and no website ever gains camera
+access through SETU. You can review or withdraw it from the camera icon in the
+address bar, or from Chrome's site settings for the extension.
+
+Frames are drawn into an in-memory canvas, reduced to an 80×60 sample, measured
 for skin-tone density, and discarded. **No video, image, or frame is stored,
-saved, or transmitted anywhere**, including to your own engine. Turning the
-feature off stops the camera track immediately.
+saved, or transmitted anywhere**, including to your own engine — the only thing
+that leaves that page is a single number describing how far your head has moved
+from its resting position. Turning the feature off stops the camera track
+immediately.
 
 ## Microphone
 
@@ -93,7 +104,7 @@ if you have Chrome Sync enabled):
 
 - Which reading tools are on, your chosen theme, and your reading preferences
 - Your engine and Sanctuary URLs
-- A random install identifier, e.g. `lens_9f2c…`
+- A random install identifier, e.g. `setu_9f2c…`
 
 The install identifier is sent with engine requests so the engine's rate limiter
 can tell one installation from another — without it, everyone behind a shared
@@ -116,11 +127,18 @@ not act on.
 
 | Permission | Why |
 | --- | --- |
-| `activeTab`, `<all_urls>` | The reading tools work by restyling whatever page you are on, so they must be able to run on any site you choose to use them on. |
+| `activeTab`, and host access to `http://*/*` and `https://*/*` | The reading tools work by restyling whatever page you are on, so they must be able to run on any site you choose to use them on. This is also what lets SETU find the active tab to send it a command, and capture the visible tab for chart descriptions. |
 | `scripting` | Injects the reading tools into tabs that were already open when the extension was installed or updated, so you do not have to reload them. |
 | `storage` | Remembers your settings and which tools you left on. |
-| `tabs` | Finds the active tab to send it a command, and captures the visible tab for chart descriptions. |
-| `contextMenus` | Adds the right-click "Explain this", "Read this aloud" and related entries. |
+| `contextMenus` | Adds the right-click "Explain this", "Turn this into a mind map" and related entries. |
+| `alarms` | Wakes the AI engine every ten minutes while your browser is open, so your first request does not have to wait for it to start up. It sends no page data — only an empty health check. |
+
+The broad `tabs` permission is deliberately **not** requested: everything SETU
+needs from a tab is already covered by the host access above, which is limited
+to ordinary web pages.
+
+Camera access is not listed in the manifest at all. It is requested by the
+browser at the moment you first turn Gaze Scroll on, and only then.
 
 ---
 

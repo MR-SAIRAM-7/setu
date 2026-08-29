@@ -7,105 +7,55 @@
  * achievable without shipping a multi-megabyte CV model, and the UI says so
  * rather than implying medical-grade eye tracking.
  *
- * Video never leaves the machine: frames are read into a canvas and discarded.
+ * Video never leaves the machine: frames are read into an 80×60 canvas and
+ * discarded. Only a head offset — one number — is ever passed around.
  *
- * The previous version was unusable for three separate reasons, and all three
- * had to be fixed before any of it worked:
+ * The camera is opened from an extension-origin frame rather than from this
+ * content script, and that is the fix for the failure people actually hit.
+ * `getUserMedia` in a content script asks for the *host page's* camera
+ * permission: per-site, re-prompted on every new domain, and permanently
+ * refused on any site whose Permissions-Policy withholds the camera or that
+ * the user once denied. The result was a stream of `NotAllowedError`s and an
+ * error message telling the reader to fix a per-site setting that would not
+ * have helped on the next site anyway. A grant made to the extension holds
+ * everywhere, once. See camera/frame.js.
  *
- *  1. It averaged every skin-coloured pixel in the frame. Hands, neck, a wooden
- *     door, and warm lighting all pulled on that average, so the signal barely
- *     moved when the head did. This finds the face *band* — the longest run of
- *     rows that actually look like a face — and ignores everything else.
- *  2. It smoothed with a fixed coefficient, which forces a choice between
- *     jitter when still and lag when moving. A one-euro filter adapts: heavy
- *     smoothing at rest, light smoothing during real movement. This is what
- *     makes "when I'm still, the page is still" true rather than aspirational.
- *  3. Velocity was measured in pixels per *frame* and fed to `scrollBy` as a
- *     fraction, so it ran at double speed on a 120Hz display and rounded to
- *     zero at slow speeds. It is now pixels per second, integrated against real
- *     elapsed time, through the shared scroll arbiter that carries the
- *     remainder — and that arbiter is also why it now works inside Focus Mode.
+ * The in-page camera path is kept as a fallback for the rare page whose CSP
+ * refuses to load an extension frame at all.
  */
 
 (() => {
   const { Feature, UI, Store, Scroll, Dock, icon } = window.SETU;
+  const Gaze = self.SETU_GAZE;
 
-  /** Detector resolution. Small on purpose — this runs next to a live page. */
-  const SAMPLE_W = 80;
-  const SAMPLE_H = 60;
-
-  /** Detection rate. 60fps of getImageData buys nothing a head can express. */
-  const DETECT_HZ = 24;
-
-  /** Neutral-relative drift, as a fraction of frame height. */
-  const DEADZONE = 0.045;
-  const FULL_TILT = 0.16;
-
-  /** Peak scroll speed in CSS pixels per second, before sensitivity. */
-  const MAX_SPEED = 820;
-
-  /** How long drift must stay outside the deadzone before scrolling starts. */
-  const DWELL_MS = 130;
-
-  /** How long the head must sit inside the deadzone before neutral re-centres. */
-  const RECENTRE_AFTER_MS = 2200;
-
-  /* ---------------------------------------------------------------------- */
-  /* One-euro filter                                                        */
-  /* ---------------------------------------------------------------------- */
+  const { DEADZONE, MAX_SPEED, speedFor, createTracker, explainCameraFailure } = Gaze;
 
   /**
-   * Adaptive low-pass filter.
+   * How long to give the camera frame to *load*.
    *
-   * The whole problem with a fixed smoothing coefficient is that jitter and
-   * intent look identical to it. This one widens its own bandwidth in
-   * proportion to how fast the signal is genuinely changing, so a still head
-   * is filtered hard (no creep) and a deliberate movement is barely filtered
-   * at all (no lag).
-   *
-   * Casiez, Roussel & Vogel, CHI 2012.
+   * Deliberately covers loading only, and is cleared the moment the frame says
+   * hello. It used to cover the whole start-up, including the browser's own
+   * permission prompt — so anyone who paused for four seconds to read that
+   * prompt had the frame declared dead underneath them, and the in-page
+   * fallback then raised a *second* prompt, this time the per-site one that
+   * the frame exists to avoid. Reading the dialog was enough to break the
+   * feature.
    */
-  class OneEuro {
-    constructor({ minCutoff = 0.55, beta = 0.4, dCutoff = 1 } = {}) {
-      this.minCutoff = minCutoff;
-      this.beta = beta;
-      this.dCutoff = dCutoff;
-      this.x = null;
-      this.dx = 0;
-      this.at = 0;
-    }
+  const FRAME_LOAD_TIMEOUT_MS = 4000;
 
-    static alpha(cutoff, dt) {
-      const tau = 1 / (2 * Math.PI * cutoff);
-      return 1 / (1 + tau / dt);
-    }
-
-    reset(value = null) {
-      this.x = value;
-      this.dx = 0;
-      this.at = 0;
-    }
-
-    filter(value, now) {
-      if (this.x === null) {
-        this.x = value;
-        this.at = now;
-        return value;
-      }
-
-      const dt = Math.max(1 / 120, (now - this.at) / 1000);
-      this.at = now;
-
-      const rawDx = (value - this.x) / dt;
-      this.dx = this.dx + OneEuro.alpha(this.dCutoff, dt) * (rawDx - this.dx);
-
-      const cutoff = this.minCutoff + this.beta * Math.abs(this.dx);
-      this.x = this.x + OneEuro.alpha(cutoff, dt) * (value - this.x);
-      return this.x;
-    }
-  }
-
-  /* ---------------------------------------------------------------------- */
+  /**
+   * Two silences, with very different meanings.
+   *
+   * Samples arrive at animation rate, so even a 400ms gap is a dozen missed
+   * frames and there is no honest reason to keep moving through it — at full
+   * tilt a single second of coasting carries the reader most of a screen past
+   * where they meant to stop. But a brief stall (a garbage collection, a heavy
+   * page) is not a dead camera, and telling someone their camera is gone every
+   * time the machine hiccups would be worse than useless. So: stop moving
+   * quickly and quietly, and only say something once it is really gone.
+   */
+  const SAMPLE_STALE_MS = 400;
+  const SAMPLE_LOST_MS = 3000;
 
   class GazeScroll extends Feature {
     static key = 'eye';
@@ -114,22 +64,24 @@
       super();
       this.stream = null;
       this.video = null;
-      this.canvas = null;
-      this.ctx = null;
+      this.tracker = null;
+      this.frame = null;
+      this.mode = 'frame';
 
-      this.filter = new OneEuro();
-      this.headY = 0.5;
-      this.neutralY = 0.5;
-      this.confidence = 0;
-
-      this.calibrated = false;
+      this.reading = { drift: 0, magnitude: 0, dwelled: false, confidence: 0, calibrated: false };
       this.velocity = 0;
       this.lastFrame = 0;
-      this.lastDetect = 0;
-      this.outsideSince = 0;
-      this.insideSince = 0;
       this.paused = false;
       this.resumeTimer = null;
+      this.needsGrant = false;
+      this.lastSampleAt = 0;
+
+      // Set here as well as in applySettings: the camera frame can deliver its
+      // first sample before the settings read completes, and integrating
+      // against an undefined sensitivity produces NaN velocity — which then
+      // sticks, because NaN never falls back under the stop threshold.
+      this.sensitivity = 1;
+      this.invert = false;
     }
 
     async onEnable() {
@@ -137,28 +89,45 @@
 
       // Registered before the camera is requested, so a stream that arrives
       // after a failure elsewhere is still shut down.
-      this.cleanup(() => {
-        this.stream?.getTracks().forEach((track) => track.stop());
-        this.stream = null;
-      });
+      this.cleanup(() => this.releaseCamera());
 
       try {
-        if (!navigator.mediaDevices?.getUserMedia) {
-          throw new Error('This page does not allow camera access.');
-        }
-        this.stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 320 }, height: { ideal: 240 }, facingMode: 'user' },
-          audio: false
-        });
-      } catch (error) {
-        // Throwing (rather than quietly clearing `enabled`) is what lets the
-        // base class roll the whole feature back. The old code left a panel on
-        // the page whose own close button could no longer tear it down.
-        throw new Error(this.explainCameraFailure(error));
-      }
+        await this.startFrameCamera();
+      } catch (frameError) {
+        // The extension frame could not run — either the page refused to load
+        // it, or SETU has not been granted the camera yet. A missing grant is
+        // worth surfacing as an action rather than retrying in the page, where
+        // it would only produce a second prompt that helps on one site.
+        if (frameError.needsGrant) {
+          this.needsGrant = true;
 
-      this.video.srcObject = this.stream;
-      await this.video.play().catch(() => {});
+          // Offer the fix rather than describing it. The panel is about to be
+          // torn down by the base class's rollback, so the way out has to live
+          // somewhere that survives — and a toast with one button is a far
+          // better answer than a paragraph about the address bar.
+          UI.toast('SETU needs your permission to use the camera.', {
+            tone: 'warn',
+            duration: 9000,
+            action: {
+              label: 'Allow camera',
+              onClick: () => {
+                try {
+                  chrome.runtime.sendMessage({ action: 'openCameraPermission' });
+                } catch (_) {
+                  /* worker asleep — the settings page explains it too */
+                }
+              }
+            }
+          });
+
+          throw new Error(
+            'Gaze Scroll needs camera permission for SETU itself. Grant it once and it works on every site.'
+          );
+        }
+
+        console.warn('[SETU:eye] camera frame unavailable, using the page camera:', frameError.message);
+        await this.startPageCamera();
+      }
 
       this.applySettings();
       this.bind();
@@ -166,22 +135,21 @@
       this.setStatus('Sit as you normally read, and hold still for a moment.', 'info');
       this.lastFrame = performance.now();
       this.loop((now) => this.tick(now));
-
-      // Calibrate itself rather than demanding a button press first. The
-      // manual control stays for anyone who moves before it settles.
-      this.autoCalibrateAt = performance.now() + 1400;
     }
 
     onDisable() {
       clearTimeout(this.resumeTimer);
+      clearTimeout(this.frameTimer);
+      this.releaseCamera();
       this.releaseDock?.();
       this.releaseDock = null;
       UI.destroyHost('gaze');
       Scroll.reset();
-      this.calibrated = false;
-      this.confidence = 0;
       this.velocity = 0;
+      this.reading = { drift: 0, magnitude: 0, dwelled: false, confidence: 0, calibrated: false };
       this.scope = null;
+      this.frame = null;
+      this.tracker = null;
     }
 
     onSettings() {
@@ -200,120 +168,164 @@
       if (invert) invert.setAttribute('aria-pressed', String(this.invert));
     }
 
+    /* ------------------------------------------------------------------ */
+    /* Camera — extension frame (normal path)                             */
+    /* ------------------------------------------------------------------ */
+
     /**
-     * Turn a getUserMedia rejection into something the user can act on.
-     * "NotAllowedError" is not an instruction.
+     * Load the extension's camera frame and wait for it to report a stream.
+     *
+     * Rejects with `needsGrant` set when the extension itself has not been
+     * given the camera, which is a one-click fix, and with a plain error when
+     * the frame could not load at all, which is not.
      */
-    explainCameraFailure(error) {
-      switch (error.name) {
-        case 'NotAllowedError':
-          return 'Camera access was blocked. Allow the camera for this site in the address bar, then turn Gaze Scroll on again.';
-        case 'NotFoundError':
-        case 'OverconstrainedError':
-          return 'No camera was found on this device, so Gaze Scroll cannot run.';
-        case 'NotReadableError':
-          return 'The camera is already in use by another app. Close it and try again.';
-        case 'SecurityError':
-          return 'This site does not permit camera access, so Gaze Scroll cannot run here.';
-        default:
-          return `Gaze Scroll could not start the camera: ${error.message}`;
+    startFrameCamera() {
+      return new Promise((resolve, reject) => {
+        let settled = false;
+
+        const finish = (fn, value) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(this.frameTimer);
+          fn(value);
+        };
+
+        const iframe = document.createElement('iframe');
+        iframe.src = chrome.runtime.getURL('camera/frame.html');
+        // Camera access is delegated to this cross-origin frame explicitly;
+        // without the attribute Chrome refuses it no matter who has granted
+        // what.
+        iframe.allow = 'camera';
+        iframe.setAttribute('title', 'SETU camera');
+        iframe.style.cssText =
+          'width:100%; height:100%; border:0; display:block; background:#000;';
+
+        this.onFrameMessage = (event) => {
+          if (event.source !== iframe.contentWindow) return;
+          const message = event.data;
+          if (!message || message.channel !== 'setu-gaze') return;
+
+          switch (message.type) {
+            case 'loaded':
+              // The frame is alive, so the load timer has done its job. From
+              // here the only thing we are waiting on is a human deciding, and
+              // there is no deadline on that.
+              clearTimeout(this.frameTimer);
+              this.frameTimer = null;
+              this.setStatus('Waiting for you to allow the camera…', 'info');
+              this.postToFrame({ type: 'start' });
+              break;
+
+            case 'ready':
+              this.mode = 'frame';
+              finish(resolve, true);
+              break;
+
+            case 'sample':
+              this.reading = message;
+              this.lastSampleAt = performance.now();
+              if (message.calibratedNow) this.announceCalibration();
+              this.paintSpeed();
+              this.narrate();
+              break;
+
+            case 'calibrate-failed':
+              this.setStatus(
+                'No face detected yet. Make sure your face is lit and centred.',
+                'error'
+              );
+              break;
+
+            case 'error': {
+              const error = new Error(message.message || 'The camera could not start.');
+              error.needsGrant = Boolean(message.recoverable);
+              finish(reject, error);
+              break;
+            }
+
+            default:
+              break;
+          }
+        };
+
+        window.addEventListener('message', this.onFrameMessage);
+        this.cleanup(() => window.removeEventListener('message', this.onFrameMessage));
+
+        iframe.addEventListener('error', () =>
+          finish(reject, new Error('This page blocked the SETU camera frame.'))
+        );
+
+        this.stage.appendChild(iframe);
+        this.frame = iframe;
+
+        // A page whose CSP forbids `frame-src chrome-extension:` never fires an
+        // error event — the frame simply stays blank forever. Time the *load*
+        // out so the in-page fallback still gets its chance.
+        this.frameTimer = setTimeout(
+          () => finish(reject, new Error('This page did not allow the SETU camera frame to load.')),
+          FRAME_LOAD_TIMEOUT_MS
+        );
+      });
+    }
+
+    postToFrame(message) {
+      try {
+        this.frame?.contentWindow?.postMessage({ channel: 'setu-gaze-control', ...message }, '*');
+      } catch (_) {
+        /* frame torn down */
       }
     }
 
     /* ------------------------------------------------------------------ */
-    /* Detection                                                          */
+    /* Camera — in-page fallback                                          */
     /* ------------------------------------------------------------------ */
 
-    /**
-     * Locate the face and return its vertical centre as a 0..1 fraction,
-     * or null when there is no face to be found.
-     *
-     * Works on the *row profile* rather than on individual pixels. Counting
-     * skin-like pixels per row and then taking the longest contiguous run of
-     * well-populated rows finds the head and rejects almost everything else: a
-     * hand at the edge of frame occupies too few rows, a wooden background
-     * occupies too many, and neither forms a band of the right size in the
-     * right place. A plain centroid could not tell any of them apart.
-     */
-    detectHead() {
-      if (!this.video || this.video.readyState < 2) return null;
+    async startPageCamera() {
+      this.mode = 'page';
 
-      this.ctx.drawImage(this.video, 0, 0, SAMPLE_W, SAMPLE_H);
-      let frame;
+      const video = document.createElement('video');
+      video.playsInline = true;
+      video.muted = true;
+      video.style.cssText =
+        'width:100%; height:100%; object-fit:cover; transform:scaleX(-1); display:block;';
+      this.stage.appendChild(video);
+      this.video = video;
+
       try {
-        frame = this.ctx.getImageData(0, 0, SAMPLE_W, SAMPLE_H);
-      } catch (_) {
-        // A cross-origin frame taints the canvas. Nothing to be done here.
-        return null;
-      }
-
-      const { data } = frame;
-      const rows = new Uint16Array(SAMPLE_H);
-      let total = 0;
-
-      for (let y = 0; y < SAMPLE_H; y += 1) {
-        let count = 0;
-        for (let x = 0; x < SAMPLE_W; x += 1) {
-          const i = (y * SAMPLE_W + x) * 4;
-          const r = data[i];
-          const g = data[i + 1];
-          const b = data[i + 2];
-
-          // YCbCr, not RGB. The chroma plane separates skin from lighting far
-          // better than raw channel comparisons, which is why this survives a
-          // warm lamp or a dim room where the old RGB envelope did not.
-          const luma = 0.299 * r + 0.587 * g + 0.114 * b;
-          if (luma < 45 || luma > 245) continue;
-
-          const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
-          const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
-
-          if (cb >= 77 && cb <= 130 && cr >= 133 && cr <= 177) count += 1;
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw Object.assign(new Error('No camera API on this page.'), { name: 'SecurityError' });
         }
-        rows[y] = count;
-        total += count;
+        this.stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 320 }, height: { ideal: 240 }, facingMode: 'user' },
+          audio: false
+        });
+      } catch (error) {
+        // Throwing (rather than quietly clearing `enabled`) is what lets the
+        // base class roll the whole feature back, so no panel and no camera
+        // stream is left stranded on the page.
+        throw new Error(explainCameraFailure(error));
       }
 
-      // Nothing, or the camera is looking at a wall of skin tone.
-      const fraction = total / (SAMPLE_W * SAMPLE_H);
-      if (fraction < 0.012 || fraction > 0.62) return null;
+      video.srcObject = this.stream;
+      await video.play().catch(() => {});
 
-      // Longest contiguous run of rows carrying a plausible amount of face.
-      const threshold = Math.max(3, SAMPLE_W * 0.1);
-      let bestStart = -1;
-      let bestLength = 0;
-      let runStart = -1;
+      this.tracker = createTracker(video);
+      this.tracker.armAutoCalibration(performance.now());
+    }
 
-      for (let y = 0; y <= SAMPLE_H; y += 1) {
-        const populated = y < SAMPLE_H && rows[y] >= threshold;
-        if (populated && runStart === -1) {
-          runStart = y;
-        } else if (!populated && runStart !== -1) {
-          const length = y - runStart;
-          if (length > bestLength) {
-            bestLength = length;
-            bestStart = runStart;
-          }
-          runStart = -1;
-        }
+    releaseCamera() {
+      this.postToFrame({ type: 'stop' });
+      this.frame?.remove();
+      this.frame = null;
+
+      this.stream?.getTracks().forEach((track) => track.stop());
+      this.stream = null;
+      if (this.video) {
+        this.video.srcObject = null;
+        this.video.remove();
+        this.video = null;
       }
-
-      // A band that is a few rows tall is noise; one that fills the frame is
-      // the background, not a head.
-      if (bestLength < SAMPLE_H * 0.08 || bestLength > SAMPLE_H * 0.85) return null;
-
-      // Weighted centre within the band, so the estimate moves smoothly rather
-      // than jumping a whole row at a time.
-      let weight = 0;
-      let sum = 0;
-      for (let y = bestStart; y < bestStart + bestLength; y += 1) {
-        weight += rows[y];
-        sum += rows[y] * y;
-      }
-      if (!weight) return null;
-
-      this.confidence = Math.min(1, bestLength / (SAMPLE_H * 0.45));
-      return sum / weight / SAMPLE_H;
+      this.tracker = null;
     }
 
     /* ------------------------------------------------------------------ */
@@ -324,83 +336,44 @@
       const dt = Math.min(0.1, (now - this.lastFrame) / 1000);
       this.lastFrame = now;
 
-      // Detection is throttled; the scroll integration is not, so movement
-      // stays smooth at whatever rate the display actually runs.
-      if (now - this.lastDetect >= 1000 / DETECT_HZ) {
-        this.lastDetect = now;
-        this.sample(now);
+      // In frame mode the samples arrive by message; in page mode we own the
+      // tracker. Either way the integration below is identical, which is what
+      // keeps the two paths behaving the same.
+      if (this.mode === 'page' && this.tracker) {
+        const reading = this.tracker.update(now);
+        this.reading = reading;
+        if (reading.calibratedNow) this.announceCalibration();
+        this.paintPage(reading);
+        this.narrate();
+      } else if (this.mode === 'frame' && this.lastSampleAt) {
+        // Watchdog. A reading is a *held* value, so if the frame stops sending
+        // — the camera was revoked from the address bar, another app seized
+        // the device, the frame crashed — the last sample stays true forever
+        // and the page keeps scrolling on its own with nobody driving it.
+        // Going quiet has to mean stop.
+        const silence = now - this.lastSampleAt;
+
+        if (silence > SAMPLE_STALE_MS) {
+          this.reading = { drift: 0, magnitude: 0, dwelled: false, confidence: 0, calibrated: false };
+          this.velocity = 0;
+          Scroll.reset();
+        }
+        if (silence > SAMPLE_LOST_MS) {
+          this.setStatus('Lost the camera. Turn Gaze Scroll off and on again.', 'error');
+        }
       }
 
       this.integrate(dt);
-    }
-
-    sample(now) {
-      const raw = this.detectHead();
-
-      if (raw === null) {
-        this.confidence = 0;
-        this.filter.reset();
-        // Coast to a stop rather than stopping dead — a single dropped frame
-        // during a blink should not feel like a jolt.
-        this.velocity *= 0.82;
-        this.outsideSince = 0;
-        if (this.calibrated) this.setStatus('Face lost — move back into frame.', 'error');
-        this.paint();
-        return;
-      }
-
-      this.headY = this.filter.filter(raw, now);
-
-      if (!this.calibrated) {
-        if (this.autoCalibrateAt && now >= this.autoCalibrateAt) this.calibrate();
-        this.paint();
-        return;
-      }
-
-      const drift = this.headY - this.neutralY;
-      const magnitude = Math.abs(drift);
-
-      if (magnitude < DEADZONE) {
-        this.outsideSince = 0;
-        if (!this.insideSince) this.insideSince = now;
-
-        // Slow posture drift is the single most common reason head tracking
-        // "stops working" after a minute: the neutral point silently becomes
-        // wrong and the page creeps. Re-centre once the head has genuinely
-        // settled, so the rest position follows the reader.
-        if (now - this.insideSince > RECENTRE_AFTER_MS) {
-          this.neutralY += (this.headY - this.neutralY) * 0.06;
-        }
-        this.setStatus('Ready — tilt down to scroll, up to go back.', 'ok');
-      } else {
-        this.insideSince = 0;
-        if (!this.outsideSince) this.outsideSince = now;
-        this.setStatus(
-          (drift > 0) !== this.invert ? 'Scrolling down…' : 'Scrolling back up…',
-          'ok'
-        );
-      }
-
-      this.paint();
     }
 
     /** Turn the current head position into motion. */
     integrate(dt) {
       let target = 0;
 
-      if (this.calibrated && this.confidence > 0.15 && !this.paused) {
-        const drift = this.headY - this.neutralY;
-        const magnitude = Math.abs(drift);
-        const dwelled = this.outsideSince && performance.now() - this.outsideSince >= DWELL_MS;
+      const { drift, magnitude, dwelled, confidence, calibrated } = this.reading;
 
-        if (magnitude >= DEADZONE && dwelled) {
-          // Squared response: small movements stay gentle and controllable,
-          // and only a deliberate tilt reaches full speed.
-          const reach = Math.min(1, (magnitude - DEADZONE) / (FULL_TILT - DEADZONE));
-          const speed = reach * reach * MAX_SPEED * this.sensitivity;
-          const direction = Math.sign(drift) * (this.invert ? -1 : 1);
-          target = speed * direction;
-        }
+      if (calibrated && confidence > 0.15 && !this.paused && magnitude >= DEADZONE && dwelled) {
+        target = speedFor(drift, this.sensitivity, this.invert);
       }
 
       // Exponential approach, framed in real time so it feels identical on a
@@ -414,6 +387,7 @@
         // which is exactly the complaint this feature exists to avoid.
         this.velocity = 0;
         Scroll.reset();
+        this.paintSpeed();
         return;
       }
 
@@ -433,24 +407,44 @@
           Scroll.reset();
         }
       }
+
+      this.paintSpeed();
     }
 
     calibrate() {
-      this.autoCalibrateAt = 0;
-
-      if (this.confidence <= 0.15) {
-        this.setStatus('No face detected yet. Make sure your face is lit and centred.', 'error');
+      if (this.mode === 'frame') {
+        this.postToFrame({ type: 'calibrate' });
         return;
       }
+      if (this.tracker?.calibrate()) this.announceCalibration();
+      else this.setStatus('No face detected yet. Make sure your face is lit and centred.', 'error');
+    }
 
-      this.neutralY = this.headY;
-      this.calibrated = true;
-      this.insideSince = 0;
-      this.outsideSince = 0;
+    announceCalibration() {
       this.velocity = 0;
       Scroll.reset();
       this.setStatus('Calibrated. Tilt your head down to scroll, up to go back.', 'ok');
       UI.toast('Gaze Scroll calibrated', { tone: 'success' });
+    }
+
+    /** Say what the tracker is currently doing, in the reader's terms. */
+    narrate() {
+      const { calibrated, lost, magnitude, drift } = this.reading;
+
+      if (lost) {
+        if (calibrated) this.setStatus('Face lost — move back into frame.', 'error');
+        return;
+      }
+      if (!calibrated) return;
+
+      if (magnitude < DEADZONE) {
+        this.setStatus('Ready — tilt down to scroll, up to go back.', 'ok');
+      } else {
+        this.setStatus(
+          (drift > 0) !== this.invert ? 'Scrolling down…' : 'Scrolling back up…',
+          'ok'
+        );
+      }
     }
 
     /**
@@ -467,13 +461,11 @@
         clearTimeout(this.resumeTimer);
         this.resumeTimer = setTimeout(() => {
           this.paused = false;
-          // Wherever they have settled is the new rest position.
-          this.insideSince = performance.now();
         }, 1500);
       };
 
-      this.listen(window, 'wheel', nudge, { passive: true });
-      this.listen(window, 'touchstart', nudge, { passive: true });
+      this.listen(window, 'wheel', nudge, { passive: true, capture: true });
+      this.listen(window, 'touchstart', nudge, { passive: true, capture: true });
 
       // A hidden tab still runs its rAF loop at a reduced rate on some
       // platforms; scrolling a page nobody is looking at is never wanted.
@@ -511,27 +503,7 @@
         .close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
         .stage { position:relative; border-radius:var(--radius); overflow:hidden; background:#000; aspect-ratio:4/3; }
-        video { width:100%; height:100%; object-fit:cover; transform:scaleX(-1); display:block; }
-        .neutral {
-          position:absolute; left:0; right:0; height:0;
-          border-top:1px dashed rgba(255,255,255,.5); pointer-events:none;
-        }
-        .zone {
-          position:absolute; left:0; right:0; pointer-events:none;
-          background: color-mix(in srgb, var(--accent) 20%, transparent);
-          border-top:1px solid color-mix(in srgb, var(--accent) 55%, transparent);
-          border-bottom:1px solid color-mix(in srgb, var(--accent) 55%, transparent);
-        }
-        .reticle {
-          position:absolute; left:6%; right:6%; height:2px;
-          background:var(--accent-2); box-shadow:0 0 9px var(--accent-2);
-          pointer-events:none;
-        }
-        .lost {
-          position:absolute; inset:0; display:none; place-items:center;
-          background:rgba(0,0,0,.55); color:#fff; font-size:12px; font-weight:700;
-        }
-        .stage[data-lost="true"] .lost { display:grid; }
+        .stage iframe, .stage video { width:100%; height:100%; display:block; border:0; }
 
         .status { margin-top:9px; font-size:11.5px; line-height:1.45; color:var(--text-dim); min-height:32px; }
         .status[data-tone="error"] { color:var(--danger); }
@@ -555,6 +527,18 @@
         .toggle[aria-pressed="true"] { background:var(--accent-100); border-color:var(--accent); color:var(--accent-900); }
         .toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+        .how { margin-top:10px; font-size:11.5px; color:var(--text-dim); }
+        .how summary {
+          cursor:pointer; font-weight:700; color:var(--accent-700);
+          list-style:none; padding:2px 0;
+        }
+        .how summary::-webkit-details-marker { display:none; }
+        .how summary::before { content:'? '; font-weight:700; }
+        .how summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        .how ol { margin:6px 0 6px 16px; display:flex; flex-direction:column; gap:4px; }
+        .how li { line-height:1.45; }
+        .how p { margin-top:6px; line-height:1.45; }
+
         .sens { margin-top:10px; }
         .sens-head { display:flex; justify-content:space-between; font-size:11px; color:var(--text-dim); margin-bottom:4px; }
         .sens-value { font-weight:700; color:var(--text); font-variant-numeric:tabular-nums; }
@@ -570,13 +554,7 @@
             <span class="title">GAZE SCROLL</span>
             <button class="close" aria-label="Close gaze scroll">${icon('x', { size: 16 })}</button>
           </div>
-          <div class="stage" data-lost="false">
-            <video playsinline muted></video>
-            <div class="zone"></div>
-            <div class="neutral"></div>
-            <div class="reticle" style="top:50%"></div>
-            <div class="lost">no face in frame</div>
-          </div>
+          <div class="stage"></div>
           <div class="speed"><div class="speed-mid"></div><div class="speed-fill"></div></div>
           <p class="status" role="status" aria-live="polite"></p>
           <div class="row">
@@ -588,22 +566,26 @@
             <input type="range" data-act="sensitivity" min="3" max="25" step="1" value="10"
                    aria-label="Gaze scroll sensitivity" />
           </div>
+          <details class="how">
+            <summary>How to use this</summary>
+            <ol>
+              <li>Sit the way you normally read and hold still. The cyan band is
+                  your rest position — it is set for you after a second.</li>
+              <li>Lower your chin, or move your head down, to scroll down.
+                  Raise it to go back up.</li>
+              <li>Return to the band to stop. Further from it means faster.</li>
+              <li>Touch the mouse wheel at any time and it yields to you.</li>
+            </ol>
+            <p>It follows your head, not your eyes, and it re-learns your rest
+               position as you settle. If it drifts, press Recalibrate.</p>
+          </details>
         </div>
       `;
       root.appendChild(scope);
 
       this.scope = scope;
-      this.video = scope.querySelector('video');
-      this.reticle = scope.querySelector('.reticle');
-      this.zone = scope.querySelector('.zone');
-      this.neutralLine = scope.querySelector('.neutral');
-      this.speedFill = scope.querySelector('.speed-fill');
       this.stage = scope.querySelector('.stage');
-
-      this.canvas = document.createElement('canvas');
-      this.canvas.width = SAMPLE_W;
-      this.canvas.height = SAMPLE_H;
-      this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
+      this.speedFill = scope.querySelector('.speed-fill');
 
       scope.querySelector('.close').onclick = () => window.setuLens?.toggle('eye', false);
       scope.querySelector('[data-act="calibrate"]').onclick = () => this.calibrate();
@@ -636,35 +618,58 @@
       el.dataset.tone = tone;
     }
 
-    /**
-     * Draw where the head is against where neutral is.
-     *
-     * The band is the deadzone made visible. Without it, "hold still" is an
-     * instruction with no feedback — the reader cannot tell whether they are
-     * inside the tolerance or one twitch away from the page moving.
-     */
-    paint() {
-      if (!this.scope) return;
-
-      const lost = this.confidence <= 0.15;
-      this.stage.dataset.lost = String(lost);
-
-      if (!lost) {
-        this.reticle.style.top = `${(this.headY * 100).toFixed(1)}%`;
-      }
-
-      const neutralPct = this.neutralY * 100;
-      this.neutralLine.style.top = `${neutralPct.toFixed(1)}%`;
-      this.zone.style.top = `${(neutralPct - DEADZONE * 100).toFixed(1)}%`;
-      this.zone.style.height = `${(DEADZONE * 200).toFixed(1)}%`;
-      this.zone.style.display = this.calibrated ? 'block' : 'none';
-      this.neutralLine.style.display = this.calibrated ? 'block' : 'none';
-
-      // Speed bar grows out from the centre, in the direction of travel.
+    /** Speed bar grows out from the centre, in the direction of travel. */
+    paintSpeed() {
+      if (!this.speedFill) return;
       const fraction = Math.max(-1, Math.min(1, this.velocity / MAX_SPEED));
       const width = Math.abs(fraction) * 50;
       this.speedFill.style.width = `${width}%`;
       this.speedFill.style.left = fraction >= 0 ? '50%' : `${50 - width}%`;
+    }
+
+    /**
+     * The in-page fallback has to draw its own guides.
+     *
+     * The extension frame paints these itself, which is why there is no
+     * equivalent in the normal path — the overlay lives next to the video it
+     * describes rather than being reconstructed across a message boundary.
+     */
+    paintPage(reading) {
+      if (!this.video) return;
+
+      if (!this.pageOverlay) {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:absolute; inset:0; pointer-events:none;';
+        overlay.innerHTML = `
+          <div data-el="zone" style="position:absolute; left:0; right:0; display:none;
+               background:color-mix(in srgb, var(--accent) 20%, transparent);
+               border-top:1px solid var(--accent); border-bottom:1px solid var(--accent);"></div>
+          <div data-el="neutral" style="position:absolute; left:0; right:0; height:0; display:none;
+               border-top:1px dashed rgba(255,255,255,.5);"></div>
+          <div data-el="reticle" style="position:absolute; left:6%; right:6%; height:2px; top:50%;
+               background:var(--accent-2); box-shadow:0 0 9px var(--accent-2);"></div>
+        `;
+        this.stage.appendChild(overlay);
+        this.pageOverlay = {
+          zone: overlay.querySelector('[data-el="zone"]'),
+          neutral: overlay.querySelector('[data-el="neutral"]'),
+          reticle: overlay.querySelector('[data-el="reticle"]')
+        };
+        this.cleanup(() => {
+          overlay.remove();
+          this.pageOverlay = null;
+        });
+      }
+
+      const { zone, neutral, reticle } = this.pageOverlay;
+      if (!reading.lost) reticle.style.top = `${(reading.headY * 100).toFixed(1)}%`;
+
+      const neutralPct = reading.neutralY * 100;
+      neutral.style.top = `${neutralPct.toFixed(1)}%`;
+      zone.style.top = `${(neutralPct - DEADZONE * 100).toFixed(1)}%`;
+      zone.style.height = `${(DEADZONE * 200).toFixed(1)}%`;
+      zone.style.display = reading.calibrated ? 'block' : 'none';
+      neutral.style.display = reading.calibrated ? 'block' : 'none';
     }
   }
 

@@ -61,9 +61,12 @@
           <span>Explain things in</span>
           <b id="v-language">English</b>
         </span>
-        <input type="text" id="language" placeholder="English" spellcheck="false" />
+        <select id="language" aria-label="Language for explanations and speech"></select>
         <small class="help">
-          Any language you name — "English", "Hindi", "Tamil", "Spanish", "plain English". Used for AI explanations, chart breakdowns and summaries.
+          One choice, used everywhere: spoken explanations, mind-map labels, chart breakdowns,
+          summaries and the Copilot's answers. Eleven Indian languages plus English — the set the
+          natural voice can actually speak, so anything SETU writes for you can also be read to
+          you. This is the same setting as the voice language below.
         </small>
       </label>
 
@@ -118,25 +121,26 @@
         </label>
       </div>
 
-      <!-- Read-aloud voice -->
+      <!-- Explain This voice -->
       <div class="field">
         <span class="field-label">
-          <span>Read-aloud voice</span>
+          <span>Explain This voice</span>
           <b id="v-voice">checking…</b>
         </span>
         <div class="voice-grid">
-          <select id="speaker" aria-label="Read-aloud voice">
+          <select id="speaker" aria-label="Explain This voice">
             <option value="">Engine default</option>
           </select>
-          <select id="tts-language" aria-label="Read-aloud language">
+          <select id="tts-language" aria-label="Explain This language">
             <option value="en-IN">English</option>
           </select>
           <button class="btn" id="preview-voice" type="button">Hear it</button>
         </div>
         <small class="help">
-          Natural human voices come from the SETU engine (Sarvam Bulbul) and speak eleven Indian
-          languages plus English. Set a language here and read-aloud will both <em>explain</em> and
-          <em>speak</em> in it. Without an engine, SETU falls back to this browser's own voice.
+          Natural human voices come from the SETU engine (Sarvam Bulbul) and speak ten Indian
+          languages plus English. SETU both <em>explains</em> and <em>speaks</em> in the language
+          chosen above. Without an engine, explanations still come back in your language and this
+          browser's own voice reads them.
         </small>
       </div>
 
@@ -238,7 +242,7 @@
       <ul class="facts">
         <li>
           <strong>Reading tools</strong>
-          <span>Bionic text, line focus, reading ruler, themes, auto-scroll and browser read-aloud run entirely on your local device. Zero bytes uploaded.</span>
+          <span>Bionic text, line focus, reading ruler, themes, auto-scroll and browser speech run entirely on your local device. Zero bytes uploaded.</span>
         </li>
         <li>
           <strong>AI features</strong>

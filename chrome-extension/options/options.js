@@ -19,7 +19,7 @@ const KEY_MAP = [
   [`${ALT}F`, 'Toggle Focus Mode (Sensory Reader)'],
   [`${ALT}L`, 'Toggle Line Focus Band'],
   [`${ALT}H`, 'Toggle Reading Ruler (Line/Word/Block)'],
-  [`${ALT}T`, 'Toggle Read Aloud with Spoken Word Highlight'],
+  [`${ALT}T`, 'Toggle Explain This — a spoken explanation in your language'],
   [`${ALT}S`, 'Toggle Smooth Hands-Free Auto Scroll'],
   [`${ALT}E`, 'Toggle Gaze Scroll (Head Tracking)'],
   [`${ALT}M`, 'Map a Chart, Image or Section as a Mind Map'],
@@ -137,7 +137,27 @@ class Options {
 
     const data = response?.ok ? response.data : null;
     const chosenSpeaker = this.state.settings.ttsSpeaker || '';
-    const chosenLanguage = this.state.settings.ttsLanguage || 'en-IN';
+    const chosenLanguage = self.setuResolveLanguage(
+      this.state.settings.ttsLanguage || this.state.settings.language
+    ).code;
+
+    // Languages first, and unconditionally.
+    //
+    // This used to be populated only after the `enabled` check below, from the
+    // engine's reply — so an engine that was asleep, offline, or without a
+    // Sarvam key left this dropdown showing the single hard-coded "English"
+    // option in the HTML. A reader who wanted Hindi was being told by the UI
+    // that SETU has no Hindi. Which language SETU *explains* in is decided by
+    // the model, and is available whether or not natural voice is.
+    const languages = data?.languages?.length ? data.languages : self.SETU_LANGUAGES;
+    language.innerHTML = languages
+      .map(
+        (entry) =>
+          `<option value="${escapeHtml(entry.code)}"${
+            entry.code === chosenLanguage ? ' selected' : ''
+          }>${escapeHtml(self.setuLanguageLabel(entry))}</option>`
+      )
+      .join('');
 
     if (!data?.enabled) {
       if (label) label.textContent = "this browser's voice";
@@ -156,15 +176,6 @@ class Options {
           )}${voice.note ? ` — ${escapeHtml(voice.note)}` : ''}</option>`
       )
     ].join('');
-
-    language.innerHTML = (data.languages || [{ code: 'en-IN', name: 'English', native: 'English' }])
-      .map(
-        (entry) =>
-          `<option value="${escapeHtml(entry.code)}"${entry.code === chosenLanguage ? ' selected' : ''}>${escapeHtml(
-            entry.native || entry.name
-          )}</option>`
-      )
-      .join('');
 
     if (label) {
       const current = (data.voices || []).find((voice) => voice.id === chosenSpeaker);
@@ -246,7 +257,17 @@ class Options {
 
   renderSettings() {
     const s = this.state.settings;
-    if ($('#language')) $('#language').value = s.language || 'English';
+    const chosenLanguage = self.setuResolveLanguage(s.ttsLanguage || s.language);
+    const languageSelect = $('#language');
+    if (languageSelect) {
+      languageSelect.innerHTML = self.SETU_LANGUAGES.map(
+        (entry) =>
+          `<option value="${escapeHtml(entry.code)}"${
+            entry.code === chosenLanguage.code ? ' selected' : ''
+          }>${escapeHtml(self.setuLanguageLabel(entry))}</option>`
+      ).join('');
+      languageSelect.value = chosenLanguage.code;
+    }
     this.renderAppearance(s.appearance);
     this.renderGazeDirection(Boolean(s.gazeInvert));
     if ($('#bionic')) $('#bionic').value = Math.round((s.bionicIntensity ?? 0.45) * 100);
@@ -267,7 +288,9 @@ class Options {
 
   paintValues() {
     const s = this.state.settings;
-    if ($('#v-language')) $('#v-language').textContent = s.language || 'English';
+    if ($('#v-language')) {
+      $('#v-language').textContent = self.setuResolveLanguage(s.ttsLanguage || s.language).name;
+    }
     if ($('#v-bionic')) $('#v-bionic').textContent = `${Math.round((s.bionicIntensity ?? 0.45) * 100)}%`;
     if ($('#v-spacing')) $('#v-spacing').textContent = `${(s.letterSpacing ?? 0.02).toFixed(2)}em`;
     if ($('#v-line')) $('#v-line').textContent = (s.lineHeight ?? 1.8).toFixed(1);
@@ -324,8 +347,14 @@ class Options {
     $('#test-engine')?.addEventListener('click', () => this.testEngine());
 
     $('#language')?.addEventListener('change', (event) => {
-      const val = event.target.value.trim() || 'English';
-      this.saveSetting({ language: val });
+      // The same write as the read-aloud picker below — they are two views of
+      // one setting. Previously this was a free-text box, so a reader could
+      // type "Spanish" and get Spanish prose that the voice engine had no way
+      // to speak, or type "Hindi" here while the voice stayed on English.
+      const chosen = self.setuResolveLanguage(event.target.value);
+      this.saveSetting({ ttsLanguage: chosen.code, language: chosen.name });
+      if ($('#v-language')) $('#v-language').textContent = chosen.name;
+      if ($('#tts-language')) $('#tts-language').value = chosen.code;
     });
 
     $('#appearance')?.addEventListener('click', (event) => {
@@ -345,7 +374,13 @@ class Options {
     });
 
     $('#tts-language')?.addEventListener('change', (event) => {
-      this.saveSetting({ ttsLanguage: event.target.value });
+      // Both halves together: `ttsLanguage` drives the voice and `language`
+      // drives the model. Writing only one of them is what produced
+      // explanations in English spoken by an Indian-language voice.
+      const chosen = self.setuResolveLanguage(event.target.value);
+      this.saveSetting({ ttsLanguage: chosen.code, language: chosen.name });
+      if ($('#language')) $('#language').value = chosen.name;
+      if ($('#v-language')) $('#v-language').textContent = chosen.name;
     });
 
     $('#preview-voice')?.addEventListener('click', () => this.previewVoice());

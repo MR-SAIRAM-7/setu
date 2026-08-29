@@ -49,13 +49,47 @@
   };
 
   /* ---------------------------------------------------------------------- */
+  /* Languages                                                              */
+  /* ---------------------------------------------------------------------- */
+
+  /**
+   * The languages SETU explains and speaks in, and the resolver for them.
+   *
+   * Defined in setu-config.js so that the popup, the options page, the service
+   * worker and every content script share one list. Re-exported here because
+   * feature modules destructure everything they need from `window.SETU`, and a
+   * second copy of this table is exactly the kind of thing that silently drifts.
+   *
+   * The literal fallback only matters if a future change reorders the manifest;
+   * it must not point somewhere different if it ever fires.
+   */
+  const LANGUAGES = self.SETU_LANGUAGES || [{ code: 'en-IN', name: 'English', native: 'English' }];
+  const resolveLanguage = self.setuResolveLanguage || (() => LANGUAGES[0]);
+  const languageLabel =
+    self.setuLanguageLabel ||
+    ((entry) =>
+      entry?.native && entry.native !== entry.name ? `${entry.native} — ${entry.name}` : entry?.name || '');
+
+  /* ---------------------------------------------------------------------- */
   /* Layer ladder                                                           */
   /* ---------------------------------------------------------------------- */
 
+  /**
+   * The reader sits *below* the dimmers and the reading overlays, not above
+   * them.
+   *
+   * That ordering is the whole reason Line Focus and the Reading Ruler can be
+   * used together with Focus Mode. When the reader was the higher layer it
+   * covered both of them completely, so turning Focus Mode on silently
+   * cancelled every reading aid — which read to the user as "these features
+   * cannot be combined". The band and the ruler are `pointer-events: none`, so
+   * sitting above the reader costs nothing: clicks, selection and scrolling
+   * all still reach it.
+   */
   const LAYERS = {
-    dim: 2147483600,      // page dimmers and masks
-    reading: 2147483610,  // line band, word highlight, ruler
-    reader: 2147483620,   // full-page focus reader
+    reader: 2147483600,   // full-page focus reader
+    dim: 2147483610,      // page dimmers and masks
+    reading: 2147483620,  // line band, word highlight, ruler
     panel: 2147483635,    // agent panel, commander, breakdowns
     control: 2147483645,  // floating control pills
     toast: 2147483647     // transient messages, always on top
@@ -146,7 +180,16 @@
    * Mounted on documentElement rather than body: some sites replace <body>
    * wholesale during hydration, which would silently destroy our overlays.
    */
-  function host(id, { layer = 'panel' } = {}) {
+  /**
+   * @param {object} [options]
+   * @param {string} [options.layer]
+   * @param {boolean} [options.readable] mark this host as carrying *page
+   *   content* rather than chrome. Focus Mode is the only one: its reader is
+   *   a real article the user is reading, so Bionic Reading, read-aloud and
+   *   the ruler must be able to see inside it, while every other overlay
+   *   stays invisible to them.
+   */
+  function host(id, { layer = 'panel', readable = false } = {}) {
     const existing = hosts.get(id);
     // A single-page app that swapped out the document can orphan our host.
     if (existing && existing.el.isConnected) return existing.root;
@@ -155,6 +198,7 @@
     const el = document.createElement('div');
     el.id = `setu-host-${id}`;
     el.setAttribute('data-setu', 'host');
+    if (readable) el.setAttribute('data-setu-readable', 'true');
     // The palette is selected by an attribute on the host, so every overlay
     // switches together without any feature module knowing about theming.
     el.dataset.appearance = appearance();
@@ -657,8 +701,14 @@
       ttsSpeaker: '',
       /** Sarvam language code for synthesis and for AI explanations. */
       ttsLanguage: 'en-IN',
-      /** Speak an explanation of the selection rather than the words themselves. */
-      ttsExplain: false,
+      /**
+       * Explain rather than recite.
+       *
+       * On by default: the feature is called Explain This, and for the readers
+       * it is built for, hearing the same hard sentence read back is not the
+       * accommodation they came for.
+       */
+      ttsExplain: true,
       /** Head-tracking sensitivity, 0.4 (calm) .. 2.5 (twitchy). */
       gazeSensitivity: 1,
       /** Flip the head-to-scroll mapping for users who prefer it inverted. */
@@ -709,6 +759,29 @@
   const Store = {
     get: () => state,
     getSetting: (key) => state.settings[key],
+
+    /**
+     * The one language SETU is currently working in.
+     *
+     * There are two stored settings for historical reasons — `ttsLanguage`
+     * holds a Sarvam code and `language` holds an English name — and when they
+     * disagreed the result was the single most confusing failure in the
+     * product: an explanation written in English, read aloud by a Hindi voice.
+     * The code is authoritative because it is the one a picker sets, and the
+     * name is derived from it.
+     *
+     * @returns {{code: string, name: string, native: string}}
+     */
+    language() {
+      return resolveLanguage(state.settings.ttsLanguage || state.settings.language);
+    },
+
+    /** Set both halves at once, so they can never drift apart again. */
+    async setLanguage(requested) {
+      const language = resolveLanguage(requested);
+      await Store.set({ settings: { ttsLanguage: language.code, language: language.name } });
+      return language;
+    },
 
     /** Shallow-merge a patch, persist it, and notify every subscriber. */
     async set(patch, { persist = true } = {}) {
@@ -973,7 +1046,11 @@
         seen += 1;
         const shadow = el.shadowRoot;
         if (!shadow) continue;
-        if (el.hasAttribute?.('data-setu')) continue; // never walk into our own UI
+        // Never walk into our own chrome — but a *readable* host (the Focus
+        // Mode reader) holds the article the user is actually reading, and
+        // skipping it is what made Bionic Reading and read-aloud find nothing
+        // while Focus Mode was open.
+        if (el.hasAttribute?.('data-setu') && !el.hasAttribute?.('data-setu-readable')) continue;
         roots.push(shadow);
         queue.push(shadow);
         if (roots.length >= MAX_ROOTS) break;
@@ -982,6 +1059,80 @@
 
     return roots;
   }
+
+  /**
+   * The shadow roots of hosts that carry page content rather than chrome.
+   *
+   * Only Focus Mode registers one. The caret APIs stop at a shadow boundary
+   * unless they are handed the roots to look inside, and `elementFromPoint`
+   * needs the same help — so this list is what lets the reading ruler, the
+   * line band, and word-level highlighting track text inside the reader.
+   */
+  function readableRoots() {
+    const roots = [];
+    for (const { el } of hosts.values()) {
+      if (!el.isConnected || !el.hasAttribute('data-setu-readable')) continue;
+      if (el.shadowRoot) roots.push(el.shadowRoot);
+    }
+    return roots;
+  }
+
+  /**
+   * The element the reader is actually reading from.
+   *
+   * `document.body` on a normal page; the Focus Mode article when that is
+   * open. Everything that processes prose — Bionic Reading, read-aloud, the
+   * page text sent to the engine — asks for this rather than assuming the
+   * document, which is what used to make all of them silently no-ops the
+   * moment Focus Mode covered the page.
+   */
+  const Reading = {
+    /** @returns {Element|null} */
+    surface() {
+      for (const root of readableRoots()) {
+        const content = root.querySelector('[data-setu-content]');
+        if (content?.isConnected) return content;
+      }
+      return null;
+    },
+
+    /** The surface, or the document body — never null on a real page. */
+    root() {
+      return Reading.surface() || document.body;
+    },
+
+    /** True while page content is being displayed by one of our own overlays. */
+    get hosted() {
+      return Boolean(Reading.surface());
+    }
+  };
+
+  /**
+   * A one-line event bus for cross-feature notifications.
+   *
+   * Exactly one thing uses it today and it earns its keep: when Focus Mode
+   * opens or closes, the text every other reading feature works on is replaced
+   * wholesale, and they have no other way to hear about it.
+   */
+  const Bus = {
+    _listeners: new Map(),
+
+    on(event, fn) {
+      if (!Bus._listeners.has(event)) Bus._listeners.set(event, new Set());
+      Bus._listeners.get(event).add(fn);
+      return () => Bus._listeners.get(event)?.delete(fn);
+    },
+
+    emit(event, detail) {
+      for (const fn of Bus._listeners.get(event) || []) {
+        try {
+          fn(detail);
+        } catch (error) {
+          console.warn(`[SETU] listener for "${event}" failed:`, error);
+        }
+      }
+    }
+  };
 
   /** querySelectorAll that descends open shadow roots. */
   function deepQueryAll(selector, { from = document, limit = 4000 } = {}) {
@@ -1015,6 +1166,10 @@
     isOurs(node) {
       const el = node?.nodeType === Node.TEXT_NODE ? node.parentElement : node;
       if (!el) return false;
+      // Page content we are hosting (the Focus Mode article) is not "ours" in
+      // the sense that matters here: it is the text the reader came for, and
+      // every reading aid must be allowed to work on it.
+      if (el.closest?.('[data-setu-content]')) return false;
       if (el.closest?.('[data-setu]')) return true;
       // Inside one of our shadow roots the page-level closest() finds nothing,
       // so walk out through the host chain as well.
@@ -1086,6 +1241,16 @@
 
     /** Best-effort main article text, for summarise / simplify / send-to-Sanctuary. */
     pageText(limit = 12000) {
+      // Focus Mode has already decided what the article is and stripped the
+      // navigation out of it. Re-deriving it from the page underneath would be
+      // both slower and worse, and on a page whose body is hidden behind the
+      // reader it used to come back nearly empty.
+      const hosted = Reading.surface();
+      if (hosted) {
+        const text = (hosted.innerText || hosted.textContent || '').trim();
+        if (text.length > 200) return text.replace(/\n{3,}/g, '\n\n').slice(0, limit);
+      }
+
       const candidates = [
         document.querySelector('article'),
         document.querySelector('main'),
@@ -1192,20 +1357,105 @@
       );
     },
 
-    /** The text node under a viewport point, across browser caret APIs. */
+    /**
+     * The text node under a viewport point, across browser caret APIs.
+     *
+     * The caret APIs stop dead at a shadow boundary unless they are given the
+     * roots to look inside, and older builds do not accept the option at all.
+     * So there are two paths: hand `caretPositionFromPoint` our readable roots
+     * where that is supported, and hit-test manually where it is not. Without
+     * one of the two, every reading aid goes blind the moment Focus Mode is
+     * open — which was exactly the reported behaviour.
+     */
     caretNodeAt(x, y) {
-      let node = null;
-
-      if (document.caretPositionFromPoint) {
-        node = document.caretPositionFromPoint(x, y)?.offsetNode || null;
-      } else if (document.caretRangeFromPoint) {
-        node = document.caretRangeFromPoint(x, y)?.startContainer || null;
-      }
-
+      const node = Text.caretAt(x, y)?.node || null;
       if (node?.nodeType !== Node.TEXT_NODE) return null;
       if (Text.isOurs(node)) return null;
       if (!node.textContent.trim()) return null;
       return node;
+    },
+
+    /** Both halves of a caret hit: the text node and the offset within it. */
+    caretAt(x, y) {
+      const roots = readableRoots();
+
+      if (document.caretPositionFromPoint) {
+        let position = null;
+        if (roots.length) {
+          try {
+            // Chrome 128+ takes the roots to descend into; older builds throw
+            // or ignore the second argument, which the fallback below covers.
+            position = document.caretPositionFromPoint(x, y, { shadowRoots: roots });
+          } catch (_) {
+            position = null;
+          }
+        }
+        if (!position) position = document.caretPositionFromPoint(x, y);
+        if (position?.offsetNode?.nodeType === Node.TEXT_NODE) {
+          return { node: position.offsetNode, offset: position.offset };
+        }
+      } else if (document.caretRangeFromPoint) {
+        const range = document.caretRangeFromPoint(x, y);
+        if (range?.startContainer?.nodeType === Node.TEXT_NODE) {
+          return { node: range.startContainer, offset: range.startOffset };
+        }
+      }
+
+      if (!roots.length) return null;
+      return Text.hitTestText(x, y);
+    },
+
+    /**
+     * Find the text node under a point without the caret API.
+     *
+     * Walks from the deepest element at the point and measures the real client
+     * rects of each of its text nodes, which is the only approach that works
+     * uniformly across shadow boundaries. Deliberately narrow — it only runs
+     * when a readable overlay is open and the caret API came back empty.
+     */
+    hitTestText(x, y) {
+      let el = document.elementFromPoint(x, y);
+      for (let depth = 0; el && depth < 12; depth += 1) {
+        const inner = el.shadowRoot?.elementFromPoint?.(x, y);
+        if (!inner || inner === el) break;
+        el = inner;
+      }
+      if (!el || Text.isOurs(el)) return null;
+
+      let walker;
+      try {
+        walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      } catch (_) {
+        return null;
+      }
+
+      const range = document.createRange();
+      let node;
+      let scanned = 0;
+      while ((node = walker.nextNode()) && scanned < 400) {
+        scanned += 1;
+        if (!node.textContent.trim()) continue;
+
+        // Per-character rects would be exact and far too slow; per-node rects
+        // give one box per wrapped line, which is all the caller needs.
+        try {
+          range.selectNodeContents(node);
+        } catch (_) {
+          continue;
+        }
+
+        for (const rect of range.getClientRects()) {
+          if (rect.width < 1 || rect.height < 1) continue;
+          if (y < rect.top || y > rect.bottom) continue;
+          if (x < rect.left - 2 || x > rect.right + 2) continue;
+
+          // Approximate the offset by where along the box the point sits.
+          const ratio = Math.max(0, Math.min(1, (x - rect.left) / Math.max(1, rect.width)));
+          return { node, offset: Math.round(ratio * node.textContent.length) };
+        }
+      }
+
+      return null;
     },
 
     /**
@@ -1252,8 +1502,30 @@
    * A WeakRef map also survives exactly as long as the element does, so a
    * re-rendered SPA simply falls through to the label-matching path.
    */
+  /**
+   * The most refs we keep alive at once.
+   *
+   * Each entry is a WeakRef plus a short label, so the memory cost is trivial;
+   * the cap exists only so a long agent session cannot grow the map without
+   * bound. Oldest entries are dropped first, and a dropped ref still resolves
+   * through label matching.
+   */
+  const MAX_REFS = 600;
+
   const Page = {
     refs: new Map(),
+
+    /**
+     * Snapshots are numbered so their handles cannot collide.
+     *
+     * Every snapshot used to hand out `r0`, `r1`, `r2`… from a map that was
+     * cleared first. That made the documented promise — that the agent and the
+     * 3-step path can address the page at the same time — false in exactly the
+     * way it claimed to have fixed: taking a second snapshot both erased the
+     * agent's handles and reissued the same names for different elements, so a
+     * running plan would either lose its target or click the wrong control.
+     */
+    seq: 0,
 
     /** Best human-visible name for a control. */
     labelOf(el) {
@@ -1313,7 +1585,7 @@
      *   still shows the model the right 60.
      */
     snapshot({ maxControls = 60, maxText = 3000, viewportFirst = true } = {}) {
-      Page.refs.clear();
+      const scope = `s${(Page.seq += 1)}`;
 
       const nodes = deepQueryAll(
         'a[href], button, input:not([type="hidden"]), select, textarea, ' +
@@ -1346,7 +1618,13 @@
       const controls = [];
       for (const candidate of candidates.slice(0, maxControls)) {
         const { el, label } = candidate;
-        const ref = `r${controls.length}`;
+        const ref = `${scope}r${controls.length}`;
+
+        // Evict oldest-first rather than wiping the map, so another feature's
+        // in-flight plan keeps the handles it was given.
+        if (Page.refs.size >= MAX_REFS) {
+          Page.refs.delete(Page.refs.keys().next().value);
+        }
         Page.refs.set(ref, { ref: new WeakRef(el), label });
 
         controls.push({
@@ -1381,17 +1659,24 @@
     /**
      * Find the element a plan step points at.
      *
-     * Three strategies in falling order of confidence: the live handle from the
-     * snapshot that produced the step, an exact visible-label match, then a
-     * fuzzy one. The last two are what make a plan survive a page re-render or
-     * a reload, when every handle is gone.
+     * The live handle from the snapshot that produced the step is used when it
+     * is still attached. Everything below it exists so a plan survives a page
+     * re-render, a reload, or a navigation, when every handle is gone.
+     *
+     * The fallback is scored rather than first-match. A plain
+     * `label.includes(needle)` picked whichever element happened to come first
+     * in document order, which on a real site is almost always a navigation
+     * link rather than the button the step meant — so the agent would
+     * confidently click the wrong thing and report success. Scoring lets an
+     * exact match beat a prefix, a prefix beat a substring, and a control of
+     * the expected kind that is actually on screen beat one that is neither.
      */
     resolve(step) {
       if (!step) return null;
 
       const held = step.targetRef ? Page.refs.get(step.targetRef) : null;
       const direct = held?.ref?.deref?.();
-      if (direct?.isConnected) return direct;
+      if (direct?.isConnected && Page.isVisible(direct)) return direct;
 
       const needle = String(step.targetText || held?.label || '').trim().toLowerCase();
       if (!needle) return null;
@@ -1402,14 +1687,53 @@
         { limit: 1500 }
       ).filter((el) => !Text.isOurs(el) && el.getClientRects?.().length);
 
-      const label = (el) => Page.labelOf(el).toLowerCase();
+      const wantTag = String(step.tag || '').toLowerCase();
+      const fillish = step.actionType === 'fill' || step.actionType === 'select';
 
-      return (
-        candidates.find((el) => label(el) === needle) ||
-        candidates.find((el) => label(el).includes(needle)) ||
-        candidates.find((el) => needle.includes(label(el)) && label(el).length > 3) ||
-        null
-      );
+      let best = null;
+      let bestScore = 0;
+
+      for (const el of candidates) {
+        const label = Page.labelOf(el).toLowerCase();
+        if (!label) continue;
+
+        let score = 0;
+        if (label === needle) score = 100;
+        else if (label.startsWith(needle) || needle.startsWith(label)) score = 70;
+        else if (label.includes(needle)) score = 50;
+        else if (needle.includes(label) && label.length > 3) score = 35;
+        else continue;
+
+        // Length agreement: "Search" matching "Search" beats "Search our
+        // 40,000 product catalogue by name, brand or code".
+        score -= Math.min(20, Math.abs(label.length - needle.length) / 4);
+
+        const tag = el.tagName.toLowerCase();
+        if (wantTag && tag === wantTag) score += 12;
+
+        // A step that fills something wants a field, and a step that clicks
+        // something usually does not.
+        const isField = tag === 'input' || tag === 'textarea' || tag === 'select';
+        if (fillish === isField) score += 10;
+
+        // Prefer what the reader can actually see, and what is nearest the
+        // middle of the viewport.
+        if (Page.isVisible(el)) {
+          score += 8;
+          const rect = el.getBoundingClientRect();
+          const distance =
+            Math.abs(rect.top + rect.height / 2 - window.innerHeight / 2) /
+            Math.max(1, window.innerHeight);
+          score += Math.max(0, 6 - distance * 6);
+        }
+
+        if (score > bestScore) {
+          bestScore = score;
+          best = el;
+        }
+      }
+
+      return best;
     }
   };
 
@@ -1585,6 +1909,9 @@
   const memoryCache = new Map();
   const MEMORY_CACHE_MAX = 120;
 
+  /** Requests currently in the air, keyed exactly as the cache is. */
+  const inFlightRequests = new Map();
+
   function cacheKeyFor(path, body) {
     let hash = 5381;
     const source = `${path}|${JSON.stringify(body ?? {})}`;
@@ -1669,6 +1996,17 @@
       const local = memoryCache.get(key);
       if (local && Date.now() < local.expiresAt) return local.value;
 
+      // Share a request that is already in the air.
+      //
+      // Two callers asking the same question at the same time is not
+      // hypothetical here: hovering a mind-map node starts fetching its
+      // explanation, and clicking it a moment later asks for the same one. On
+      // a metered free tier the duplicate is not merely slow, it is a second
+      // charge against a daily quota — and the second caller waits the full
+      // 20-40 seconds again for an answer that was already coming.
+      const flight = inFlightRequests.get(key);
+      if (flight) return flight;
+
       try {
         const stored = await chrome.storage.session?.get?.(key);
         const entry = stored?.[key];
@@ -1680,20 +2018,47 @@
         /* session storage unavailable — memory cache still works */
       }
 
-      const value = await API.post(path, body, options);
-      const entry = { value, expiresAt: Date.now() + ttlMs };
+      // A shared request must not be abortable by whoever happens to hold the
+      // first signal, so the caller's signal is deliberately not passed on
+      // when more than one party could be waiting on the result.
+      const request = API.post(path, body, options)
+        .then((value) => {
+          const entry = { value, expiresAt: Date.now() + ttlMs };
 
-      if (memoryCache.size >= MEMORY_CACHE_MAX) {
-        memoryCache.delete(memoryCache.keys().next().value);
-      }
-      memoryCache.set(key, entry);
+          if (memoryCache.size >= MEMORY_CACHE_MAX) {
+            memoryCache.delete(memoryCache.keys().next().value);
+          }
+          memoryCache.set(key, entry);
+          try {
+            chrome.storage.session?.set?.({ [key]: entry });
+          } catch (_) {
+            /* best effort */
+          }
+          return value;
+        })
+        .finally(() => {
+          inFlightRequests.delete(key);
+        });
+
+      inFlightRequests.set(key, request);
+      return request;
+    },
+
+    /**
+     * Fetch and cache without waiting for, or caring about, the result.
+     *
+     * Used to start work the moment we believe it is about to be needed — the
+     * explanation for the mind-map node the cursor is resting on. A failure
+     * here is deliberately silent: nothing has been asked for yet, so there is
+     * nothing to report, and the real request will surface any problem with a
+     * message the reader can act on.
+     */
+    prefetch(path, body, options = {}) {
       try {
-        chrome.storage.session?.set?.({ [key]: entry });
+        API.cached(path, body, options).catch(() => {});
       } catch (_) {
-        /* best effort */
+        /* never let a speculative call reach the caller */
       }
-
-      return value;
     },
 
     /** GET from the engine (health probes, voice lists). */
@@ -1851,7 +2216,7 @@
 
   window.SETU = {
     ready: true,
-    VERSION: '3.2.0',
+    VERSION: '3.3.0',
     DEFAULTS,
     LAYERS,
     icon,
@@ -1864,7 +2229,13 @@
     Text,
     API,
     Session,
+    Reading,
+    Bus,
+    LANGUAGES,
+    resolveLanguage,
+    languageLabel,
     deepQueryAll,
+    readableRoots,
     prefersReducedMotion,
     features: new Map()
   };

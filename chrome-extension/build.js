@@ -43,6 +43,47 @@ const EXCLUDE_EXT = new Set(['.zip', '.crx', '.pem', '.log', '.map']);
 const problems = [];
 const notes = [];
 
+/**
+ * Control characters that must never appear in source.
+ *
+ * This is not hypothetical tidiness. A `\b` word boundary in a regular
+ * expression was once written into this codebase as a literal backspace byte
+ * (0x08) by an editing pass that mis-escaped it. The file still parsed, the
+ * extension still loaded, and the regex silently matched nothing at all — so
+ * the Commander stopped recognising action requests and answered them with
+ * prose instead of doing them. Nothing but a byte-level check finds that: it is
+ * invisible in every editor, and valid JavaScript.
+ *
+ * Tab, newline and carriage return are the only C0 characters with any business
+ * being in a source file.
+ */
+const ALLOWED_CONTROL = new Set([0x09, 0x0a, 0x0d]);
+
+function verifyNoControlCharacters(files) {
+  for (const file of files) {
+    if (!/\.(js|json|html|css|md)$/i.test(file)) continue;
+
+    let buffer;
+    try {
+      buffer = fs.readFileSync(path.join(ROOT, file));
+    } catch (_) {
+      continue;
+    }
+
+    for (let i = 0; i < buffer.length; i += 1) {
+      const byte = buffer[i];
+      if (byte >= 0x20 || ALLOWED_CONTROL.has(byte)) continue;
+
+      const line = buffer.subarray(0, i).toString('utf8').split('\n').length;
+      problems.push(
+        `${file}:${line} contains a raw control character (0x${byte.toString(16).padStart(2, '0')}). ` +
+          'A mis-escaped sequence — most likely a regex escape written as a literal byte.'
+      );
+      break;
+    }
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 /* Verification                                                               */
 /* -------------------------------------------------------------------------- */
@@ -79,6 +120,18 @@ function manifestPaths(manifest) {
   for (const entry of manifest.content_scripts || []) {
     for (const file of entry.js || []) paths.push({ file });
     for (const file of entry.css || []) paths.push({ file });
+  }
+
+  // Web-accessible resources fail *silently*: a stale path here does not stop
+  // the extension loading, it just makes whatever needed that file quietly
+  // stop working on every site. Gaze Scroll's camera frame is exactly such a
+  // file, so a typo would look like a camera bug rather than a build one.
+  // Glob entries are skipped — only literal paths can be checked.
+  for (const entry of manifest.web_accessible_resources || []) {
+    for (const file of entry.resources || []) {
+      if (file.includes('*')) continue;
+      paths.push({ file });
+    }
   }
 
   return paths;
@@ -338,6 +391,7 @@ function main() {
   verifyStoreLimits(manifest);
   verifyReferences(manifest);
   verifyScripts(files);
+  verifyNoControlCharacters(files);
   verifyDefaults();
 
   if (problems.length) {

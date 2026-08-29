@@ -63,6 +63,10 @@ const sandbox = {
   requestAnimationFrame: (fn) => setTimeout(fn, 16),
   cancelAnimationFrame: clearTimeout,
   DOMException: globalThis.DOMException,
+  // Only the node-type constants are ever read from it in this file, and the
+  // stub elements below report no nodeType at all, so they take the element
+  // branch of every check.
+  Node: { TEXT_NODE: 3, ELEMENT_NODE: 1 },
   addEventListener(type, handler) {
     if (!documentListeners.has(type)) documentListeners.set(type, new Set());
     documentListeners.get(type).add(handler);
@@ -109,7 +113,8 @@ vm.runInContext(fs.readFileSync(path.join(EXT, 'shared', 'setu-core.js'), 'utf8'
   filename: 'setu-core.js'
 });
 
-const { Store, Feature, Text, Scroll, Dock } = sandbox.window.SETU;
+const { Store, Feature, Text, Scroll, Dock, LAYERS, LANGUAGES, resolveLanguage, languageLabel } =
+  sandbox.window.SETU;
 
 /* ---- tiny assertion harness --------------------------------------------- */
 
@@ -422,6 +427,146 @@ function testText() {
   check('escape handles apostrophes', Text.escape("it's") === 'it&#39;s');
 }
 
+/**
+ * The language table and its resolver.
+ *
+ * These carry the fix for the bug users described as "it only speaks one
+ * language". The list is shipped with the extension rather than fetched, so
+ * every picker stays complete when the engine is unreachable, and the resolver
+ * accepts all three shapes that reach it — because the codebase stores a
+ * Sarvam code in one setting and an English name in another.
+ */
+function testLanguages() {
+  console.log('\nLanguages');
+
+  // Ten Indian languages plus English — the set Sarvam Bulbul can voice.
+  check('the shipped table is not a stub', LANGUAGES.length === 11, `count=${LANGUAGES.length}`);
+  check('English is first, so it is the default', LANGUAGES[0].code === 'en-IN');
+  check(
+    'every entry carries a code, a name and a native name',
+    LANGUAGES.every((entry) => entry.code && entry.name && entry.native)
+  );
+  check(
+    'codes are unique',
+    new Set(LANGUAGES.map((entry) => entry.code)).size === LANGUAGES.length
+  );
+
+  check('resolves a full code', resolveLanguage('hi-IN').name === 'Hindi');
+  check('resolves a bare tag', resolveLanguage('ta').name === 'Tamil');
+  check('resolves an English name', resolveLanguage('Telugu').code === 'te-IN');
+  check('resolves a native name', resolveLanguage('বাংলা').code === 'bn-IN');
+  check('is case-insensitive', resolveLanguage('MARATHI').code === 'mr-IN');
+
+  // Anything unknown has to become English rather than reach Sarvam, which
+  // rejects a language code it does not publish.
+  check('an unknown language falls back to English', resolveLanguage('Klingon').code === 'en-IN');
+  check('empty falls back to English', resolveLanguage('').code === 'en-IN');
+  check('null falls back to English', resolveLanguage(null).code === 'en-IN');
+
+  check(
+    'the label leads with the native name',
+    languageLabel(resolveLanguage('hi-IN')) === 'हिन्दी — Hindi'
+  );
+  check('English is not doubled up', languageLabel(resolveLanguage('en-IN')) === 'English');
+}
+
+/**
+ * One chosen language, however it was stored.
+ *
+ * The two settings drifting apart produced the worst failure in the product:
+ * an explanation written in English and spoken by a Hindi voice. `Store.language`
+ * is the single reading of both, and `Store.setLanguage` the single write.
+ */
+async function testStoreLanguage() {
+  console.log('\nStore — language');
+
+  await Store.set({ settings: { ttsLanguage: 'ta-IN', language: 'English' } });
+  check(
+    'the voice code wins over a stale name',
+    Store.language().name === 'Tamil',
+    `got ${Store.language().name}`
+  );
+
+  const chosen = await Store.setLanguage('kn-IN');
+  check('setLanguage returns the resolved entry', chosen.name === 'Kannada');
+  check('setLanguage writes the voice code', Store.getSetting('ttsLanguage') === 'kn-IN');
+  check('setLanguage writes the matching name', Store.getSetting('language') === 'Kannada');
+  check('both halves now agree', Store.language().code === 'kn-IN');
+
+  // A name-only install from an older build must still resolve.
+  await Store.set({ settings: { ttsLanguage: '', language: 'Punjabi' } });
+  check('an older name-only setting still resolves', Store.language().code === 'pa-IN');
+
+  await Store.setLanguage('en-IN');
+}
+
+/**
+ * Reading aids have to render on top of the Focus Mode reader.
+ *
+ * This is the whole mechanism behind "I cannot use line focus or the ruler
+ * with Focus Mode". Both draw into fixed overlays, and the reader used to be
+ * the higher layer, so it covered them completely — the features were running
+ * correctly and were simply invisible. An ordering test is the cheapest way to
+ * stop that silently coming back.
+ */
+function testLayers() {
+  console.log('\nLayers');
+
+  check('the reader sits below the dimmers', LAYERS.reader < LAYERS.dim);
+  check('the reader sits below the reading overlays', LAYERS.reader < LAYERS.reading);
+  check('dimmers sit below the reading overlays', LAYERS.dim < LAYERS.reading);
+
+  // Panels and controls must stay above the dimmer, or Line Focus would grey
+  // out the very controls offered to turn it off.
+  check('panels clear the dimmer', LAYERS.panel > LAYERS.dim);
+  check('panels clear the reading overlays', LAYERS.panel > LAYERS.reading);
+  check('controls clear the panels', LAYERS.control > LAYERS.panel);
+  check('toasts are always on top', LAYERS.toast === Math.max(...Object.values(LAYERS)));
+
+  check(
+    'every layer is within the 32-bit z-index ceiling',
+    Object.values(LAYERS).every((z) => z <= 2147483647)
+  );
+}
+
+/**
+ * Content SETU is hosting is not SETU's own chrome.
+ *
+ * `Text.isOurs` is the gate every reading feature consults before touching a
+ * node. It has to say "not ours" for the article inside the Focus Mode reader
+ * — otherwise Bionic Reading, read-aloud and the ruler all skip it, which is
+ * exactly how those features came to look broken in Focus Mode — while still
+ * saying "ours" for the reader's own toolbar.
+ */
+function testReadableContent() {
+  console.log('\nText.isOurs');
+
+  // Minimal stand-ins: isOurs only ever calls closest() and getRootNode().
+  const el = (matches, root = null) => ({
+    closest: (selector) => (matches.includes(selector) ? {} : null),
+    getRootNode: () => root,
+    hasAttribute: () => false
+  });
+
+  const pageParagraph = el([], sandbox.document);
+  check('ordinary page content is not ours', Text.isOurs(pageParagraph) === false);
+
+  const ourPanel = el(['[data-setu]'], sandbox.document);
+  check('our own overlay is ours', Text.isOurs(ourPanel) === true);
+
+  // Inside the reader: matches both selectors, and the content marker wins.
+  const hostedArticle = el(['[data-setu-content]', '[data-setu]'], sandbox.document);
+  check('an article we are hosting is not ours', Text.isOurs(hostedArticle) === false);
+
+  // The reader's toolbar lives in the same shadow root but outside the
+  // article, so it is reached through the host chain instead.
+  const shadowRoot = { host: { hasAttribute: (name) => name === 'data-setu', getRootNode: () => sandbox.document } };
+  const readerToolbar = el([], shadowRoot);
+  check("the reader's own toolbar is still ours", Text.isOurs(readerToolbar) === true);
+
+  check('a null node is not ours', Text.isOurs(null) === false);
+}
+
 /* ---- run ----------------------------------------------------------------- */
 
 (async () => {
@@ -430,6 +575,10 @@ function testText() {
   testScroll();
   testDock();
   testText();
+  testLanguages();
+  await testStoreLanguage();
+  testLayers();
+  testReadableContent();
 
   console.log(`\n${passed} passed, ${failures.length} failed`);
   if (failures.length) {

@@ -54,6 +54,26 @@ const INTERACTIVE = { timeoutMs: 12000, maxRetries: 1, deadlineMs: 25000 };
  */
 const INTERACTIVE_MAP = { timeoutMs: 20000, maxRetries: 1, deadlineMs: 40000 };
 
+/**
+ * Planning, which is the heaviest structured generation in the product.
+ *
+ * A plan is up to six steps of seven fields each, plus six top-level fields,
+ * all under a strict response schema — several hundred tokens of JSON that has
+ * to be right first time. It was running on the INTERACTIVE budget, which is
+ * sized for a single paragraph of prose, while the *lighter* structure map got
+ * nearly twice as long. That was simply the wrong way round, and it showed:
+ * planning routinely burned its whole 25-second ceiling walking the model chain
+ * and fell back to the keyword planner, so the agent looked far less capable
+ * than it is.
+ *
+ * The budget below fits two unhurried attempts (20s + 20s) inside the ceiling
+ * with room to spare, rather than one and a half. The user is not left staring
+ * at nothing meanwhile: the panel narrates real stages, counts the seconds, and
+ * offers Cancel throughout, and the extension's own request timeout is far
+ * longer than this.
+ */
+const PLANNING = { timeoutMs: 20000, maxRetries: 1, deadlineMs: 48000 };
+
 /** Vision is slower again: a whole image has to be read before a token is written. */
 const INTERACTIVE_VISION = { timeoutMs: 25000, deadlineMs: 45000 };
 
@@ -208,7 +228,7 @@ ${(pageContext.text || '').slice(0, 2500) || '(no text captured)'}`;
     instructions: AGENT_SYSTEM,
     input: `USER GOAL: "${task}"\n\n${snapshot}`,
     temperature: 0.3,
-    ...INTERACTIVE
+    ...PLANNING
   });
 
   const steps = markConfirmations(pruneUnresolvableSteps(plan.steps || [], controls), controls);

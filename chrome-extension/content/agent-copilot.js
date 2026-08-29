@@ -50,7 +50,66 @@
   const QUESTION_INTENT =
     /^(summari[sz]e|explain|what|why|how|who|when|where|tell me|describe|is |are |does |do |can )/i;
 
+  /**
+   * Verbs that mean "operate the page", which outrank the question test.
+   *
+   * The question test alone was too eager. "How do I log in?", "Where is the
+   * submit button?" and "Can you fill this form?" all start with a question
+   * word, so all three were answered with a paragraph about the page instead
+   * of a plan that pointed at the control — which is the single most common
+   * way the agent appeared not to do what it was asked. A goal that names an
+   * action on the page is a task, however it is phrased.
+   */
+  const ACTION_INTENT =
+    /\b(click|press|tap|open|go to|navigate|take me|fill|enter|type|select|choose|search for|log ?in|sign ?in|sign ?up|register|submit|apply|book|buy|checkout|add to cart|download|upload|subscribe|unsubscribe|find the|show me the|take me to|scroll to|switch to|change the|set the|update the|complete the)\b/i;
+
+  /**
+   * True when the goal wants an answer rather than an action.
+   *
+   * Both tests are consulted, and the action test wins ties, because acting on
+   * a request that only wanted an explanation is recoverable — the reader
+   * reads the plan and ignores it — while explaining a request that wanted an
+   * action leaves them exactly where they started.
+   */
+  function wantsAnswer(goal) {
+    if (ACTION_INTENT.test(goal)) return false;
+    return QUESTION_INTENT.test(goal);
+  }
+
   const MAX_AUTORUN_STEPS = 24;
+
+  /**
+   * Set a form value in a way component frameworks actually notice.
+   *
+   * React — and Vue, and everything else that mirrors the trick — interposes
+   * its own `value` accessor so it can track writes. Assigning `el.value = x`
+   * goes through that accessor: the pixels update, the framework records the
+   * new value as one it already knew about, and the subsequent `input` event
+   * is therefore treated as a no-op. A later re-render wipes the field back
+   * out and any submit sends the old value. The agent was filling fields that
+   * looked filled and were not, across a very large share of the modern web.
+   *
+   * The fix is to reach the *native* accessor underneath and then dispatch
+   * `input`, so the framework sees a change it did not make and adopts it.
+   *
+   * Finding that accessor is the fiddly part. Taking the element's immediate
+   * prototype is not enough — that can be the interposed one. Walking to the
+   * deepest prototype that still defines `value` lands on the DOM's own
+   * accessor in every arrangement, and unlike an `instanceof` check it also
+   * works for elements belonging to another document, which happens whenever
+   * we reach into a same-origin frame.
+   */
+  function setNativeValue(el, value) {
+    let descriptor = null;
+
+    for (let proto = Object.getPrototypeOf(el); proto; proto = Object.getPrototypeOf(proto)) {
+      const found = Object.getOwnPropertyDescriptor(proto, 'value');
+      if (found?.set) descriptor = found;
+    }
+
+    if (descriptor) descriptor.set.call(el, value);
+    else el.value = value;
+  }
 
   /** Panel geometry. Spacious design tailored for cognitive accessibility and legible reading. */
   const MIN_WIDTH = 440;
@@ -325,7 +384,7 @@
       this.busy = true;
       this.controller = new AbortController();
 
-      const asking = QUESTION_INTENT.test(goal);
+      const asking = wantsAnswer(goal);
       this.startStages(
         asking
           ? ['Reading this page', 'Asking the engine', 'Writing it plainly']
@@ -672,7 +731,10 @@
       try {
         switch (step.actionType) {
           case 'scroll':
-            window.scrollBy({ top: window.innerHeight * 0.75, behavior: 'smooth' });
+            // Through the arbiter: inside Focus Mode the document is not the
+            // thing that scrolls, so `window.scrollBy` moved nothing and the
+            // step silently did nothing at all.
+            Scroll.by(window.innerHeight * 0.75);
             break;
 
           case 'wait':
@@ -680,7 +742,7 @@
             break;
 
           case 'read':
-            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            Scroll.into(target, { block: 'center' });
             this.flash(target);
             break;
 
@@ -693,7 +755,7 @@
           case 'submit':
           case 'navigate':
           default:
-            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            Scroll.into(target, { block: 'center' });
             await new Promise((resolve) => setTimeout(resolve, 320));
             // A click can navigate away and tear down this whole context, so
             // the resume point is written *before* the click — and it points at
@@ -723,16 +785,27 @@
         const wanted = String(step.valueToFill || '').toLowerCase();
         const option =
           [...target.options].find((o) => o.value.toLowerCase() === wanted) ||
+          [...target.options].find((o) => o.text.toLowerCase() === wanted) ||
           [...target.options].find((o) => o.text.toLowerCase().includes(wanted));
         if (!option) throw new Error(`no option matching "${step.valueToFill}"`);
-        target.value = option.value;
+        setNativeValue(target, option.value);
       } else if (target.type === 'checkbox' || target.type === 'radio') {
-        target.checked = step.valueToFill !== 'false';
+        const wanted = step.valueToFill !== 'false';
+        // Click rather than assign. A checkbox in any component framework is
+        // driven by its change handler, and assigning `.checked` updates the
+        // pixel without telling the application anything — so the box appeared
+        // ticked, the form did not agree, and submitting failed validation for
+        // a reason nobody could see.
+        if (target.checked !== wanted) {
+          target.click();
+        }
+        this.flash(target);
+        return;
       } else {
         // Without a supplied value we hand control back rather than inventing
         // personal data — this is someone's real form.
         if (!step.valueToFill) {
-          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          Scroll.into(target, { block: 'center' });
           this.flash(target);
           this.say(
             'agent',
@@ -742,13 +815,37 @@
           this.renderPlan({ awaitingInput: true });
           throw new Error('needs-user-input');
         }
-        target.value = step.valueToFill;
+        setNativeValue(target, step.valueToFill);
       }
 
-      // Fire the events frameworks listen for, so React/Vue see the change.
+      // Fire the events frameworks listen for, so React/Vue see the change,
+      // then blur so validation that runs on leaving the field also runs.
       target.dispatchEvent(new Event('input', { bubbles: true }));
       target.dispatchEvent(new Event('change', { bubbles: true }));
+      target.dispatchEvent(new FocusEvent('blur', { bubbles: false }));
       this.flash(target);
+
+      // Report what the field actually holds now. A silent no-op was the worst
+      // outcome available here: the plan advanced, the agent said it had filled
+      // the field, and the form was still empty.
+      //
+      // Only free-text fields are checked. A <select> stores an option's value
+      // while the step names its visible text, and a date or number input
+      // normalises what it is given — comparing either against the requested
+      // string would report a failure that did not happen.
+      const freeText =
+        target.tagName === 'TEXTAREA' ||
+        (target.tagName === 'INPUT' && /^(text|search|email|url|tel|password|)$/i.test(target.type));
+
+      if (freeText && String(target.value).trim() !== String(step.valueToFill).trim()) {
+        this.say(
+          'agent',
+          `I could not set "${step.targetText || 'that field'}" — the page did not accept the value. Please type it yourself, then press "Do this step".`
+        );
+        this.stopAutoRun();
+        this.renderPlan({ awaitingInput: true });
+        throw new Error('needs-user-input');
+      }
     }
 
     advance() {
@@ -863,7 +960,10 @@
       }
 
       const recognition = new Recognition();
-      recognition.lang = navigator.language || 'en-US';
+      // Dictate in the language SETU is working in, not the browser's UI
+      // locale. A reader who has chosen Tamil is very likely to speak Tamil,
+      // and recognising it as English produced unusable transcripts.
+      recognition.lang = Store.language().code || navigator.language || 'en-US';
       recognition.interimResults = true;
       recognition.continuous = false;
 
@@ -1202,7 +1302,7 @@
               <span class="pulse" aria-hidden="true"></span>
               <div class="id-text">
                 <strong>SETU Copilot</strong>
-                <small>AI Cognitive Companion · Connected</small>
+                <small data-role="engine-state">AI Cognitive Companion</small>
               </div>
             </div>
             <div class="head-acts">
@@ -1246,7 +1346,10 @@
       scope.querySelector('[data-act="send"]').onclick = send;
       scope.querySelector('[data-act="mic"]').onclick = () => this.toggleVoice();
       scope.querySelector('[data-act="minimise"]').onclick = () => this.setMinimised(!this.minimised);
-      scope.querySelector('[data-act="close"]').onclick = () => window.setu?.toggle('commander', false) || window.setuLens?.toggle('commander', false);
+      // `toggle` returns a promise, so the old `a || b` form always took the
+      // first branch and never actually had a fallback. One canonical handle.
+      const close = () => window.setuLens?.toggle('commander', false);
+      scope.querySelector('[data-act="close"]').onclick = close;
 
       input.onkeydown = (event) => {
         if (event.key === 'Enter') {
@@ -1258,7 +1361,7 @@
       this.listen(scope, 'keydown', (event) => {
         if (event.key === 'Escape') {
           event.stopPropagation();
-          window.setu?.toggle('commander', false) || window.setuLens?.toggle('commander', false);
+          close();
         }
       });
 
@@ -1276,6 +1379,39 @@
       Dock.observe(this.dock);
 
       this.say('agent', "Tell me what you'd like to do on this page and I'll guide or navigate you step by step.");
+
+      this.reportEngineState();
+    }
+
+    /**
+     * Say whether the engine is actually reachable.
+     *
+     * The header used to read "Connected" unconditionally, which was simply
+     * untrue whenever the engine was asleep or unconfigured — and it made
+     * every subsequent failure look inexplicable rather than expected. The
+     * probe is cheap and doubles as the wake-up nudge.
+     */
+    async reportEngineState() {
+      const label = this.scope?.querySelector('[data-role="engine-state"]');
+      if (!label) return;
+
+      label.textContent = 'AI Cognitive Companion · checking…';
+
+      try {
+        const health = await API.get('/api/health', {
+          timeoutMs: window.SETU.DEFAULTS.healthTimeoutMs
+        });
+        if (!this.scope?.isConnected) return;
+
+        label.textContent = health?.aiConfigured
+          ? 'AI Cognitive Companion · Connected'
+          : 'AI Cognitive Companion · engine up, no AI key';
+      } catch (_) {
+        if (!this.scope?.isConnected) return;
+        // Not an error state to shout about: the local plan still works, and
+        // the engine may simply be waking up.
+        label.textContent = 'AI Cognitive Companion · engine offline';
+      }
     }
 
     /**

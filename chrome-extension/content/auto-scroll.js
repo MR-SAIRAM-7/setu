@@ -22,6 +22,13 @@
 
     onEnable() {
       this.wpm = Store.getSetting('scrollWpm') || 220;
+      // Reset the run state explicitly. The constructor only runs once per
+      // page, so a session that ended by reaching the bottom of an article
+      // left `running` false — and the next time Auto Scroll was switched on
+      // it mounted its bar, said it was on, and never moved a pixel.
+      this.running = true;
+      this.remainder = 0;
+      Scroll.reset();
       this.build();
       this.bind();
       this.lastFrame = performance.now();
@@ -51,8 +58,18 @@
      * Assumes ~11 words per rendered line, so px/sec = (wpm/60) / 11 * lineHeight.
      */
     pixelsPerSecond() {
-      const lineHeight = parseFloat(getComputedStyle(document.body).lineHeight) || 24;
-      const safeLineHeight = Number.isFinite(lineHeight) ? lineHeight : 24;
+      // Measure the surface that is actually scrolling. Inside Focus Mode the
+      // reader sets its own generous line height, and pacing against the
+      // hidden page body underneath made the same words-per-minute setting
+      // scroll visibly too slowly there.
+      const surface = Scroll.surface() || document.body;
+      let lineHeight = NaN;
+      try {
+        lineHeight = parseFloat(getComputedStyle(surface).lineHeight);
+      } catch (_) {
+        /* detached element */
+      }
+      const safeLineHeight = Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : 24;
       return (this.wpm / 60 / 11) * safeLineHeight;
     }
 
@@ -94,8 +111,20 @@
       });
 
       // Any manual scroll input pauses, so the user is never fighting the page.
-      this.listen(window, 'wheel', () => this.pauseBriefly(), { passive: true });
-      this.listen(window, 'touchstart', () => this.pauseBriefly(), { passive: true });
+      this.listen(window, 'wheel', () => this.pauseBriefly(), { passive: true, capture: true });
+      this.listen(window, 'touchstart', () => this.pauseBriefly(), { passive: true, capture: true });
+
+      // Scrolling a page nobody is looking at is never wanted, and a
+      // background tab still runs its rAF loop on some platforms — so an
+      // article would silently scroll to its end while the user was in
+      // another tab.
+      this.listen(document, 'visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          this.lastFrame = performance.now();
+        } else if (this.running) {
+          this.pauseBriefly();
+        }
+      });
     }
 
     pauseBriefly() {

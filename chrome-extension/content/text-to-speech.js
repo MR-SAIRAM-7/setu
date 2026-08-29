@@ -1,9 +1,17 @@
 /**
- * Read Aloud — natural-voice reading with a spoken-word highlight.
+ * Explain This — a spoken explanation in the reader's own language.
+ *
+ * Renamed from "Read Aloud" in 3.3, because reading was never the point. For
+ * a reader whose difficulty is *understanding* a passage, hearing the same
+ * words back in the same language is no accommodation at all. The default is
+ * now to explain the selection — or, when nothing is selected, what the page
+ * is about — in plain Grade-6 language, in whichever of the eleven supported
+ * languages the reader has chosen, and then speak that explanation. Verbatim
+ * reading is still one click away for people who want it.
  *
  * Two engines behind one interface:
  *
- *  1. Sarvam Bulbul, through the SETU engine. A real human voice in eleven
+ *  1. Sarvam Bulbul, through the SETU engine. A real human voice in ten
  *     Indian languages plus English. For a reader whose difficulty is decoding
  *     text rather than understanding it, this is the whole accommodation — a
  *     robotic voice reading English at someone who thinks in Tamil is not.
@@ -24,7 +32,8 @@
  */
 
 (() => {
-  const { Feature, UI, Store, Text, API, Scroll, Dock, icon } = window.SETU;
+  const { Feature, UI, Store, Text, API, Scroll, Dock, Reading, LANGUAGES, resolveLanguage, languageLabel, icon } =
+    window.SETU;
 
   /**
    * Clip sizing.
@@ -112,7 +121,19 @@
     /** null = not yet probed. */
     available: null,
     catalogue: [],
-    languages: [],
+
+    /**
+     * Seeded from the table shipped with the extension, never left empty.
+     *
+     * This list used to start empty and be filled only from
+     * `/api/speech/voices`. So whenever the engine was asleep, offline, or had
+     * no Sarvam key, every language picker in the product collapsed to a
+     * single "English" option — and a reader who wanted an explanation in
+     * Hindi was told, by the UI itself, that SETU does not do that. The
+     * language of an *explanation* is decided by the model, not the voice
+     * service, so it must not depend on the voice service answering.
+     */
+    languages: LANGUAGES.slice(),
     defaultSpeaker: '',
     maxCharacters: MAX_CLIP_CHARS,
     probing: null,
@@ -138,11 +159,18 @@
           const data = await API.get('/api/speech/voices', { timeoutMs: 8000 });
           Voice.available = Boolean(data?.enabled);
           Voice.catalogue = Array.isArray(data?.voices) ? data.voices : [];
-          Voice.languages = Array.isArray(data?.languages) ? data.languages : [];
+          // Prefer the engine's list when it has one — it is authoritative
+          // about what the configured Sarvam model can actually speak — but
+          // never replace a working list with an empty one.
+          if (Array.isArray(data?.languages) && data.languages.length) {
+            Voice.languages = data.languages;
+          }
           Voice.defaultSpeaker = data?.defaultSpeaker || '';
           Voice.maxCharacters = Number(data?.maxCharacters) || MAX_CLIP_CHARS;
           return Voice.available;
         } catch (_) {
+          // Unreachable engine: browser speech still works, and every language
+          // stays selectable because the shipped table is still standing.
           Voice.available = false;
           return false;
         } finally {
@@ -182,7 +210,7 @@
     settings() {
       return {
         speaker: Store.getSetting('ttsSpeaker') || Voice.defaultSpeaker || undefined,
-        language: Store.getSetting('ttsLanguage') || 'en-IN',
+        language: Store.language().code,
         pace: Math.max(0.5, Math.min(2, Store.getSetting('ttsRate') || 1))
       };
     },
@@ -344,7 +372,7 @@
           return resolve();
         }
 
-        const language = Store.getSetting('ttsLanguage') || 'en-IN';
+        const language = Store.language().code;
         const preferred = Store.getSetting('ttsVoice');
         const voices = synth.getVoices();
 
@@ -364,16 +392,26 @@
           utterance.pitch = Store.getSetting('ttsPitch') || 1;
           utterance.lang = language;
 
-          const short = language.split('-')[0];
+          // Match on the language subtag rather than the full code: a system
+          // may ship `hi-IN`, `hi`, or `hi_IN`, and requiring an exact match
+          // silently dropped every Indian-language voice the machine had.
+          const short = language.split('-')[0].toLowerCase();
+          const speaks = (voice) => voice.lang?.toLowerCase().replace('_', '-').startsWith(short);
+
           const match =
-            voices.find((v) => v.name === preferred) ||
-            voices.find((v) => v.lang?.toLowerCase().startsWith(short) && v.localService) ||
-            voices.find((v) => v.lang?.toLowerCase().startsWith(short)) ||
-            voices.find((v) => /Natural|Google/i.test(v.name)) ||
-            voices[0];
+            voices.find((v) => v.name === preferred && speaks(v)) ||
+            voices.find((v) => speaks(v) && v.localService) ||
+            voices.find((v) => speaks(v)) ||
+            null;
+
           if (match) {
             utterance.voice = match;
             utterance.lang = match.lang;
+          } else if (voices.length && short !== 'en') {
+            // Reading Devanagari with an English voice produces sounds, not
+            // words. Say so once, rather than letting the reader conclude the
+            // language setting does nothing.
+            Voice._warnMissingVoice(language);
           }
 
           utterance.onboundary = (event) => {
@@ -461,8 +499,42 @@
     /** Voice settings changed — cached clips were synthesised with the old ones. */
     invalidate() {
       Voice._clips.clear();
+    },
+
+    _warnedLanguages: new Set(),
+
+    /**
+     * Tell the reader once per language that the *voice* is missing, while
+     * being clear that the explanation itself is still in their language.
+     */
+    _warnMissingVoice(code) {
+      if (Voice._warnedLanguages.has(code)) return;
+      Voice._warnedLanguages.add(code);
+
+      const language = resolveLanguage(code);
+      UI.toast(
+        `This browser has no ${language.name} voice installed, so it will be read in the default voice. The text is still ${language.name}. Connect the SETU engine for a natural ${language.name} voice.`,
+        { tone: 'warn', duration: 7000 }
+      );
     }
   };
+
+  /**
+   * Index just past the last complete sentence in `text`, or -1.
+   *
+   * Danda (।) and double danda (॥) terminate a sentence in Devanagari,
+   * Bengali, Gujarati, Punjabi and Odia; Latin punctuation terminates the
+   * rest. Both are checked equally rather than one being the fallback.
+   */
+  function lastSentenceEnd(text) {
+    for (let i = text.length - 1; i >= 0; i -= 1) {
+      if (!/[.!?।॥]/.test(text[i])) continue;
+      // A terminator only ends a sentence when something follows it; otherwise
+      // the model may still be mid-token (an abbreviation, a decimal).
+      if (i + 1 < text.length && /\s/.test(text[i + 1])) return i + 1;
+    }
+    return -1;
+  }
 
   function base64ToBytes(base64) {
     const cleaned = String(base64).replace(/^data:[^;]+;base64,/, '');
@@ -475,7 +547,7 @@
   window.addEventListener('pagehide', () => Voice.stop());
 
   /* ---------------------------------------------------------------------- */
-  /* The Read Aloud feature                                                 */
+  /* The Explain This feature                                               */
   /* ---------------------------------------------------------------------- */
 
   class TextToSpeech extends Feature {
@@ -497,6 +569,8 @@
       API.warm();
       Voice.probe().then(() => this.populateVoices());
 
+      this.trackSelection();
+
       this.cleanup(
         Voice.subscribe((event) => {
           if (event.type === 'end' || event.type === 'stop') {
@@ -509,12 +583,18 @@
         })
       );
 
-      UI.toast('Read Aloud ready — press play, or select text first', { tone: 'success' });
+      UI.toast(
+        this.explaining()
+          ? `Explain This ready — press play for a ${Store.language().native} explanation`
+          : 'Read aloud ready — press play, or select text first',
+        { tone: 'success', duration: 3600 }
+      );
     }
 
     onDisable() {
       this.explainController?.abort();
       this.explainController = null;
+      this.clearSource();
       Voice.stop();
       this.releaseDock?.();
       this.releaseDock = null;
@@ -522,6 +602,62 @@
       UI.destroyHost('tts-mark');
       this.scope = null;
       this.mark = null;
+      this.markScope = null;
+      this.sourceLayer = null;
+    }
+
+    /**
+     * Hold on to the passage the reader highlighted.
+     *
+     * Reading it at the moment they press play is too late: clicking anywhere,
+     * including on our own play button, collapses the document selection
+     * first. So "explain this paragraph" would silently become "explain the
+     * whole page" — and, worse, there would be nothing left to draw a
+     * highlight around.
+     */
+    trackSelection() {
+      this.captureSelection();
+
+      this.listen(document, 'selectionchange', () => {
+        const selection = document.getSelection();
+        const anchor = selection?.anchorNode;
+        // Our own panel's text is not page content.
+        if (anchor && Text.isOurs(anchor)) return;
+        this.captureSelection();
+      });
+    }
+
+    captureSelection() {
+      const selection = document.getSelection();
+      if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+
+      const text = String(selection).trim();
+      if (text.length < 2) return;
+
+      try {
+        this.selectedRange = selection.getRangeAt(0).cloneRange();
+        this.selectedText = text;
+      } catch (_) {
+        /* a detached or cross-root selection — keep whatever we had */
+      }
+    }
+
+    /** The passage to work from, with the live Range that located it. */
+    heldSelection() {
+      const live = Text.selection();
+      if (live) {
+        // A fresh selection always wins over a remembered one.
+        this.captureSelection();
+        return { text: live, range: this.selectedRange };
+      }
+      if (this.selectedRange && this.selectedText) {
+        // Only usable while the nodes it points at are still in the document.
+        const container = this.selectedRange.commonAncestorContainer;
+        if (container?.isConnected) {
+          return { text: this.selectedText, range: this.selectedRange };
+        }
+      }
+      return { text: '', range: null };
     }
 
     onSettings() {
@@ -574,6 +710,16 @@
         }
         .toggle[aria-pressed="true"] { background:var(--accent-100); border-color:var(--accent); color:var(--accent-900); }
         .toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+        .modes { display:inline-flex; gap:4px; padding:3px; border:1px solid var(--border); border-radius:999px; }
+        .modes button {
+          display:inline-flex; align-items:center; gap:6px;
+          border:none; border-radius:999px; padding:5px 13px;
+          background:transparent; color:var(--text-dim); cursor:pointer;
+          font-family:var(--font); font-size:12.5px; font-weight:700;
+          transition: background .15s ease, color .15s ease;
+        }
+        .modes button[aria-checked="true"] { background:var(--accent); color:var(--on-accent); }
+        .modes button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
         .engine { font-size:11px; color:var(--text-dim); }
         .engine b { color: var(--accent-700); font-weight: 700; }
         .progress { height:3px; background:var(--border); border-radius:2px; overflow:hidden; }
@@ -584,7 +730,7 @@
       const scope = document.createElement('div');
       scope.className = 'setu-scope';
       scope.innerHTML = `
-        <div class="bar" role="group" aria-label="Read aloud controls">
+        <div class="bar" role="group" aria-label="Explain This controls">
           <div class="row">
             <button class="icon" data-primary data-act="play" aria-label="Play" title="Play / Pause">${icon('play')}</button>
             <button class="icon" data-act="stop" aria-label="Stop" title="Stop">${icon('stop')}</button>
@@ -595,13 +741,19 @@
             <div class="sep"></div>
             <select data-act="voice" aria-label="Voice"></select>
             <select data-act="language" aria-label="Language"></select>
-            <button class="icon" data-act="close" aria-label="Close read aloud" title="Close">${icon('x')}</button>
+            <button class="icon" data-act="close" aria-label="Close Explain This" title="Close">${icon('x')}</button>
           </div>
           <div class="row">
-            <button class="toggle" data-act="explain" aria-pressed="false"
-                    title="Explain the selection in your language, then read the explanation">
-              ${icon('book-open', { size: 14 })}Explain, don't just read
-            </button>
+            <div class="modes" role="radiogroup" aria-label="What should I say?">
+              <button data-act="mode" data-mode="explain" role="radio" aria-checked="true"
+                      title="Explain what this is about, in your language, then say it">
+                ${icon('book-open', { size: 14 })}Explain this
+              </button>
+              <button data-act="mode" data-mode="read" role="radio" aria-checked="false"
+                      title="Say the words exactly as they are written">
+                ${icon('speaker-high', { size: 14 })}Read it out
+              </button>
+            </div>
             <span class="engine" data-role="engine"></span>
           </div>
           <div class="progress"><div class="progress-fill"></div></div>
@@ -620,10 +772,15 @@
       on('slower', () => this.changeRate(-0.1));
       on('faster', () => this.changeRate(0.1));
       on('close', () => window.setuLens?.toggle('tts', false));
-      on('explain', (event) => {
-        const next = event.currentTarget.getAttribute('aria-pressed') !== 'true';
-        event.currentTarget.setAttribute('aria-pressed', String(next));
-        Store.set({ settings: { ttsExplain: next } });
+      scope.querySelectorAll('[data-act="mode"]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const explain = button.dataset.mode === 'explain';
+          Store.set({ settings: { ttsExplain: explain } });
+          this.paintMode(explain);
+          // Switching mode mid-sentence should take effect now, not after the
+          // current passage finishes.
+          if (this.speaking) this.stop();
+        });
       });
 
       scope.querySelector('[data-act="voice"]').addEventListener('change', (event) => {
@@ -632,15 +789,31 @@
         if (this.speaking) this.restart();
       });
 
-      scope.querySelector('[data-act="language"]').addEventListener('change', (event) => {
-        Store.set({ settings: { ttsLanguage: event.target.value } });
+      scope.querySelector('[data-act="language"]').addEventListener('change', async (event) => {
+        // Sets both the voice code and the AI language name together. Setting
+        // only one of them is what produced explanations written in English
+        // and spoken by a Hindi voice.
+        const language = await Store.setLanguage(event.target.value);
         Voice.invalidate();
+        UI.toast(`SETU will explain in ${language.native}`, { tone: 'success' });
         if (this.speaking) this.restart();
       });
 
       this.populateVoices();
       this.paintRate();
       this.paintTransport();
+      this.paintMode(this.explaining());
+    }
+
+    /** True when the panel is in "explain" rather than "read verbatim" mode. */
+    explaining() {
+      return Store.getSetting('ttsExplain') !== false;
+    }
+
+    paintMode(explain) {
+      this.scope?.querySelectorAll('[data-act="mode"]').forEach((button) => {
+        button.setAttribute('aria-checked', String((button.dataset.mode === 'explain') === explain));
+      });
     }
 
     /**
@@ -657,7 +830,7 @@
       if (!voiceSelect || !languageSelect) return;
 
       const chosenVoice = Store.getSetting('ttsSpeaker') || Store.getSetting('ttsVoice') || '';
-      const chosenLanguage = Store.getSetting('ttsLanguage') || 'en-IN';
+      const chosenLanguage = Store.language().code;
 
       if (Voice.available === null) {
         voiceSelect.innerHTML = '<option value="">Finding voices…</option>';
@@ -685,16 +858,16 @@
           : '<option value="">Default voice</option>';
       }
 
-      const languages = Voice.languages.length
-        ? Voice.languages
-        : [{ code: 'en-IN', name: 'English', native: 'English' }];
+      // Never narrows to English: `Voice.languages` is seeded from the table
+      // shipped with the extension and only ever replaced by a non-empty one.
+      const languages = Voice.languages.length ? Voice.languages : LANGUAGES;
 
       languageSelect.innerHTML = languages
         .map(
           (language) =>
             `<option value="${Text.escape(language.code)}"${
               language.code === chosenLanguage ? ' selected' : ''
-            }>${Text.escape(language.native || language.name)}</option>`
+            }>${Text.escape(languageLabel(language))}</option>`
         )
         .join('');
 
@@ -707,11 +880,7 @@
               : "natural voice unavailable — using this browser's voice";
       }
 
-      const explainToggle = this.scope?.querySelector('[data-act="explain"]');
-      if (explainToggle) {
-        explainToggle.setAttribute('aria-pressed', String(Boolean(Store.getSetting('ttsExplain'))));
-      }
-
+      this.paintMode(this.explaining());
       Dock.layout();
     }
 
@@ -719,7 +888,8 @@
       const voiceSelect = this.scope?.querySelector('[data-act="voice"]');
       const languageSelect = this.scope?.querySelector('[data-act="language"]');
       if (voiceSelect) voiceSelect.value = Store.getSetting('ttsSpeaker') || voiceSelect.value;
-      if (languageSelect) languageSelect.value = Store.getSetting('ttsLanguage') || languageSelect.value;
+      if (languageSelect) languageSelect.value = Store.language().code;
+      this.paintMode(this.explaining());
     }
 
     paintRate() {
@@ -782,17 +952,25 @@
         return;
       }
 
-      const selected = Text.selection();
+      const { text: selected, range } = this.heldSelection();
 
-      if (Store.getSetting('ttsExplain')) {
-        if (!selected) {
-          UI.toast('Select some text first — that is what I will explain.', {
+      if (this.explaining()) {
+        // No selection is not an error. "Explain this" with nothing selected
+        // has an obvious meaning — explain what this page is about — and
+        // refusing to act until the reader highlights something made the
+        // feature feel broken on exactly the pages where a wall of text is
+        // the problem.
+        const source = selected || Text.pageText(6000);
+
+        if (!source) {
+          UI.toast("There isn't enough readable text here for me to explain.", {
             tone: 'warn',
             duration: 3600
           });
           return;
         }
-        await this.speakExplanation(selected);
+
+        await this.speakExplanation(source, { whole: !selected, range });
         return;
       }
 
@@ -835,22 +1013,44 @@
      * difference between hearing the first sentence in about two seconds and
      * hearing nothing for forty.
      */
-    async speakExplanation(selection) {
+    async speakExplanation(source, { whole = false, range = null } = {}) {
       this.explainController?.abort();
       this.explainController = new AbortController();
       const controller = this.explainController;
 
-      const languageCode = Store.getSetting('ttsLanguage') || 'en-IN';
-      const languageName =
-        Voice.languages.find((entry) => entry.code === languageCode)?.name ||
-        Store.getSetting('language') ||
-        'English';
+      // One resolved language for both halves. Deriving the name from the
+      // voice catalogue meant that whenever the engine was unreachable the
+      // catalogue was empty, the name fell back to English, and the reader got
+      // an English explanation no matter which language they had picked —
+      // the "it only speaks one language" bug.
+      const language = Store.language();
 
-      UI.toast(`Explaining in ${languageName}…`, { tone: 'success', duration: 3000 });
+      // A caller may hand us the text without the Range that located it — the
+      // right-click menu does exactly that. The document selection is still
+      // live at that moment, so recovering it here means the highlight works
+      // from the context menu too.
+      const passage = range || (whole ? null : this.heldSelection().range);
+
+      UI.toast(
+        whole
+          ? `Explaining this page in ${language.native}…`
+          : `Explaining your selection in ${language.native}…`,
+        { tone: 'success', duration: 3000 }
+      );
 
       this.speaking = true;
       this.paintTransport();
       this.segments = [];
+      this.hideMark();
+
+      // Show what is being explained. A highlighted passage marks itself
+      // exactly; a whole-page explanation outlines the article it read, so the
+      // scope is at least visible even though no single passage owns it.
+      this.showSource(
+        passage
+          ? { range: passage, label: `Explaining this in ${language.native}` }
+          : { element: this.articleElement(), label: `Explaining this page in ${language.native}` }
+      );
 
       // Producer: sentences arrive from the engine. Consumer: the voice speaks
       // each one as soon as it is whole.
@@ -860,43 +1060,67 @@
 
       const push = (sentence) => {
         queue.push(sentence);
+
+        // Start synthesising it now rather than when the voice reaches it.
+        // Clips are memoised by exactly the key the player will look up, so
+        // this turns the wait for sentence two from "generate, then play" into
+        // "already generated". On a natural voice that is several seconds a
+        // sentence, and it is the difference between an explanation that flows
+        // and one that stops between every full stop.
+        if (Voice.available === true) {
+          Voice.clip(sentence).catch(() => {
+            /* the player will surface any real failure */
+          });
+        }
+
         wake?.();
       };
+
+      /** How much of the streamed answer has already been handed to the voice. */
+      let consumed = 0;
 
       const producer = API.stream(
         '/api/agent/explain/stream',
         {
-          text: selection,
-          language: languageName,
+          // Told what it is looking at, so a whole page comes back as "this
+          // page is about…" rather than a summary of a stray paragraph.
+          text: whole
+            ? `Explain what this page is about, and the two or three things worth taking away from it.
+
+---
+PAGE: ${document.title}
+
+${source}`
+            : source,
+          language: language.name,
           style: 'spoken'
         },
         {
           signal: controller.signal,
-          onChunk: (_chunk, whole) => {
+          onChunk: (_chunk, accumulated) => {
             // Emit complete sentences only; half a sentence read aloud is
             // worse than a beat of silence.
-            let pending = whole.slice(producer.consumed || 0);
-            producer.consumed = producer.consumed || 0;
+            const pending = accumulated.slice(consumed);
 
-            const boundary = pending.lastIndexOf('. ') >= 0
-              ? pending.lastIndexOf('. ') + 1
-              : Math.max(pending.lastIndexOf('। '), pending.lastIndexOf('? '), pending.lastIndexOf('! '));
+            // The last terminator of *any* script wins. Preferring '. ' meant
+            // a Hindi explanation — which ends every sentence with '।' and may
+            // never contain a full stop at all — was held back until the whole
+            // answer had arrived, losing the entire point of streaming.
+            const boundary = lastSentenceEnd(pending);
 
             if (boundary > 40) {
-              push(pending.slice(0, boundary + 1).trim());
-              producer.consumed += boundary + 1;
+              push(pending.slice(0, boundary).trim());
+              consumed += boundary;
             }
           }
         }
       );
 
-      producer.consumed = 0;
-
       let full = '';
       producer
         .then((text) => {
           full = text;
-          const tail = text.slice(producer.consumed).trim();
+          const tail = text.slice(consumed).trim();
           if (tail) push(tail);
         })
         .catch((error) => {
@@ -936,15 +1160,50 @@
       } finally {
         this.speaking = false;
         this.paintTransport();
+        this.clearSource();
         if (this.explainController === controller) this.explainController = null;
       }
     }
 
+    /**
+     * Re-say what we were saying, under the new settings.
+     *
+     * Explanations restart through `togglePlay` rather than `speak`: a changed
+     * language has to be re-generated by the model, not merely re-voiced, and
+     * replaying the cached English audio in a "Hindi" session was precisely
+     * the behaviour that made the language picker look inert.
+     */
+    /**
+     * The block a whole-page explanation was drawn from.
+     *
+     * Deliberately the same resolution order `Text.pageText` uses, so the
+     * outline marks what was actually read rather than a plausible-looking
+     * container that was not.
+     */
+    articleElement() {
+      const hosted = Reading.surface();
+      if (hosted?.isConnected) return hosted;
+
+      for (const selector of ['article', 'main', '[role="main"]', '#content, .content, .post-content, .entry-content']) {
+        const el = document.querySelector(selector);
+        if (el && (el.innerText || '').trim().length > 400) return el;
+      }
+      return document.body;
+    }
+
     restart() {
       const wasSpeaking = this.speaking;
+      const explaining = this.explaining();
       const text = this.spokenText;
+
       this.stop();
-      if (wasSpeaking && text) this.speak(this.segments.length ? null : text);
+      if (!wasSpeaking) return;
+
+      if (explaining) {
+        this.togglePlay();
+        return;
+      }
+      if (text) this.speak(this.segments.length ? null : text);
     }
 
     stop() {
@@ -953,6 +1212,7 @@
       this.speaking = false;
       Voice.stop();
       this.hideMark();
+      this.clearSource();
       this.paintProgress(0);
       this.paintTransport();
     }
@@ -1016,28 +1276,68 @@
       }
     }
 
-    paintMark(rect) {
+    /**
+     * Build the overlay both highlights live in, once.
+     *
+     * Two marks, drawn in the same shadow layer: `.mark` follows the word being
+     * spoken while reading verbatim, and `.source` shows the passage an
+     * explanation is *about*. They never appear together, because the two modes
+     * are mutually exclusive.
+     */
+    ensureMarkLayer() {
       const root = UI.host('tts-mark', { layer: 'reading' });
+      if (this.markScope?.isConnected) return;
 
-      if (!this.mark || !this.mark.isConnected) {
-        const style = document.createElement('style');
-        style.textContent = `
-          .mark {
-            position: fixed; border-radius: 2px; pointer-events: none;
-            background: color-mix(in srgb, var(--accent) 22%, transparent);
-            box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
-            transition: top .1s ease, left .1s ease, width .1s ease, height .1s ease;
-          }
-        `;
-        root.appendChild(style);
+      const style = document.createElement('style');
+      style.textContent = `
+        .mark {
+          position: fixed; border-radius: 2px; pointer-events: none;
+          background: color-mix(in srgb, var(--accent) 22%, transparent);
+          box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+          transition: top .1s ease, left .1s ease, width .1s ease, height .1s ease;
+        }
+        /* Magenta, not cyan: this marks what is being talked *about*, which is
+           a different statement from cyan's "this is the word being said", and
+           the two must never be read as the same thing. */
+        .source {
+          position: fixed; pointer-events: none; border-radius: 2px;
+          background: color-mix(in srgb, var(--accent-2) 16%, transparent);
+          box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent-2) 55%, transparent);
+        }
+        /* A whole-page scope is outlined rather than filled — washing an entire
+           article in colour would make it harder to read, not easier. */
+        .source[data-kind="scope"] {
+          background: transparent;
+          border: 2px dashed color-mix(in srgb, var(--accent-2) 70%, transparent);
+          box-shadow: none;
+        }
+        .source-tag {
+          position: fixed; pointer-events: none;
+          padding: 3px 9px; border-radius: 999px;
+          background: var(--accent-2); color: #fff;
+          font-family: var(--font); font-size: 11px; font-weight: 700;
+          white-space: nowrap;
+        }
+      `;
+      root.appendChild(style);
 
-        const scope = document.createElement('div');
-        scope.className = 'setu-scope';
-        this.mark = document.createElement('div');
-        this.mark.className = 'mark';
-        scope.appendChild(this.mark);
-        root.appendChild(scope);
-      }
+      const scope = document.createElement('div');
+      scope.className = 'setu-scope';
+
+      this.sourceLayer = document.createElement('div');
+      scope.appendChild(this.sourceLayer);
+
+      this.mark = document.createElement('div');
+      this.mark.className = 'mark';
+      this.mark.style.display = 'none';
+      scope.appendChild(this.mark);
+
+      root.appendChild(scope);
+      this.markScope = scope;
+    }
+
+    paintMark(rect) {
+      this.ensureMarkLayer();
 
       Object.assign(this.mark.style, {
         top: `${rect.top - 2}px`,
@@ -1050,6 +1350,120 @@
 
     hideMark() {
       if (this.mark) this.mark.style.display = 'none';
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* "This is what I am explaining"                                     */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Show the passage an explanation is about.
+     *
+     * Without this an explanation arrived as disembodied audio: the reader
+     * heard a paragraph of plain language with no way to tell which part of a
+     * dense page it referred to — which, for someone who opened the tool
+     * because the page was already hard to hold onto, is most of the value
+     * gone. A live Range is kept rather than a stored rectangle so the marks
+     * survive reflow, and they are repainted on scroll because everything here
+     * is viewport-positioned.
+     *
+     * @param {{range?: Range, element?: Element, label?: string}} source
+     */
+    showSource({ range = null, element = null, label = '' }) {
+      this.clearSource();
+      if (!range && !element?.isConnected) return;
+
+      this.source = { range, element, label };
+      this.ensureMarkLayer();
+
+      const repaint = () => this.paintSource();
+      // Captured, so a scroll inside the Focus Mode reader is heard too.
+      window.addEventListener('scroll', repaint, { passive: true, capture: true });
+      window.addEventListener('resize', repaint, { passive: true });
+      this.stopSourceTracking = () => {
+        window.removeEventListener('scroll', repaint, { capture: true });
+        window.removeEventListener('resize', repaint);
+      };
+
+      this.paintSource();
+
+      // Bring it into view, so "what is it explaining?" is answerable without
+      // the reader having to go looking.
+      const anchor = element || range?.startContainer?.parentElement;
+      if (anchor?.isConnected) Scroll.into(anchor, { block: 'center' });
+    }
+
+    paintSource() {
+      if (!this.source || !this.sourceLayer) return;
+
+      const { range, element, label } = this.source;
+
+      let rects = [];
+      if (range) {
+        // A Range spanning several lines yields one rect per line box, which is
+        // what makes a multi-line highlight follow the prose instead of boxing
+        // in the whitespace around it.
+        rects = [...range.getClientRects()].filter((r) => r.width > 1 && r.height > 1);
+      } else if (element?.isConnected) {
+        const rect = element.getBoundingClientRect();
+        if (rect.width > 1 && rect.height > 1) rects = [rect];
+      }
+
+      if (!rects.length) {
+        this.sourceLayer.innerHTML = '';
+        return;
+      }
+
+      // Rebuild only when the count changes; otherwise move what is already
+      // there, so scrolling does not thrash the DOM on every frame.
+      const kind = range ? 'passage' : 'scope';
+      const wanted = rects.length + (label ? 1 : 0);
+      if (this.sourceLayer.childElementCount !== wanted) {
+        this.sourceLayer.innerHTML = '';
+        for (let i = 0; i < rects.length; i += 1) {
+          const box = document.createElement('div');
+          box.className = 'source';
+          box.dataset.kind = kind;
+          this.sourceLayer.appendChild(box);
+        }
+        if (label) {
+          const tag = document.createElement('div');
+          tag.className = 'source-tag';
+          tag.textContent = label;
+          this.sourceLayer.appendChild(tag);
+        }
+      }
+
+      const boxes = this.sourceLayer.querySelectorAll('.source');
+      rects.forEach((rect, i) => {
+        const box = boxes[i];
+        if (!box) return;
+        Object.assign(box.style, {
+          top: `${rect.top - 2}px`,
+          left: `${rect.left - 2}px`,
+          width: `${rect.width + 4}px`,
+          height: `${rect.height + 4}px`
+        });
+      });
+
+      const tag = this.sourceLayer.querySelector('.source-tag');
+      if (tag) {
+        const first = rects[0];
+        // Above the passage where there is room, below it when the passage is
+        // at the very top of the viewport.
+        const above = first.top > 30;
+        Object.assign(tag.style, {
+          top: `${above ? first.top - 26 : first.bottom + 6}px`,
+          left: `${Math.max(8, first.left)}px`
+        });
+      }
+    }
+
+    clearSource() {
+      this.stopSourceTracking?.();
+      this.stopSourceTracking = null;
+      this.source = null;
+      if (this.sourceLayer) this.sourceLayer.innerHTML = '';
     }
 
     paintProgress(charIndex) {

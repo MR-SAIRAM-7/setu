@@ -1,8 +1,9 @@
 # SETU — Chrome Extension
 
 A Chrome extension that reshapes any website for how your brain actually reads:
-bionic text, line focus, a reading ruler, a sensory-safe reader, read-aloud,
-themes, and an AI agent that reads the live page and walks you through it.
+bionic text, line focus, a reading ruler, a sensory-safe reader, spoken
+explanations in eleven languages, themes, and an AI agent that reads the live
+page and walks you through it.
 
 Manifest V3. No build step, no dependencies, no bundler.
 
@@ -36,7 +37,7 @@ On first install the options page opens so you can point it at an engine.
 | Focus Mode (reader view) | `Alt+F` |
 | Line Focus | `Alt+L` |
 | Reading Ruler | `Alt+H` |
-| Read Aloud (browser voices) | `Alt+T` |
+| Explain This (browser voices) | `Alt+T` |
 | Auto Scroll | `Alt+S` |
 | Gaze Scroll (webcam) | `Alt+E` |
 | 3-step path (read off the page) | `Alt+3` |
@@ -52,8 +53,10 @@ On first install the options page opens so you can point it at an engine.
 | Commander — answers questions about the page | `POST /api/agent/explain/stream` | — |
 | 3-step path | `POST /api/agent/chunk` | steps derived from the page's own fields |
 | Visual map of a chart, table or section | `POST /api/agent/visualize` | map built from headings, lists and rows |
+| Explaining one map node, in your language | `POST /api/agent/explain/stream` | the node's own detail line |
 | Visual map of an image | `POST /api/agent/visualize` (image) | — |
-| Natural-voice read aloud (Sarvam Bulbul) | `POST /api/speech` | the browser's own voices |
+| Explain This — a plain-language explanation of a selection or the page | `POST /api/agent/explain/stream` | — |
+| Explain This — natural voice (Sarvam Bulbul) | `POST /api/speech` | the browser's own voices |
 
 Every AI feature here draws something usable **before** it calls the engine, and
 replaces it if a better answer arrives. That is not a nicety: the free model
@@ -266,7 +269,7 @@ usable at the same time:
    each other, and a panel too tall for its share of the edge is capped and
    scrolls internally rather than covering its neighbour.
 6. **`Scroll`** is the single arbiter for moving the reading surface. Auto
-   Scroll, Gaze Scroll, and read-aloud's follow-along all go through it, so they
+   Scroll, Gaze Scroll, and Explain This's follow-along all go through it, so they
    compose — and all three keep working inside Focus Mode, which is its own
    scroll container. It carries the sub-pixel remainder (so slow paces move at
    all) and scrolls with `behavior: 'instant'` against the clamped target, which

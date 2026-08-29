@@ -22,7 +22,8 @@
  */
 
 (() => {
-  const { Feature, UI, API, Text, Store, Dock, Scroll, icon } = window.SETU;
+  const { Feature, UI, API, Text, Store, Dock, Scroll, LANGUAGES, languageLabel, icon } =
+    window.SETU;
 
   /** Node geometry, in CSS pixels at zoom 1. */
   const ROOT_W = 210;
@@ -34,6 +35,9 @@
 
   /** How long the cursor must rest on a node before it speaks. */
   const HOVER_SPEAK_MS = 420;
+
+  /** Node explanations kept in memory, oldest evicted first. */
+  const MAX_NODE_EXPLANATIONS = 80;
 
   class VisualBreakdown extends Feature {
     static key = 'visual';
@@ -51,6 +55,18 @@
       this.collapsed = new Set();
       this.geometry = null;
       this.size = null;
+
+      /**
+       * Explanations already paid for, keyed by node and language.
+       *
+       * Free-tier generation is the dominant cost in this whole interaction —
+       * tens of seconds, against a daily quota — so re-opening a node the
+       * reader has already asked about must be instant and free.
+       */
+      this.nodeExplanations = new Map();
+      /** Streams in the air, so a click can join one a hover already started. */
+      this.nodeInFlight = new Map();
+      this.openNodeKey = '';
     }
 
     /** Entry point — invoked from the popup, a shortcut, or the context menu. */
@@ -87,6 +103,10 @@
       this.collapsed.clear();
       this.geometry = null;
       this.size = null;
+
+      for (const entry of this.nodeInFlight.values()) entry.controller?.abort();
+      this.nodeInFlight.clear();
+      this.openNodeKey = '';
     }
 
     /* ------------------------------------------------------------------ */
@@ -231,7 +251,7 @@
           {
             image,
             context: `${document.title} — ${el.getAttribute('alt') || el.getAttribute('aria-label') || text.slice(0, 200)}`,
-            language: Store.getSetting('language') || 'English'
+            language: Store.language().name
           },
           { signal: this.controller.signal, timeoutMs: 60000 }
         );
@@ -267,7 +287,7 @@
           {
             text,
             context: `${document.title}${sourceLabel ? ` — ${sourceLabel}` : ''}`,
-            language: Store.getSetting('language') || 'English'
+            language: Store.language().name
           },
           { signal: this.controller.signal, timeoutMs: 62000 }
         );
@@ -657,7 +677,10 @@
           branchIndex: index
         });
         el.dataset.branch = String(index);
-        if (children.length) el.dataset.collapsible = 'true';
+        if (children.length) {
+          el.dataset.collapsible = 'true';
+          el.setAttribute('aria-expanded', String(!isCollapsed));
+        }
 
         return {
           el,
@@ -737,6 +760,26 @@
       });
 
       for (const node of branchNodes) {
+        // A separate control, because a button cannot legally contain another
+        // one and because collapsing and explaining are different intents that
+        // should not share a target.
+        if (node.el.dataset.collapsible === 'true') {
+          const toggle = document.createElement('button');
+          toggle.type = 'button';
+          toggle.className = 'branch-toggle';
+          toggle.dataset.branch = String(node.index);
+          const isCollapsed = this.collapsed.has(node.index);
+          toggle.textContent = isCollapsed ? '+' : '–';
+          toggle.title = isCollapsed ? 'Show what is under this' : 'Hide what is under this';
+          toggle.setAttribute(
+            'aria-label',
+            `${isCollapsed ? 'Expand' : 'Collapse'} ${node.el.querySelector('.node-label')?.textContent || 'branch'}`
+          );
+          toggle.style.left = `${columnX[1] + BRANCH_W - 10}px`;
+          toggle.style.top = `${node.top - 8}px`;
+          container.appendChild(toggle);
+        }
+
         const from = rightOf(rootNode, columnX[0], ROOT_W);
         curve(from.x, from.y, columnX[1], node.top + heightOf(node.el) / 2);
 
@@ -751,12 +794,19 @@
     }
 
     /**
-     * Hover speaks, click collapses.
+     * Hover speaks the node, click asks what it means.
      *
      * Speaking on hover came out of clinical review: a mind map is a visual
      * artefact, and a reader who takes information in by ear gets nothing from
      * one they cannot hear. The delay matters as much as the feature — firing
      * on every pixel of cursor travel turns a map into a stutter of half-words.
+     *
+     * Click used to collapse a branch, which was the least valuable thing a
+     * click could do here. A map tells you a topic has five parts; it does not
+     * tell you what any of them *mean*, and a two-word branch label is often
+     * the very jargon the reader was stuck on. Clicking now asks for that node
+     * to be explained, in their language. Collapsing moved to its own control
+     * so both remain available.
      */
     wireNodes(container) {
       for (const node of container.querySelectorAll('.node')) {
@@ -774,9 +824,21 @@
         node.addEventListener('focus', speak);
         node.addEventListener('mouseleave', () => clearTimeout(this.hoverTimer));
 
-        node.addEventListener('click', () => {
-          if (node.dataset.collapsible !== 'true') return;
-          const index = Number(node.dataset.branch);
+        // Pointerdown rather than hover: it buys the round trip a head start
+        // of a frame or two and, unlike a hover heuristic, never spends a
+        // request on a node the reader was only passing over. On a metered
+        // daily quota that distinction matters more than the milliseconds.
+        node.addEventListener('pointerdown', (event) => {
+          if (event.button !== 0) return;
+          this.explainNode(node, { prefetch: true });
+        });
+        node.addEventListener('click', () => this.explainNode(node));
+      }
+
+      for (const toggle of container.querySelectorAll('.branch-toggle')) {
+        toggle.addEventListener('click', (event) => {
+          event.stopPropagation();
+          const index = Number(toggle.dataset.branch);
           if (this.collapsed.has(index)) this.collapsed.delete(index);
           else this.collapsed.add(index);
           this.layoutMap(container);
@@ -792,6 +854,237 @@
       }
       const readout = this.panelScope?.querySelector('.zoom-value');
       if (readout) readout.textContent = `${Math.round(this.zoom * 100)}%`;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Explaining one node                                                */
+    /* ------------------------------------------------------------------ */
+
+    /** What this node is, as the model needs to see it. */
+    nodeSubject(node) {
+      const label = node.querySelector('.node-label')?.textContent?.trim() || '';
+      const detail = node.querySelector('.node-detail')?.textContent?.trim() || '';
+      return { label, detail };
+    }
+
+    /**
+     * Explain the node the reader clicked, in the language they chose.
+     *
+     * Streamed rather than buffered: the engine runs on free models that take
+     * twenty to forty seconds to finish a paragraph and about one to start it,
+     * so waiting for the whole answer would spend that entire difference on a
+     * spinner. Asked for two sentences rather than a paragraph, which is both
+     * what a single map node warrants and by far the largest latency saving
+     * available — generation time is roughly proportional to output length.
+     *
+     * @param {boolean} options.prefetch start the work without opening the
+     *   drawer, so the answer is already arriving by the time the click lands.
+     */
+    async explainNode(node, { prefetch = false } = {}) {
+      const { label, detail } = this.nodeSubject(node);
+      if (!label) return;
+
+      const language = Store.language();
+      const key = `${language.code}|${label}|${detail}`;
+
+      if (!prefetch) {
+        this.openNodeKey = key;
+        this.markExplaining(node);
+        this.openExplanation(label);
+      }
+
+      // Already paid for: answer instantly and spend nothing.
+      const cached = this.nodeExplanations.get(key);
+      if (cached) {
+        if (!prefetch) this.renderExplanation(cached, 'done');
+        return;
+      }
+
+      // Already in the air — from the pointerdown that preceded this click, or
+      // from a second click on the same node. Join it rather than starting a
+      // duplicate that would cost a second request and answer no sooner.
+      const existing = this.nodeInFlight.get(key);
+      if (existing) {
+        if (!prefetch) {
+          this.renderExplanation(existing.text || 'Thinking about this…', existing.text ? 'streaming' : 'waiting');
+          existing.listeners.add((text, state) => {
+            if (this.openNodeKey === key) this.renderExplanation(text, state);
+          });
+        }
+        return;
+      }
+
+      const controller = new AbortController();
+      const entry = { text: '', controller, listeners: new Set() };
+      this.nodeInFlight.set(key, entry);
+
+      if (!prefetch) {
+        this.renderExplanation('Thinking about this…', 'waiting');
+        entry.listeners.add((text, state) => {
+          if (this.openNodeKey === key) this.renderExplanation(text, state);
+        });
+      }
+
+      const emit = (state) => {
+        for (const listener of entry.listeners) listener(entry.text, state);
+      };
+
+      const context = this.map?.title ? ` It appears in a map of "${this.map.title}".` : '';
+      const prompt =
+        `Explain what this means, for someone who found it hard to read the original page.\n\n` +
+        `TOPIC: ${label}\n` +
+        (detail ? `WHAT THE MAP SAYS: ${detail}\n` : '') +
+        `CONTEXT:${context || ' None.'}`;
+
+      try {
+        await API.stream(
+          '/api/agent/explain/stream',
+          { text: prompt, language: language.name, style: 'simple' },
+          {
+            signal: controller.signal,
+            timeoutMs: window.SETU.DEFAULTS.fastTimeoutMs,
+            onChunk: (_chunk, whole) => {
+              entry.text = whole;
+              emit('streaming');
+            }
+          }
+        );
+
+        const finished = entry.text.trim();
+        if (finished) {
+          if (this.nodeExplanations.size >= MAX_NODE_EXPLANATIONS) {
+            this.nodeExplanations.delete(this.nodeExplanations.keys().next().value);
+          }
+          this.nodeExplanations.set(key, finished);
+          entry.text = finished;
+          emit('done');
+
+          // Hearing it is the whole point for a reader who came here because
+          // the text was the problem — but only when they have asked for audio.
+          // Keyed on what is actually open rather than on which call started
+          // the work: a click that joins the request its own pointerdown began
+          // must still get the audio.
+          if (this.openNodeKey === key && this.speakOnHover) this.speakExplanation();
+        } else {
+          entry.text = 'The engine had nothing to add about this one.';
+          emit('error');
+        }
+      } catch (error) {
+        if (error.name === 'AbortError') return;
+
+        // Say what the map already knows rather than only an apology: the
+        // node's own detail line is a real, if thinner, answer.
+        entry.text = detail
+          ? `${detail}\n\n(${this.explainFailure(error)})`
+          : this.explainFailure(error);
+        emit(detail ? 'done' : 'error');
+      } finally {
+        this.nodeInFlight.delete(key);
+      }
+    }
+
+    /** Ring the node currently being explained, and only that one. */
+    markExplaining(node) {
+      for (const other of this.body?.querySelectorAll('.node[data-explaining]') || []) {
+        delete other.dataset.explaining;
+      }
+      if (node) node.dataset.explaining = 'true';
+    }
+
+    openExplanation(title) {
+      const drawer = this.panelScope?.querySelector('.explain');
+      if (!drawer) return;
+      drawer.dataset.show = 'true';
+      const heading = drawer.querySelector('.explain-title');
+      if (heading) heading.textContent = title;
+      Dock.layout();
+    }
+
+    renderExplanation(text, state = 'done') {
+      const body = this.panelScope?.querySelector('.explain-body');
+      if (!body) return;
+      body.textContent = text;
+      body.dataset.state = state;
+    }
+
+    closeExplanation() {
+      window.SETU.Voice?.stop();
+      this.openNodeKey = '';
+      this.markExplaining(null);
+      const drawer = this.panelScope?.querySelector('.explain');
+      if (drawer) drawer.dataset.show = 'false';
+    }
+
+    /** Read the open explanation aloud, in the language it was written in. */
+    speakExplanation() {
+      const body = this.panelScope?.querySelector('.explain-body');
+      const text = body?.textContent?.trim();
+      if (!text || body.dataset.state === 'waiting') return;
+      window.SETU.Voice?.say(text);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Language                                                           */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Offer every language SETU can explain in, from the table shipped with
+     * the extension.
+     *
+     * Not fetched from the engine on purpose. A map's labels are written by
+     * the model, so the choice is available whether or not the voice service
+     * is reachable — and populating this from the voice catalogue would have
+     * reduced it to English exactly when the engine was slow, which is when a
+     * reader is most likely to be fiddling with settings.
+     */
+    populateLanguages() {
+      const select = this.panelScope?.querySelector('[data-act="language"]');
+      if (!select) return;
+
+      const chosen = Store.language().code;
+      select.innerHTML = LANGUAGES.map(
+        (language) =>
+          `<option value="${Text.escape(language.code)}"${
+            language.code === chosen ? ' selected' : ''
+          }>${Text.escape(languageLabel(language))}</option>`
+      ).join('');
+    }
+
+    /**
+     * Redraw the current map in another language.
+     *
+     * Re-asks the engine rather than translating what is on screen: the map's
+     * branch labels are model output, and there is nothing client-side that
+     * could turn them into Tamil. Hover audio follows automatically, because
+     * `setLanguage` moves the voice and the prose together.
+     */
+    async setLanguage(code) {
+      const language = await Store.setLanguage(code);
+      window.SETU.Voice?.stop();
+      window.SETU.Voice?.invalidate();
+
+      // Cached node explanations are in the previous language, and the open
+      // drawer is showing one of them. The cache is keyed by language so
+      // nothing is actually stale, but what is on screen now is.
+      for (const entry of this.nodeInFlight.values()) entry.controller?.abort();
+      this.nodeInFlight.clear();
+      this.closeExplanation();
+
+      const text = this.lastText || '';
+      if (!text && !this.sourceElement) {
+        UI.toast(`Maps will be drawn in ${language.native} from now on.`, { tone: 'success' });
+        return;
+      }
+
+      UI.toast(`Redrawing this map in ${language.native}…`, { tone: 'success' });
+
+      // A fresh controller: the in-flight request, if any, was for the old
+      // language and its answer is no longer the one being waited for.
+      this.controller?.abort();
+      this.controller = null;
+
+      if (text) await this.mapText(text, this.describeSource(this.sourceElement), this.sourceElement);
+      else await this.mapElement(this.sourceElement);
     }
 
     setZoom(next) {
@@ -880,6 +1173,14 @@
           font-size:10.5px; font-weight:700;
         }
 
+        .acts select {
+          max-width: 132px; padding: 4px 7px; margin-right: 2px;
+          font-family: var(--font); font-size: 12px;
+          background: var(--bg); color: var(--text);
+          border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer;
+        }
+        .acts select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
         .chart { margin-bottom:16px; flex-shrink:0; }
         .bars { list-style:none; margin-top:9px; display:flex; flex-direction:column; gap:7px; }
         .bar-row { display:grid; grid-template-columns: minmax(70px, 26%) 1fr auto; gap:10px; align-items:center; }
@@ -902,6 +1203,57 @@
           flex-shrink:0;
         }
         .caution svg { flex-shrink:0; margin-top:2px; }
+
+        /* The explanation drawer. Capped and scrollable so a long answer can
+           never push the map out of the panel. */
+        .explain {
+          display: none; flex-shrink: 0;
+          border-top: 1px solid var(--border); background: var(--bg);
+          padding: 12px 20px 14px; max-height: 34%; overflow-y: auto;
+        }
+        .explain[data-show="true"] { display: block; }
+        .explain-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:7px; }
+        .explain-title {
+          font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+          color:var(--accent-2-700); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+        }
+        .explain-acts { display:flex; gap:4px; flex-shrink:0; }
+        .explain-acts button {
+          display:grid; place-items:center; padding:5px; cursor:pointer;
+          background:transparent; border:1px solid transparent; border-radius:var(--radius);
+          color:var(--text-dim);
+        }
+        .explain-acts button:hover { background:var(--accent-100); border-color:var(--accent); color:var(--accent-900); }
+        .explain-acts button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+        .explain-acts button[data-active="true"] { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
+        .explain-body { font-size:14px; line-height:1.65; color:var(--text); white-space:pre-wrap; }
+        .explain-body[data-state="waiting"] { color:var(--text-dim); font-style:italic; }
+        .explain-body[data-state="error"] { color:var(--danger); }
+        /* A caret while tokens are still arriving, so a pause between them
+           reads as "still writing" rather than "finished, and that was it". */
+        .explain-body[data-state="streaming"]::after {
+          content:''; display:inline-block; vertical-align:text-bottom;
+          width:2px; height:1.05em; margin-left:2px; background:var(--accent-2);
+          animation: setu-caret 1s steps(2, start) infinite;
+        }
+        @keyframes setu-caret { 0%,100% { opacity:1 } 50% { opacity:0 } }
+
+        /* Every node is now a question you can ask, so every node is a target. */
+        .node { cursor: pointer; }
+        .node[aria-expanded] { cursor: pointer; }
+        .node[data-explaining="true"] {
+          border-color: var(--accent-2);
+          box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-2) 25%, transparent);
+        }
+        .branch-toggle {
+          position:absolute; width:20px; height:20px; padding:0;
+          display:grid; place-items:center; cursor:pointer; z-index:3;
+          background:var(--surface); color:var(--text-dim);
+          border:1px solid var(--border); border-radius:50%;
+          font-family:var(--font); font-size:11px; font-weight:700; line-height:1;
+        }
+        .branch-toggle:hover { background:var(--accent-100); border-color:var(--accent); color:var(--accent-900); }
+        .branch-toggle:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
 
         .resize-handle {
           position: absolute; right: 0; bottom: 0; width: 18px; height: 18px;
@@ -934,6 +1286,8 @@
           <div class="head">
             <span class="badge">VISUAL MAP</span>
             <div class="acts">
+              <select data-act="language" aria-label="Explain this map in"
+                      title="Explain this map in your language"></select>
               <button data-act="zoom-out" aria-label="Zoom out" title="Zoom out">${icon('minus', { size: 16 })}</button>
               <span class="zoom-value">100%</span>
               <button data-act="zoom-in" aria-label="Zoom in" title="Zoom in">${icon('plus', { size: 16 })}</button>
@@ -946,6 +1300,18 @@
             </div>
           </div>
           <div class="content"></div>
+          <div class="explain" data-show="false" aria-live="polite">
+            <div class="explain-head">
+              <span class="explain-title"></span>
+              <div class="explain-acts">
+                <button data-act="explain-speak" aria-label="Hear this explanation"
+                        title="Hear this explanation">${icon('speaker-high', { size: 15 })}</button>
+                <button data-act="explain-close" aria-label="Close explanation"
+                        title="Close">${icon('x', { size: 15 })}</button>
+              </div>
+            </div>
+            <p class="explain-body"></p>
+          </div>
           <div class="resize-handle" data-act="resize" title="Drag to resize"></div>
         </div>
       `;
@@ -969,6 +1335,15 @@
         const el = scope.querySelector(`[data-act="${name}"]`);
         if (el) el.onclick = fn;
       };
+
+      this.populateLanguages();
+      const languageSelect = scope.querySelector('[data-act="language"]');
+      if (languageSelect) {
+        languageSelect.addEventListener('change', (event) => this.setLanguage(event.target.value));
+      }
+
+      act('explain-close', () => this.closeExplanation());
+      act('explain-speak', () => this.speakExplanation());
 
       act('close', () => window.setuLens?.toggle('visual', false));
       act('again', () => {

@@ -56,19 +56,36 @@
 
       const style = document.createElement('style');
       style.textContent = `
+        /* The tint is deliberately strong.
+           A 14%-alpha wash was too faint to do the one job this feature has:
+           at that weight the eye still had to hunt for the current line, which
+           is the very effort the ruler exists to remove. It is now mixed from
+           the chosen ruler colour rather than hard-coded cyan, so picking a
+           highlight colour actually changes the highlight, and it carries a
+           soft outer shadow so the line reads as lifted off the page. */
         .ruler {
           position: fixed;
-          background: rgba(0, 136, 176, 0.14);
-          border-left: 3.5px solid var(--ruler);
+          background: color-mix(in srgb, var(--ruler) 38%, transparent);
+          border-left: 4px solid var(--ruler);
           border-radius: var(--radius);
+          box-shadow: 0 0 0 1px color-mix(in srgb, var(--ruler) 55%, transparent),
+                      0 2px 10px color-mix(in srgb, var(--ruler) 30%, transparent);
           pointer-events: none;
           opacity: 0;
           transition: opacity .15s ease, top .07s linear, left .07s linear,
                       width .07s linear, height .07s linear;
         }
         .ruler[data-visible="true"] { opacity: 1; }
-        .ruler[data-mode="word"]  { border-radius: 2px; }
-        .ruler[data-mode="block"] { border-radius: var(--radius); background: rgba(0, 136, 176, 0.08); }
+        /* One word is a small target, so it takes the strongest wash;
+           a whole block is a large area, so it takes the gentlest. */
+        .ruler[data-mode="word"]  {
+          border-radius: 2px;
+          background: color-mix(in srgb, var(--ruler) 46%, transparent);
+        }
+        .ruler[data-mode="block"] {
+          border-radius: var(--radius);
+          background: color-mix(in srgb, var(--ruler) 24%, transparent);
+        }
 
         .dock {
           position: fixed;
@@ -138,7 +155,9 @@
         { passive: true }
       );
 
-      this.listen(window, 'scroll', () => this.measure(), { passive: true });
+      // Captured: a scroll inside the Focus Mode reader never bubbles to
+      // window, and without this the ruler stuck to the old line there.
+      this.listen(window, 'scroll', () => this.measure(), { passive: true, capture: true });
       this.listen(window, 'resize', () => this.measure(), { passive: true });
 
       this.listen(window, 'keydown', (event) => {
@@ -176,11 +195,15 @@
 
     /** Rect of the single word under the cursor. */
     wordRectAt(x, y) {
-      const node = Text.caretNodeAt(x, y);
-      if (!node) return null;
+      // One shadow-aware lookup for both halves. Asking the raw document API
+      // for the offset separately meant word mode silently fell back to line
+      // mode inside the Focus Mode reader, where that API returns nothing.
+      const hit = Text.caretAt(x, y);
+      const node = hit?.node;
+      if (!node || Text.isOurs(node)) return null;
 
-      const offset = this.caretOffsetAt(x, y);
-      if (offset === null) return null;
+      const offset = hit.offset;
+      if (offset === null || offset === undefined) return null;
 
       const content = node.textContent;
       let start = offset;
@@ -199,18 +222,6 @@
 
       const rect = range.getBoundingClientRect();
       return rect.width > 0 ? rect : null;
-    }
-
-    caretOffsetAt(x, y) {
-      if (document.caretPositionFromPoint) {
-        const position = document.caretPositionFromPoint(x, y);
-        return position ? position.offset : null;
-      }
-      if (document.caretRangeFromPoint) {
-        const range = document.caretRangeFromPoint(x, y);
-        return range ? range.startOffset : null;
-      }
-      return null;
     }
 
     /** Rect of the whole paragraph/block under the cursor. */

@@ -11,7 +11,7 @@
  */
 
 (() => {
-  const { Feature, UI, Store, Text, icon } = window.SETU;
+  const { Feature, UI, Store, Text, Scroll, icon } = window.SETU;
 
   class LineFocus extends Feature {
     static key = 'lineFocus';
@@ -163,8 +163,11 @@
         { passive: true }
       );
 
-      // Keep the band on its line as the page moves under it.
-      this.listen(window, 'scroll', () => this.snapToPointer(), { passive: true });
+      // Keep the band on its line as the page moves under it. Captured,
+      // because a scroll inside the Focus Mode reader is a shadow-DOM event
+      // that never bubbles to window — without capture the band froze in place
+      // the moment the two features were used together.
+      this.listen(window, 'scroll', () => this.snapToPointer(), { passive: true, capture: true });
       this.listen(window, 'resize', () => this.snapToPointer(), { passive: true });
 
       this.listen(window, 'keydown', (event) => {
@@ -221,7 +224,10 @@
       // Near an edge, scroll the page instead of pinning the band to the border.
       const margin = window.innerHeight * 0.2;
       if (clampedY > window.innerHeight - margin || clampedY < margin) {
-        window.scrollBy({ top: direction * currentHeight * 2, behavior: 'instant' in window ? 'instant' : 'auto' });
+        // Through the arbiter: `window.scrollBy` moves the document, and inside
+        // Focus Mode the document is not what is scrolling — so stepping past
+        // the bottom of the band did nothing at all there.
+        Scroll.by(direction * currentHeight * 2);
       }
 
       this.pointerY = clampedY;

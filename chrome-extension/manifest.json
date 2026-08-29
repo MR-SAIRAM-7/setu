@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "SETU - Cognitive Companion & AI Copilot",
-  "version": "3.2.0",
-  "description": "Reshape any website for how your brain reads: line focus, natural-voice read aloud, instant mind maps, and an AI page agent.",
+  "version": "3.3.0",
+  "description": "Reshape any site for how your brain reads: line focus, spoken explanations in 11 languages, mind maps, and an AI page agent.",
   "minimum_chrome_version": "116",
   "icons": {
     "16": "icons/icon16.png",
@@ -41,6 +41,7 @@
       "js": [
         "shared/setu-config.js",
         "shared/setu-icons.js",
+        "shared/gaze-detector.js",
         "shared/setu-core.js",
         "content/bionic-reading.js",
         "content/focus-mode.js",
@@ -63,7 +64,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["icons/*"],
+      "resources": ["icons/*", "camera/frame.html"],
       "matches": ["<all_urls>"]
     }
   ],
@@ -85,7 +86,7 @@
       "description": "Open SETU Commander"
     },
     "toggle-tts": {
-      "description": "Toggle Read Aloud (Alt+T on the page)"
+      "description": "Toggle Explain This (Alt+T on the page)"
     },
     "toggle-ruler": {
       "description": "Toggle Reading Ruler (Alt+H on the page)"

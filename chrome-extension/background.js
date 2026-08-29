@@ -165,7 +165,7 @@ function freshState() {
       ttsVoice: '',
       ttsSpeaker: '',
       ttsLanguage: 'en-IN',
-      ttsExplain: false,
+      ttsExplain: true,
       gazeSensitivity: 1,
       gazeInvert: false,
       fontScale: 1,
@@ -178,7 +178,10 @@ function freshState() {
 }
 
 /**
- * Drop state keys retired in 3.1.
+ * Bring stored state forward across versions.
+ *
+ * Two migrations, both of which exist because a stale key is invisible to the
+ * user but changes what the extension does.
  */
 async function migrateState() {
   try {
@@ -186,12 +189,39 @@ async function migrateState() {
     if (!setuState) return;
 
     let changed = false;
+
+    // Keys retired in 3.1. `chunking` in particular fired an AI request on
+    // every page load for anyone who had ever tried it once.
     for (const key of ['chunking', 'dyslexia', 'commander', 'visual']) {
       if (key in setuState) {
         delete setuState[key];
         changed = true;
       }
     }
+
+    // 3.3 folded the two language settings into one, with the voice code as
+    // the authority. Someone who typed "Hindi" into the old free-text box but
+    // never opened the voice picker has `language: 'Hindi'` and the default
+    // `ttsLanguage: 'en-IN'` — and reading the code first would silently put
+    // them back into English. Their stated choice wins.
+    const settings = setuState.settings;
+    if (settings) {
+      const named = self.setuResolveLanguage(settings.language);
+      const voiced = self.setuResolveLanguage(settings.ttsLanguage);
+
+      if (named.code !== 'en-IN' && voiced.code === 'en-IN' && settings.ttsLanguage === 'en-IN') {
+        settings.ttsLanguage = named.code;
+        settings.language = named.name;
+        changed = true;
+      } else if (settings.language !== voiced.name) {
+        // Otherwise the code is authoritative, and the name follows it, so the
+        // two can never disagree again.
+        settings.language = voiced.name;
+        settings.ttsLanguage = voiced.code;
+        changed = true;
+      }
+    }
+
     if (changed) await chrome.storage.sync.set({ setuState });
   } catch (error) {
     console.warn('[SETU worker] state migration skipped:', error.message);
@@ -244,7 +274,7 @@ function buildMenus() {
     add('cmd-commander', 'Ask SETU to do something…');
     add('cmd-explain-selection', 'Explain this in plain language', ['selection']);
     add('cmd-map-selection', 'Turn this into a mind map', ['selection']);
-    add('cmd-speak', 'Read this aloud', ['selection']);
+    add('cmd-speak', 'Explain this out loud', ['selection']);
     add('cmd-visual', 'Map this chart, image or section');
     add('cmd-chunk', 'Break this page into 3 steps');
     add('cmd-sanctuary', 'Send page to my Sanctuary');
@@ -279,7 +309,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
   const routes = {
     'cmd-commander': { action: 'openCommander' },
-    'cmd-speak': { action: 'speakText', text: info.selectionText },
+    'cmd-speak': { action: 'explainAloud', text: info.selectionText },
     'cmd-visual': { action: 'explainVisual' },
     'cmd-chunk': { action: 'toggleFeature', feature: 'chunking', enabled: true },
     'cmd-sanctuary': { action: 'sendToSanctuary' },
@@ -424,6 +454,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'openOptions':
           chrome.runtime.openOptionsPage();
           return sendResponse({ ok: true });
+
+        case 'openCameraPermission': {
+          // The grant has to be made from an extension page for it to hold on
+          // every site — see camera/permission.js.
+          const url = chrome.runtime.getURL('camera/permission.html');
+
+          // Re-use an open one where we can. Matching a chrome-extension URL
+          // needs the broad "tabs" permission, which is not worth requesting
+          // for a tidiness win, so a failure here just opens a second tab.
+          try {
+            const [existing] = await chrome.tabs.query({ url });
+            if (existing?.id) {
+              await chrome.tabs.update(existing.id, { active: true });
+              return sendResponse({ ok: true });
+            }
+          } catch (_) {
+            /* no permission to look — open a fresh one below */
+          }
+
+          await chrome.tabs.create({ url });
+          return sendResponse({ ok: true });
+        }
 
         default:
           return sendResponse({ ok: false, error: `Unknown action "${request.action}"` });

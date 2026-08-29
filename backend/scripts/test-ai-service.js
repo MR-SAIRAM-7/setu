@@ -600,6 +600,219 @@ async function run() {
     restore();
   });
 
+  /* -- budget arithmetic --------------------------------------------------- */
+
+  await test('a model is never given a slice of time it cannot finish in', async () => {
+    const { ai, restore } = loadService({ GEMINI_MODEL_CHAIN: 'model-a,model-b,model-c' });
+
+    // Reproduces exactly what was observed in production: the first model eats
+    // its whole per-call timeout, the second is overloaded, and the third is
+    // then left with a couple of seconds. That third call could never have
+    // succeeded — it cost a request against a daily quota and two seconds of
+    // the user's wait to fail in a way that read as the model's fault.
+    let now = Date.now();
+    const realNow = Date.now;
+    Date.now = () => now;
+
+    const attempted = [];
+    const fetchMock = installFetch(({ url }) => {
+      const model = url.match(/models\/([^:]+):/)?.[1] || '?';
+      attempted.push(model);
+
+      if (model === 'model-a') {
+        now += 12000; // times out against its own 12s budget
+        const error = new Error('The operation was aborted.');
+        error.name = 'AbortError';
+        throw error;
+      }
+      if (model === 'model-b') {
+        now += 10900; // an overloaded endpoint, answering slowly
+        return mockResponse({ status: 503, body: { error: { message: 'overloaded' } } });
+      }
+      return mockResponse({ body: geminiText('should never be reached') });
+    });
+
+    try {
+      await assert.rejects(
+        ai.requestText({
+          input: 'plan something',
+          noCache: true,
+          maxRetries: 0,
+          timeoutMs: 12000,
+          deadlineMs: 25000
+        })
+      );
+
+      assert.deepStrictEqual(
+        attempted,
+        ['model-a', 'model-b'],
+        `the third model was attempted with no time left: ${attempted.join(', ')}`
+      );
+    } finally {
+      Date.now = realNow;
+      fetchMock.restore();
+      restore();
+    }
+  });
+
+  await test('a caller asking for short calls is not held to the viable floor', async () => {
+    const { ai, restore } = loadService({ GEMINI_MODEL_CHAIN: 'model-a,model-b' });
+
+    let now = Date.now();
+    const realNow = Date.now;
+    Date.now = () => now;
+
+    const attempted = [];
+    const fetchMock = installFetch(({ url }) => {
+      attempted.push(url.match(/models\/([^:]+):/)?.[1] || '?');
+      if (attempted.length === 1) {
+        now += 1200;
+        return mockResponse({ status: 503, body: { error: { message: 'overloaded' } } });
+      }
+      return mockResponse({ body: geminiText('ok') });
+    });
+
+    try {
+      // 2s per call: the second attempt has 1.8s left, which is short in
+      // absolute terms but is everything this caller ever wanted per call.
+      const text = await ai.requestText({
+        input: 'quick',
+        noCache: true,
+        maxRetries: 0,
+        timeoutMs: 2000,
+        deadlineMs: 3000
+      });
+      assert.strictEqual(text.trim(), 'ok');
+      assert.strictEqual(attempted.length, 2, 'the second model should still have been tried');
+    } finally {
+      Date.now = realNow;
+      fetchMock.restore();
+      restore();
+    }
+  });
+
+  await test('the timeout error says what actually went wrong underneath', async () => {
+    const { ai, restore } = loadService({ GEMINI_MODEL_CHAIN: 'model-a' });
+
+    let now = Date.now();
+    const realNow = Date.now;
+    Date.now = () => now;
+
+    const fetchMock = installFetch(() => {
+      now += 12000;
+      return mockResponse({ status: 503, body: { error: { message: 'model is overloaded' } } });
+    });
+
+    try {
+      await assert.rejects(
+        ai.requestText({
+          input: 'x',
+          noCache: true,
+          maxRetries: 0,
+          timeoutMs: 12000,
+          deadlineMs: 14000
+        }),
+        // Not merely "did not answer within 14s", which is true and useless.
+        (error) => /overloaded|503/i.test(error.message)
+      );
+    } finally {
+      Date.now = realNow;
+      fetchMock.restore();
+      restore();
+    }
+  });
+
+  await test('planning gets a budget that fits two whole attempts', async () => {
+    // The planner is the heaviest structured generation in the product and was
+    // running on the budget sized for one paragraph of prose, while the lighter
+    // structure map got nearly twice as long.
+    const agent = require('../services/agentService');
+    const source = require('fs').readFileSync(
+      require('path').join(__dirname, '..', 'services', 'agentService.js'),
+      'utf8'
+    );
+
+    const planning = source.match(/const PLANNING = \{([^}]+)\}/);
+    assert.ok(planning, 'planning has no budget of its own');
+
+    const timeoutMs = Number(planning[1].match(/timeoutMs:\s*(\d+)/)[1]);
+    const deadlineMs = Number(planning[1].match(/deadlineMs:\s*(\d+)/)[1]);
+
+    assert.ok(
+      deadlineMs >= timeoutMs * 2 + 5000,
+      `deadline ${deadlineMs}ms leaves no room for a second ${timeoutMs}ms attempt`
+    );
+    assert.ok(agent.planPageTask, 'planPageTask is no longer exported');
+  });
+
+  await test('a plan survives one slow model and lands on the next', async () => {
+    // The reported failure, end to end through the planner itself: the first
+    // model burns its whole per-call budget, and the plan must still come back
+    // from the second rather than collapsing to the keyword fallback.
+    const { ai, restore } = loadService({ GEMINI_MODEL_CHAIN: 'slow-model,good-model' });
+    delete require.cache[require.resolve('../services/agentService')];
+    const agent = require('../services/agentService');
+
+    let now = Date.now();
+    const realNow = Date.now;
+    Date.now = () => now;
+
+    const plan = {
+      goal: 'log in',
+      understanding: 'You want to sign in.',
+      feasible: true,
+      blockedReason: '',
+      steps: [
+        {
+          stepNumber: 1,
+          instruction: 'Go to the Sign in button.',
+          actionType: 'click',
+          targetRef: 's1r0',
+          targetText: 'Sign in',
+          valueToFill: '',
+          tip: 'It is at the top right.'
+        }
+      ],
+      supportiveMessage: 'One step, and you are through.'
+    };
+
+    const attempted = [];
+    const fetchMock = installFetch(({ url }) => {
+      const model = url.match(/models\/([^:]+):/)?.[1] || '?';
+      attempted.push(model);
+
+      if (model === 'slow-model') {
+        now += 20000; // the whole per-call budget, as observed
+        const error = new Error('The operation was aborted.');
+        error.name = 'AbortError';
+        throw error;
+      }
+      return mockResponse({ body: geminiText(JSON.stringify(plan)) });
+    });
+
+    try {
+      const result = await agent.planPageTask({
+        task: 'log in',
+        pageContext: {
+          url: 'https://example.com',
+          title: 'Example',
+          headings: ['Welcome'],
+          controls: [{ ref: 's1r0', tag: 'button', type: '', label: 'Sign in', onScreen: true, value: '' }],
+          text: 'Some page text'
+        }
+      });
+
+      assert.deepStrictEqual(attempted, ['slow-model', 'good-model'], 'wrong chain walk');
+      assert.strictEqual(result.feasible, true);
+      assert.strictEqual(result.steps.length, 1);
+      assert.strictEqual(result.steps[0].targetRef, 's1r0');
+    } finally {
+      Date.now = realNow;
+      fetchMock.restore();
+      restore();
+    }
+  });
+
   /* ------------------------------------------------------------------------ */
 
   const failed = results.filter((r) => !r.ok);
