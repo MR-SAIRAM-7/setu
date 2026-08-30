@@ -23,9 +23,16 @@ import { tts } from '../lib/tts';
  */
 const MAX_DRAWN = 60;
 
-export default function NumberStory({ data, onSolved }) {
+export default function NumberStory({ data, onSolved, autoNarrate = true }) {
   const [stepIndex, setStepIndex] = useState(0);
-  const [narrate, setNarrate] = useState(true);
+  /**
+   * Narration is on by default for a sum the user actually asked for — the
+   * objects only work when they are spoken over. It is off for the worked
+   * example, because that one appears the instant someone clicks "Numbers" in
+   * the rail, and a screen that starts talking at a glance is startling rather
+   * than helpful.
+   */
+  const [narrate, setNarrate] = useState(autoNarrate);
   const solvedRef = useRef(false);
 
   const steps = useMemo(() => (Array.isArray(data?.steps) ? data.steps : []), [data]);
@@ -35,8 +42,9 @@ export default function NumberStory({ data, onSolved }) {
   // Reset when a different problem arrives, so a new sum never opens half-solved.
   useEffect(() => {
     setStepIndex(0);
+    setNarrate(autoNarrate);
     solvedRef.current = false;
-  }, [data]);
+  }, [data, autoNarrate]);
 
   // Speak the current step. The brief was explicit that graphical material only
   // works for this audience when paired with audio on interaction, so narration

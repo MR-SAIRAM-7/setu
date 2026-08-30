@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { award } from '../lib/progress';
 
 /**
@@ -14,6 +14,9 @@ import { award } from '../lib/progress';
  * puts you back exactly where you were. Notes stay in this browser and are never
  * mirrored anywhere.
  */
+
+/** Fired by the app chrome to open the parking lot from anywhere. */
+export const TOGGLE_EVENT = 'setu:toggle-parking-lot';
 
 const PARKED_KEY = 'setu.parked.v1';
 const MAX_NOTES = 40;
@@ -42,21 +45,34 @@ export default function ParkingLot() {
   const inputRef = useRef(null);
   const restoreFocusRef = useRef(null);
 
+  const toggle = useCallback(() => {
+    setOpen((current) => {
+      if (!current) restoreFocusRef.current = document.activeElement;
+      return !current;
+    });
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (event) => {
       if (event.altKey && (event.key === 'p' || event.key === 'P')) {
         event.preventDefault();
-        setOpen((current) => {
-          if (!current) restoreFocusRef.current = document.activeElement;
-          return !current;
-        });
+        toggle();
       } else if (event.key === 'Escape' && open) {
         setOpen(false);
       }
     };
+
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [open]);
+    // The app chrome opens this too — the phone header has no room for a
+    // floating pill, and on desktop the pill sat on top of the engine badge in
+    // the corner of the sidebar. A window event keeps the notes owned here
+    // rather than lifted into the shell just to hang a second button off them.
+    window.addEventListener(TOGGLE_EVENT, toggle);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener(TOGGLE_EVENT, toggle);
+    };
+  }, [open, toggle]);
 
   // Focus straight into the field on open, and hand focus back to wherever the
   // user was on close — the whole point is not to lose their place.
@@ -94,17 +110,14 @@ export default function ParkingLot() {
   return (
     <>
       <button
-        onClick={() => {
-          restoreFocusRef.current = document.activeElement;
-          setOpen((current) => !current);
-        }}
+        onClick={toggle}
         aria-expanded={open}
         aria-controls="parking-lot-panel"
         title="Park a thought (Alt+P)"
-        className="fixed bottom-4 left-4 z-[880] flex items-center gap-2 rounded-full border border-[var(--color-divider)] bg-[var(--color-surface)] px-3.5 py-2 text-[12.5px] font-semibold text-[var(--color-text)] shadow-[var(--shadow-md)] transition-colors hover:border-[var(--color-accent)] hover:text-[var(--color-accent-700)]"
+        className="fixed bottom-4 left-4 z-[880] hidden items-center gap-2 rounded-full border border-[var(--color-divider)] bg-[var(--color-surface)] px-3.5 py-2 text-[12.5px] font-semibold text-[var(--color-text)] shadow-[var(--shadow-md)] transition-colors hover:border-[var(--color-accent)] hover:text-[var(--color-accent-700)] lg:flex"
       >
         <i className="ph-duotone ph-push-pin text-base text-[var(--color-accent)]"></i>
-        <span className="hidden sm:inline">Park a thought</span>
+        <span>Park a thought</span>
         {notes.length > 0 && (
           <span className="grid h-[18px] min-w-[18px] place-items-center rounded-full bg-[var(--color-accent)] px-1 font-mono text-[10px] font-bold text-[var(--color-bg)]">
             {notes.length}

@@ -257,11 +257,23 @@ function explainerInstructions({ language = 'English', style = 'plain' } = {}) {
       'Short spoken sentences that flow into each other, at a Grade 6 level.'
   }[style] || 'Explain in plain Grade 6 language.';
 
+  // Callers hand us whatever they have: a BCP-47 code from the web app's
+  // language picker ('hi-IN'), or a bare name from the extension ('Hindi').
+  // Resolving both to the same catalogue entry is what stops an explanation
+  // coming back in English because the prompt said "respond entirely in hi-IN"
+  // and the model quietly ignored it.
+  const resolved = resolveLanguage(language);
+  const looksLikeCode = /^[a-z]{2}([-_][A-Za-z]{2,4})?$/.test(String(language || '').trim());
+  const languageName = looksLikeCode || !language ? resolved.name : String(language);
+  const nativeName = looksLikeCode || !language ? resolved.native : '';
+
   return `You are SETU's vernacular explainer for neurodivergent users.
 ${styleGuide}
-Respond entirely in ${language}, in its native script, written naturally rather than
+Respond entirely in ${languageName}${nativeName && nativeName !== languageName ? ` (${nativeName})` : ''}, in its native script, written naturally rather than
 translated word-for-word from English.
-Never use jargon without immediately defining it. Keep sentences under 20 words.`;
+Keep widely used English technical terms in English where a ${languageName} speaker would normally say them that way.
+Never use jargon without immediately defining it. Keep sentences under 20 words.
+Write prose only: no markdown, no headings, no bullet characters.`;
 }
 
 /**

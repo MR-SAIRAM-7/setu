@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getPrefs, savePrefs, listMaps, clearAllMaps, restoreSeedMaps, THEMES } from '../lib/storage';
+import { getPrefs, savePrefs, listMaps, clearAllMaps, restoreSeedMaps } from '../lib/storage';
 import { getUserId } from '../lib/identity';
 import { api, setApiLanguage } from '../lib/api';
 import { tts } from '../lib/tts';

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { savePrefs, listMaps } from '../lib/storage';
 import { exportMindMapToPDF } from '../lib/exportUtils';
+import { MODES } from '../lib/modeCatalog';
 import VoiceInputButton from './VoiceInputButton';
 
 export default function CommandPalette({ isOpen, onClose, onStartFocus }) {
@@ -65,6 +66,22 @@ export default function CommandPalette({ isOpen, onClose, onStartFocus }) {
       run: () => navigate('/modes')
     },
     {
+      id: 'go-listen',
+      group: 'Go',
+      icon: 'ph-heart',
+      label: 'Listen',
+      hint: 'Somewhere to put the frustration before the next task',
+      run: () => navigate('/listen')
+    },
+    {
+      id: 'go-momentum',
+      group: 'Go',
+      icon: 'ph-medal',
+      label: 'Momentum',
+      hint: 'Points, streak, and milestones',
+      run: () => navigate('/momentum')
+    },
+    {
       id: 'go-settings',
       group: 'Go',
       icon: 'ph-gear',
@@ -82,30 +99,22 @@ export default function CommandPalette({ isOpen, onClose, onStartFocus }) {
       hint: '25-minute calm timer with gentle break',
       run: () => onStartFocus?.()
     },
-    {
-      id: 'do-simplify',
+    /*
+      Every mode, generated from the catalogue.
+
+      Three of the eight used to be hand-listed here, which meant Numbers — the
+      dyscalculia tool, and the hardest one to stumble across — was unreachable
+      from the palette entirely. Generating them keeps the list honest when a
+      mode is added or renamed.
+    */
+    ...MODES.map((mode) => ({
+      id: `do-${mode.key}`,
       group: 'Do',
-      icon: 'ph-waves',
-      label: 'Simplify some text',
-      hint: 'Rewrite dense language to Grade 6 plain words',
-      run: () => navigate('/modes?mode=simplify')
-    },
-    {
-      id: 'do-start',
-      group: 'Do',
-      icon: 'ph-play-circle',
-      label: 'Break task freeze',
-      hint: 'Get one 10-minute micro action to begin',
-      run: () => navigate('/modes?mode=start')
-    },
-    {
-      id: 'do-meet',
-      group: 'Do',
-      icon: 'ph-users-three',
-      label: 'Rescue meeting notes',
-      hint: 'Pull decisions, actions, and decode jargon',
-      run: () => navigate('/modes?mode=meet')
-    },
+      icon: mode.icon,
+      label: `${mode.verb} · ${mode.name}`,
+      hint: mode.blurb,
+      run: () => navigate(`/modes?mode=${mode.key}`)
+    })),
     {
       id: 'do-upload',
       group: 'Do',

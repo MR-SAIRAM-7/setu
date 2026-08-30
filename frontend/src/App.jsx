@@ -12,7 +12,7 @@ import CommandPalette from './components/CommandPalette';
 import BreakDialog from './components/BreakDialog';
 import ReadingRuler from './components/ReadingRuler';
 import RewardToast from './components/RewardToast';
-import ParkingLot from './components/ParkingLot';
+import ParkingLot, { TOGGLE_EVENT as PARKING_LOT_TOGGLE } from './components/ParkingLot';
 import MomentumRail from './components/MomentumRail';
 import { api, setApiLanguage } from './lib/api';
 import { applyPrefs, getPrefs, savePrefs } from './lib/storage';
@@ -351,43 +351,39 @@ function Shell({
             </NavLink>
           ))}
 
-          {/* Quick Sensory / Focus Tools in Sidebar */}
-          <div className="pt-2 px-3 space-y-1">
-            <span className="kicker text-[9.5px] px-1">Focus Tools</span>
-            <button
-              onClick={onToggleRuler}
-              className={`w-full flex items-center justify-between p-2 rounded-[var(--radius-md)] border text-xs font-semibold transition-colors ${
-                readingRulerActive
-                  ? 'bg-[var(--color-accent-100)] border-[var(--color-accent)] text-[var(--color-accent-900)]'
-                  : 'bg-[var(--color-bg)] border-[var(--color-divider)] text-[var(--color-text)] hover:border-[var(--color-accent)]'
-              }`}
-              title="Toggle reading ruler (Alt+H)"
-            >
-              <div className="flex items-center gap-2">
-                <i className="ph-duotone ph-line-segments text-base text-[var(--color-accent)]"></i>
-                <span>Reading Ruler</span>
-              </div>
-              <kbd className="px-1 py-0.5 rounded border border-[var(--color-divider)] bg-[var(--color-surface)] font-mono text-[9.5px]">
-                Alt+H
-              </kbd>
-            </button>
-          </div>
         </div>
 
-        {/* Command Palette Trigger */}
-        <div className="px-3 pb-2">
+        {/*
+          Utility row.
+
+          The ruler and the command palette used to occupy a headed section and
+          a full-width button of their own, which put four separate blocks
+          between the navigation and the clock. They are two toggles; they get
+          one row.
+        */}
+        <div className="grid grid-cols-2 gap-1.5 px-3 pb-2">
+          <button
+            onClick={onToggleRuler}
+            aria-pressed={readingRulerActive}
+            className={`flex min-h-[34px] cursor-pointer items-center justify-center gap-1.5 rounded-[var(--radius-md)] border text-[12px] font-semibold transition-colors ${
+              readingRulerActive
+                ? 'border-[var(--color-accent)] bg-[var(--color-accent-100)] text-[var(--color-accent-900)]'
+                : 'border-[var(--color-divider)] bg-[var(--color-bg)] text-[var(--color-text)] hover:border-[var(--color-accent)]'
+            }`}
+            title="Reading ruler — a moving band that keeps your place (Alt+H)"
+          >
+            <i className="ph-duotone ph-line-segments text-base text-[var(--color-accent)]"></i>
+            Ruler
+          </button>
+
           <button
             onClick={onOpenPalette}
-            className="w-full flex items-center justify-between gap-2 p-2 rounded-[var(--radius-md)] border border-[var(--color-divider)] bg-[var(--color-bg)] text-[12.5px] text-[var(--color-text)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent-700)] transition-colors cursor-pointer"
+            className="flex min-h-[34px] cursor-pointer items-center justify-center gap-1.5 rounded-[var(--radius-md)] border border-[var(--color-divider)] bg-[var(--color-bg)] text-[12px] font-semibold text-[var(--color-text)] transition-colors hover:border-[var(--color-accent)] hover:text-[var(--color-accent-700)]"
             aria-label="Open command palette"
+            title="Jump anywhere — every screen and tool, by name (Ctrl or Cmd + K)"
           >
-            <div className="flex items-center gap-2">
-              <i className="ph-duotone ph-magnifying-glass text-base text-[var(--color-accent)]"></i>
-              <span className="font-semibold">Quick Actions</span>
-            </div>
-            <kbd className="px-1.5 py-0.5 rounded border border-[var(--color-divider)] bg-[var(--color-surface)] font-mono text-[10px] text-[color-mix(in_srgb,var(--color-text)_60%,transparent)]">
-              ⌘K
-            </kbd>
+            <i className="ph-duotone ph-magnifying-glass text-base text-[var(--color-accent)]"></i>
+            Actions
           </button>
         </div>
 
@@ -432,7 +428,9 @@ function Shell({
         <MomentumRail />
 
         {/* Engine & MongoDB Status Badge */}
-        <div className="border-t border-[var(--color-divider)] p-3 bg-[var(--color-surface)]">
+          {/* Reserved lane at the foot of the rail: the parking-lot pill floats at
+            bottom-left on desktop and used to sit directly on top of this badge. */}
+        <div className="border-t border-[var(--color-divider)] p-3 pb-[60px] bg-[var(--color-surface)]">
           <EngineBadge state={engine} dbState={dbState} />
         </div>
       </nav>
@@ -461,13 +459,23 @@ function Shell({
           <span className="font-[var(--font-heading)] font-bold text-base text-[var(--color-text)]">
             SETU Sanctuary
           </span>
-          <button
-            onClick={onOpenPalette}
-            className="btn btn-quiet !min-h-[34px] !px-2"
-            aria-label="Search"
-          >
-            <i className="ph-duotone ph-magnifying-glass text-lg"></i>
-          </button>
+          <div className="flex items-center gap-0.5">
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent(PARKING_LOT_TOGGLE))}
+              className="btn btn-quiet !min-h-[34px] !px-2"
+              aria-label="Park a thought"
+              title="Park a thought (Alt+P)"
+            >
+              <i className="ph-duotone ph-push-pin text-lg"></i>
+            </button>
+            <button
+              onClick={onOpenPalette}
+              className="btn btn-quiet !min-h-[34px] !px-2"
+              aria-label="Search"
+            >
+              <i className="ph-duotone ph-magnifying-glass text-lg"></i>
+            </button>
+          </div>
         </div>
 
         <main id="main" className="min-h-0 flex-1 overflow-hidden">

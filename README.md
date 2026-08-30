@@ -36,7 +36,7 @@ Built for Capgemini Hack4Positive 2026 · Disability Inclusion & Accessibility
 | Surface | What it is | Where |
 |---|---|---|
 | **SETU Lens** | Chrome extension. Rewrites the page you are on — bionic text, line focus, reader view, read-aloud, and an AI agent that navigates the page for you. | `chrome-extension/` |
-| **SETU Sanctuary** | Redesigned Broadsheet React workspace. Research any topic into an interactive talking mind map, 8 cognitive tools, reflective support, a reward system, 3-step onboarding, command palette, and focus sessions. | `frontend/` |
+| **SETU Sanctuary** | Redesigned Broadsheet React workspace. Research any topic into an interactive talking mind map that explains any branch in your language, 8 cognitive tools that each look and work like the job they do, reflective support, a reward system, 3-step onboarding, command palette, and focus sessions. | `frontend/` |
 | **SETU Mobile** | React Native + TypeScript Expo Android client with SVG touch mind maps, camera OCR document ingestion, 7 cognitive modes, and ADHD focus timers. | `mobile/` |
 | **SETU Engine** | The shared AI orchestration layer and MongoDB persistence service that all surfaces call transparently via `x-user-id`. | `backend/` |
 
@@ -51,7 +51,7 @@ contradicted assumptions the app was built on, so the web application was rework
 |---|---|
 | "Dyslexia" is three separate conditions — dyslexia (reading), **dyscalculia** (numbers), **dysgraphia** (writing). A person may have one, two, or all three. | Onboarding lists all three separately. A dedicated **Numbers** mode was added for dyscalculia. |
 | Bigger fonts and bionic reading are **largely ineffective** — the difficulty is comprehension and decoding, not eyesight. | Bionic reading is demoted to an honestly-labelled comfort option. A new **Comprehension Support** section leads with audio and diagrams. |
-| Mind maps only help if they carry **no text**, or if text is **spoken when the cursor reaches it**. | Branches speak on hover *and* on keyboard focus. **Picture mode** strips the prose and moves detail to the voice. |
+| Mind maps only help if they carry **no text**, or if text is **spoken when the cursor reaches it**. | Branches speak on hover *and* on keyboard focus. **Picture mode** strips the prose and moves detail to the voice. Selecting a branch goes further and *explains* it, in the reader's own language. |
 | Maths must be taught with **countable physical objects inside a story** — apples and bananas, the way special education does it. | **Numbers** mode renders the actual objects on screen, one step at a time, narrated aloud. |
 | ADHD needs work made **interesting and gamified** — milestones and points, not long text reports. | A full reward engine: points, levels, streaks, and 11 milestones, summarised as one ring. |
 | **Working memory** is impaired; long-term memory is not. | The **parking lot** (`Alt+P`) offloads an interrupting thought from anywhere without losing your place. |
@@ -78,6 +78,51 @@ map re-requests the same handful of labels constantly.
 **Without `SARVAM_API_KEY` everything still works** on the browser's built-in speech synthesis. The
 engine says so explicitly (`fallbackToBrowser: true`) and the client switches engines rather than
 leaving the user in silence — including mid-passage if Sarvam fails partway through.
+
+### Eight modes, eight workspaces
+
+The cognitive modes used to share one chrome: same list, same textarea, same button, same
+column of headed paragraphs. They do genuinely different jobs, and printing all eight on
+identical stationery made them read as one feature with a dropdown — and hid the
+accommodation, because nothing on screen said that Numbers works differently from Simplify.
+
+Each mode now carries a full identity: its own plate colour, its own CSS-drawn background
+texture, the shape of its ask, the words on its button, and above all the layout of its
+answer.
+
+| Mode | Workspace | What that looks like |
+|---|---|---|
+| **Start** | Launch pad | One ignition card with the first ten minutes in large type and a real ten-minute clock, then a ladder whose rail fills as rungs are ticked |
+| **Simplify** | Translation bench | Your text and the plain version side by side with a gutter between them, and a needle showing the reading level |
+| **Learn** | Study deck | Concept cards, then a quiz dealt one card at a time — the rest are dots, so nothing has to be held in your head |
+| **Meet** | The ledger | A real table: task, owner, due, priority, ticked off row by row |
+| **Practice** | Rehearsal room | The conversation in the shape of a conversation — their line incoming, your reply outgoing, tone as a switch |
+| **Write** | Copy desk | Ruled manuscript paper, the cut sentence struck through, the reason set in the margin |
+| **Numbers** | The table | Countable objects on squared paper, one step at a time, narrated |
+| **Guide** | The trail | Stations on a filling rail, with "you are here" and a success signal at each one |
+
+Each lives in its own component under `frontend/src/components/modes/`; the identity and the
+worked example live in `frontend/src/lib/modeCatalog.js`. Adding a mode means adding an
+entry there and a stage component — not another branch in a shared switch.
+
+Every mode opens on a hand-checked worked example rather than an empty state, so each one
+can be understood, and demonstrated, without an API key.
+
+### Selecting a branch explains it
+
+Pointing at a branch reads it aloud. **Selecting** one asks the engine for a fresh
+plain-language explanation of that idea — streamed into a panel beside the canvas, written
+and spoken in whichever of the eleven languages is chosen, at one of three depths
+(*Simplest*, *Plain*, *Deeper*).
+
+Reading the branch's own note back was never an accommodation for someone who chose Tamil:
+the note is in whatever language the map was built in, and hearing an English sentence
+spoken at you is not translation. The explanation is generated per branch instead, and the
+audio follows the explanation rather than the map text.
+
+Answers are cached per branch, per depth, per language, and the request waits for the
+selection to settle — clicking across a map to find the branch you meant costs one call,
+not ten.
 
 ### Eleven Indian languages
 

@@ -27,8 +27,7 @@ export default function MindMap({
   textScale = 1.0,
   onOpenCustomizer = null,
   onAddChild = null,
-  onEditNode = null,
-  onDeleteNode = null
+  onEditNode = null
 }) {
   const [collapsed, setCollapsed] = useState(() => new Set());
   const [selected, setSelected] = useState(null);
@@ -44,6 +43,18 @@ export default function MindMap({
   const didFitRef = useRef(false);
   const speakTimerRef = useRef(null);
   const draggingRef = useRef(false);
+
+  /**
+   * Whether the reader has panned or zoomed since the last automatic fit.
+   *
+   * The canvas is re-fitted when its box changes size — opening the branch
+   * explainer, collapsing the conversation panel, or simply resizing the window
+   * all used to leave the map stranded off-screen with no way back except the
+   * fit button. But re-fitting a map somebody has deliberately zoomed into
+   * would throw away their place, so the automatic pass stands down as soon as
+   * they take the viewport into their own hands.
+   */
+  const userMovedRef = useRef(false);
 
   const root = map?.root;
   const activePalette = (COLOR_PALETTES[palette] || COLOR_PALETTES.broadsheet).colors;
@@ -80,6 +91,7 @@ export default function MindMap({
   // Fit once per map on load
   useEffect(() => {
     didFitRef.current = false;
+    userMovedRef.current = false;
     setCollapsed(new Set());
     setSelected(null);
   }, [map?.id, map?.createdAt]);
@@ -90,6 +102,26 @@ export default function MindMap({
       fit();
     }
   }, [width, height, fit]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || typeof ResizeObserver === 'undefined') return undefined;
+
+    let frame = null;
+    const observer = new ResizeObserver(() => {
+      if (userMovedRef.current) return;
+      // Coalesced into a frame: a resize fires continuously while a panel
+      // animates open, and re-fitting on every tick is a full layout each time.
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => fit());
+    });
+
+    observer.observe(viewport);
+    return () => {
+      observer.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [fit]);
 
   /* Pan & Zoom */
   const onPointerDown = (event) => {
@@ -113,6 +145,7 @@ export default function MindMap({
     const dragState = dragRef.current;
     if (!dragState) return;
 
+    userMovedRef.current = true;
     setView((current) => ({
       ...current,
       x: dragState.originX + (event.clientX - dragState.startX),
@@ -178,11 +211,13 @@ export default function MindMap({
     savePrefs({ pictureMode: next });
   };
 
-  const zoomBy = (factor) =>
+  const zoomBy = (factor) => {
+    userMovedRef.current = true;
     setView((current) => ({
       ...current,
       scale: Math.min(2.4, Math.max(0.22, current.scale * factor))
     }));
+  };
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -250,6 +285,10 @@ export default function MindMap({
   }, [expandError]);
 
   const selectNode = (node) => {
+    // Hovering already started reading the branch out. Selecting it means the
+    // reader wants it *explained*, and the explainer will speak its own answer
+    // — so the hover read-out is cut here rather than left talking over it.
+    stopSpeaking();
     setSelected(node.id);
     onNodeFocus?.(node);
   };
@@ -415,7 +454,10 @@ export default function MindMap({
         pictureMode={pictureMode}
         onZoomIn={() => zoomBy(1.18)}
         onZoomOut={() => zoomBy(0.85)}
-        onFit={fit}
+        onFit={() => {
+          userMovedRef.current = false;
+          fit();
+        }}
         onCollapseAll={() =>
           setCollapsed(new Set(nodes.filter((n) => n.depth >= 1 && n.childCount).map((n) => n.id)))
         }
@@ -439,8 +481,8 @@ export default function MindMap({
       <div className="pointer-events-none absolute bottom-3 left-4 right-20 flex items-center justify-between text-[11.5px] text-[color-mix(in_srgb,var(--color-text)_55%,transparent)] select-none">
         <span>
           {speakOnHover
-            ? 'Point at any branch to hear it · click “+” on hover to add ideas · arrow keys work too'
-            : 'Click a branch to read notes · double-click to research deeper · arrow keys work too'}
+            ? 'Point at a branch to hear it · click it for an explanation in your language · double-click to research deeper'
+            : 'Click a branch for an explanation in your language · double-click to research deeper · arrow keys work too'}
         </span>
       </div>
     </div>
@@ -576,7 +618,7 @@ function Node({
             title="Add your own custom idea branch here"
             className="grid h-[22px] w-[22px] place-items-center rounded-full bg-[var(--color-accent-100)] border border-[var(--color-accent-300)] text-[11px] font-bold text-[var(--color-accent-900)] shadow-xs hover:bg-[var(--color-accent)] hover:text-[var(--color-bg)] cursor-pointer"
           >
-            <i className="ph-bold ph-plus"></i>
+            <i className="ph-duotone ph-plus"></i>
           </button>
         )}
 

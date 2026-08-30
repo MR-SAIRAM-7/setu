@@ -5,10 +5,11 @@ import FileUploadModal from '../components/FileUploadModal';
 import DocumentViewerModal from '../components/DocumentViewerModal';
 import MindMapCustomizerModal from '../components/MindMapCustomizerModal';
 import NodeEditorModal from '../components/NodeEditorModal';
+import NodeInsightPanel from '../components/NodeInsightPanel';
 import { BionicText } from '../lib/bionic';
 import { tts } from '../lib/tts';
 import { streamChat, api } from '../lib/api';
-import { saveMap, listMaps, DEFAULT_WORKED_MAP, getPrefs, savePrefs } from '../lib/storage';
+import { saveMap, listMaps, getMap, DEFAULT_WORKED_MAP, getPrefs, savePrefs } from '../lib/storage';
 import { addNodeToTree, editNodeInTree, deleteNodeFromTree } from '../lib/layout';
 import { award } from '../lib/progress';
 import {
@@ -46,13 +47,23 @@ export default function MindMapChat() {
   const [error, setError] = useState(null);
   const [detail, setDetail] = useState(null);
   const [showChat, setShowChat] = useState(true);
+
+  /**
+   * Which half of this screen a phone is looking at.
+   *
+   * Below `lg` the two panes stack, and the conversation is `w-full` — which
+   * meant the canvas was pushed off the bottom of a viewport that does not
+   * scroll, so on a phone the mind map, the entire point of the page, could not
+   * be reached at all. They are now mutually exclusive views with a switch,
+   * and researching a topic hands you straight to the map.
+   */
+  const [mobileView, setMobileView] = useState('chat');
   const [handoffBanner, setHandoffBanner] = useState(null);
   const [attachedDoc, setAttachedDoc] = useState(null);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [viewingDocId, setViewingDocId] = useState(null);
   const [bionicEnabled, setBionicEnabled] = useState(() => getPrefs().bionicReading === true);
-  const [ttsPlaying, setTtsPlaying] = useState(false);
   const [conversationId, setConversationId] = useState(() => `conv_${Date.now()}`);
 
   // Canvas appearance lives in preferences so it survives reloads and applies to
@@ -76,40 +87,57 @@ export default function MindMapChat() {
     setMap(stored[0] || DEFAULT_WORKED_MAP);
   }, []);
 
-  useEffect(() => {
-    const unsubscribe = tts.subscribe((state) => {
-      setTtsPlaying(state.isPlaying && !state.isPaused);
-    });
-    return () => {
-      unsubscribe();
-      tts.stop();
-    };
-  }, []);
+  // Read-aloud transport now lives inside the branch explainer, which owns the
+  // text being spoken. All this page still owes the engine is silence on the
+  // way out, so leaving a route mid-sentence does not keep talking.
+  useEffect(() => () => tts.stop(), []);
 
   /**
-   * Handle the three deep links the app supports, exactly once each.
+   * Handle the deep links the app supports, exactly once each.
+   *
+   * `map` names a saved map to open, and travels with `topic` when a question
+   * is handed over from the Library — asking "tell me more about this branch"
+   * is meaningless if the page has opened somebody's most recent map instead of
+   * the one they were reading.
    */
   useEffect(() => {
     const topicParam = params.get('topic');
     const docParam = params.get('doc');
     const importParam = params.get('import');
+    const mapParam = params.get('map');
 
-    if (!topicParam && !docParam && !importParam) return;
+    if (!topicParam && !docParam && !importParam && !mapParam) return;
 
     const next = new URLSearchParams(params);
     next.delete('topic');
     next.delete('doc');
     next.delete('import');
+    next.delete('map');
     setParams(next, { replace: true });
 
+    let handedOverId = null;
+    if (mapParam) {
+      const stored = getMap(mapParam);
+      if (stored) {
+        setMap(stored);
+        setMobileView('map');
+        // Only claimed when the map genuinely resolved: a deleted id must not
+        // leave a pending question waiting forever on a map that cannot arrive.
+        handedOverId = stored.id;
+      }
+    }
+
     if (topicParam) {
-      pendingRef.current = { kind: 'topic', topic: topicParam };
+      pendingRef.current = { kind: 'topic', topic: topicParam, mapId: handedOverId };
       return;
     }
     if (docParam) {
       pendingRef.current = { kind: 'doc', documentId: docParam };
       return;
     }
+    // A bare `?map=` has already done its whole job above. Guarded here so it
+    // cannot fall through and try to parse a missing `import` payload.
+    if (mapParam) return;
 
     try {
       pendingRef.current = { kind: 'import', payload: JSON.parse(decodeURIComponent(importParam)) };
@@ -191,6 +219,7 @@ export default function MindMapChat() {
             onMap: (fresh) => {
               const stored = saveMap(fresh);
               setMap(stored || fresh);
+              setMobileView('map');
               // Researching a map is the headline action of the whole app; it
               // has to pay out, or the Mapmaker milestone can never be reached.
               award('mapCreated');
@@ -229,6 +258,13 @@ export default function MindMapChat() {
     pendingRef.current = null;
 
     if (pending.kind === 'topic') {
+      // Hold the question until the handed-over map is in state. `send` is
+      // rebuilt whenever `map` changes, which re-runs this effect, so re-arming
+      // is enough — no polling needed.
+      if (pending.mapId && map?.id !== pending.mapId) {
+        pendingRef.current = pending;
+        return;
+      }
       send(pending.topic);
       return;
     }
@@ -277,7 +313,7 @@ export default function MindMapChat() {
           setStatus(null);
         });
     }
-  }, [params, busy, send]);
+  }, [params, busy, send, map?.id]);
 
   const stop = () => {
     abortRef.current?.abort();
@@ -288,6 +324,7 @@ export default function MindMapChat() {
   const startNewMap = () => {
     stop();
     tts.stop();
+    setMobileView('chat');
     setMessages([]);
     setMap(null);
     setDetail(null);
@@ -301,6 +338,7 @@ export default function MindMapChat() {
   const handleMindMapFromFile = (freshMap) => {
     const stored = saveMap(freshMap);
     setMap(stored || freshMap);
+    setMobileView('map');
     setDetail(null);
     award('mapCreated');
     setMessages([
@@ -374,15 +412,6 @@ export default function MindMapChat() {
     [map, applyRootChange]
   );
 
-  const handleReadDetail = () => {
-    if (!detail) return;
-    if (ttsPlaying) {
-      tts.stop();
-    } else {
-      tts.speak(`${detail.label}. ${detail.detail || ''}`);
-    }
-  };
-
   // Reversed visually only: the transcript stays first in DOM order either way,
   // so tab order and screen-reader sequence do not change with the side.
   const chatOnRight = mapPrefs.chatPanelSide === 'right';
@@ -393,59 +422,107 @@ export default function MindMapChat() {
         chatOnRight ? 'lg:flex-row-reverse' : 'lg:flex-row'
       }`}
     >
+      {/* Phone-only switch between the two panes. Order-first so it sits on top
+          of the stack whichever side the conversation is pinned to. */}
+      <div
+        className="order-first flex shrink-0 gap-1 border-b border-[var(--color-divider)] bg-[var(--color-surface)] p-2 lg:hidden"
+        role="tablist"
+        aria-label="Conversation or map"
+      >
+        {[
+          { key: 'chat', label: 'Ask', icon: 'ph-chats-circle' },
+          { key: 'map', label: 'Map', icon: 'ph-graph' }
+        ].map((tab) => (
+          <button
+            key={tab.key}
+            role="tab"
+            aria-selected={mobileView === tab.key}
+            onClick={() => setMobileView(tab.key)}
+            className={`flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-[var(--radius-md)] border py-2 text-[13px] font-bold transition-colors ${
+              mobileView === tab.key
+                ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-bg)]'
+                : 'border-[var(--color-divider)] bg-[var(--color-bg)] text-[var(--color-text)]'
+            }`}
+          >
+            <i className={`ph-duotone ${tab.icon} text-base`}></i>
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       {/* --------------------------- Conversation Pane (392px fixed) --------------------------- */}
       <section
-        className={`flex flex-col bg-[var(--color-bg)] transition-all duration-200 ${
+        className={`flex-col bg-[var(--color-bg)] transition-all duration-200 ${
           chatOnRight
             ? 'border-[var(--color-divider)] lg:border-l'
             : 'border-r border-[var(--color-divider)]'
-        } ${showChat ? 'lg:w-[392px] lg:shrink-0 w-full' : 'lg:w-12 lg:shrink-0 hidden lg:flex'}`}
+        } ${mobileView === 'chat' ? 'flex min-h-0 flex-1' : 'hidden'} ${
+          showChat ? 'lg:flex lg:w-[392px] lg:flex-none lg:shrink-0' : 'lg:flex lg:w-12 lg:flex-none lg:shrink-0'
+        }`}
         aria-label="Conversation"
       >
-        {/* Header */}
-        <header className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[var(--color-divider)]">
+        {/*
+          Header.
+
+          Four labelled buttons and a two-line title never fitted across 392px —
+          the heading wrapped to three lines and the row spilled. The title now
+          keeps the row to itself and the tools sit underneath as icons with
+          accessible names, which is both narrower and steadier when the panel
+          is resized.
+        */}
+        <header className="border-b border-[var(--color-divider)] px-4 py-3">
           {showChat ? (
             <>
-              <div>
-                <h1 className="text-[20px] font-bold text-[var(--color-text)]">Ask anything</h1>
-                <p className="text-[12px] text-[color-mix(in_srgb,var(--color-text)_58%,transparent)]">
-                  Research topics or query uploaded documents
-                </p>
-              </div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <h1 className="truncate text-[19px] font-bold leading-tight text-[var(--color-text)]">
+                  Ask anything
+                </h1>
                 <button
-                  onClick={() => setBionicEnabled((prev) => !prev)}
-                  className={`btn !min-h-[30px] !px-2 text-xs font-semibold ${
-                    bionicEnabled
-                      ? 'bg-[var(--color-accent-100)] text-[var(--color-accent-900)] border border-[var(--color-accent-300)]'
-                      : 'btn-ghost'
-                  }`}
-                  title="Toggle Bionic Reading Fixations"
+                  onClick={() => setShowChat(false)}
+                  className="btn btn-quiet !min-h-[28px] !px-1.5 hidden shrink-0 lg:inline-flex"
+                  aria-label="Collapse conversation panel"
+                  title="Collapse this panel to widen the map"
                 >
-                  <i className="ph-duotone ph-eye text-sm"></i>
-                  Bionic
+                  <i className="ph-duotone ph-caret-left text-base"></i>
                 </button>
+              </div>
+
+              <div className="mt-2 flex items-center gap-1.5">
                 <button
                   onClick={() => setUploadModalOpen(true)}
-                  className="btn btn-secondary !min-h-[30px] !px-2.5 text-[12px]"
-                  title="Upload PDF, DOCX, or Notes"
+                  className="btn btn-secondary !min-h-[28px] !px-2.5 text-[12px]"
+                  title="Upload a PDF, Word file, or notes"
                 >
                   <i className="ph-duotone ph-file-arrow-up"></i>
                   Upload
                 </button>
                 <button
                   onClick={startNewMap}
-                  className="btn btn-ghost !min-h-[30px] !px-2 text-[12px]"
-                  title="Start a new map"
+                  className="btn btn-ghost !min-h-[28px] !px-2.5 text-[12px]"
+                  title="Clear the canvas and start a new map"
                 >
-                  New
+                  <i className="ph-duotone ph-plus"></i>
+                  New map
                 </button>
                 <button
-                  onClick={() => setShowChat(false)}
-                  className="btn btn-quiet !min-h-[30px] !px-2 hidden lg:inline-flex"
-                  aria-label="Collapse conversation panel"
+                  onClick={() => {
+                    const next = !bionicEnabled;
+                    setBionicEnabled(next);
+                    // Persisted like the other reading settings: it used to reset
+                    // every time the page was re-entered, so a reader who needs
+                    // it had to switch it back on at every visit.
+                    savePrefs({ bionicReading: next });
+                  }}
+                  aria-pressed={bionicEnabled}
+                  className={`btn !min-h-[28px] !px-2 text-[12px] font-semibold ${
+                    bionicEnabled
+                      ? 'bg-[var(--color-accent-100)] text-[var(--color-accent-900)] border border-[var(--color-accent-300)]'
+                      : 'btn-ghost'
+                  }`}
+                  title="Bold the first letters of each word. Helps some readers, not all — try it both ways."
                 >
-                  <i className="ph-duotone ph-caret-left text-base"></i>
+                  <i className="ph-duotone ph-eye text-sm"></i>
+                  Bionic
                 </button>
               </div>
             </>
@@ -454,6 +531,7 @@ export default function MindMapChat() {
               onClick={() => setShowChat(true)}
               className="btn btn-quiet !min-h-[36px] !px-2 w-full justify-center"
               aria-label="Expand conversation panel"
+              title="Show the conversation"
             >
               <i className="ph-duotone ph-caret-right text-base"></i>
             </button>
@@ -653,7 +731,9 @@ export default function MindMapChat() {
 
       {/* --------------------------- Flexible Map Pane --------------------------- */}
       <section
-        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-4 sm:p-5 gap-3"
+        className={`min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-4 sm:p-5 gap-3 lg:flex ${
+          mobileView === 'map' ? 'flex' : 'hidden'
+        }`}
         aria-label="Mind map canvas"
       >
         {map ? (
@@ -743,8 +823,19 @@ export default function MindMapChat() {
               </div>
             </header>
 
-            {/* Mind Map Canvas floor flex: 1 1 300px */}
-            <div className="flex-1 basis-[300px] min-h-[300px] relative">
+            {/*
+              Canvas and branch explainer sit side by side from 2xl up, and stack
+              below that.
+
+              The split needs about 500px of canvas left over to be worth having,
+              and the sidebar and the conversation have already taken 636px — so
+              at 1280 a side-docked panel left the map a 220px strip. Above 1536
+              there is genuinely room for both; below it the panel goes under the
+              canvas, where the map keeps its full width and the explanation is
+              still on screen without covering it.
+            */}
+            <div className="flex min-h-0 flex-1 basis-[300px] flex-col gap-3 2xl:flex-row">
+            <div className="relative min-h-[300px] flex-1">
               <MindMap
                 map={map}
                 palette={mapPrefs.mapColorTheme}
@@ -764,56 +855,22 @@ export default function MindMapChat() {
               />
             </div>
 
-            {/* Detail Panel below canvas when a node is clicked */}
             {detail && (
-              <aside className="p-4 bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-divider)] shadow-[var(--shadow-sm)] animate-setu-rise max-h-[32vh] overflow-y-auto text-left">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 max-w-[76ch]">
-                    <span className="kicker block mb-1">Selected topic</span>
-                    <h3 className="text-[19px] font-bold text-[var(--color-text)] leading-tight">
-                      <BionicText text={detail.label} enabled={bionicEnabled} />
-                    </h3>
-                    {detail.detail && (
-                      <p className="mt-1.5 text-[14px] leading-relaxed text-[color-mix(in_srgb,var(--color-text)_78%,transparent)]">
-                        <BionicText text={detail.detail} enabled={bionicEnabled} />
-                      </p>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => setDetail(null)}
-                    className="btn btn-quiet !min-h-[28px] !px-2"
-                    aria-label="Close topic detail"
-                  >
-                    <i className="ph-duotone ph-x text-base"></i>
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-2.5 mt-3 pt-3 border-t border-[var(--color-divider)]">
-                  <button
-                    onClick={handleReadDetail}
-                    className={`btn !min-h-[32px] text-[12px] ${ttsPlaying ? 'btn-primary' : 'btn-ghost'}`}
-                    title="Listen aloud"
-                  >
-                    <i className={`ph-duotone ${ttsPlaying ? 'ph-pause-circle' : 'ph-speaker-high'}`}></i>
-                    {ttsPlaying ? 'Pause Audio' : 'Listen'}
-                  </button>
-                  <button
-                    onClick={() => send(`Tell me more about "${detail.label}"`)}
-                    className="btn btn-secondary !min-h-[32px] text-[12px]"
-                  >
-                    <i className="ph-duotone ph-chats-circle"></i>
-                    Ask about this
-                  </button>
-                  <button
-                    onClick={() => send(`Go one level deeper into "${detail.label}" in the map`)}
-                    className="btn btn-ghost !min-h-[32px] text-[12px]"
-                  >
-                    <i className="ph-duotone ph-tree-structure"></i>
-                    Go one level deeper
-                  </button>
-                </div>
-              </aside>
+              <div className="flex max-h-[46vh] min-h-[240px] 2xl:max-h-none 2xl:min-h-0 2xl:w-[380px] 2xl:shrink-0">
+                <NodeInsightPanel
+                  node={detail}
+                  map={map}
+                  language={mapPrefs.language}
+                  bionicEnabled={bionicEnabled}
+                  onClose={() => setDetail(null)}
+                  onAsk={(node) => send(`Tell me more about "${node.label}"`)}
+                  onDeeper={(node) =>
+                    send(`Go one level deeper into "${node.label}" in the map`)
+                  }
+                />
+              </div>
             )}
+            </div>
           </>
         ) : (
           <EmptyCanvas

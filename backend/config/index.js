@@ -403,10 +403,19 @@ module.exports = {
   // ---------------------------------------------------------------------------
 
   rateLimit: {
-    /** AI calls are quota-bound. */
+    /**
+     * AI calls are quota-bound.
+     *
+     * Raised from 30 when selecting a mind-map branch started asking for a
+     * plain-language explanation of it. Exploring a map is a burst of a dozen
+     * or so short streamed calls in a minute, on top of whatever else the
+     * reader is doing; at 30 an ordinary session hit the limiter. The client
+     * caches per branch and waits for the selection to settle before asking,
+     * so this is headroom for real use rather than a licence to hammer it.
+     */
     aiWindowMs: Number(process.env.RATE_LIMIT_AI_WINDOW_MS || 60000),
 
-    aiMax: Number(process.env.RATE_LIMIT_AI_MAX || 30),
+    aiMax: Number(process.env.RATE_LIMIT_AI_MAX || 60),
 
     /** General API calls. */
     generalWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60000),

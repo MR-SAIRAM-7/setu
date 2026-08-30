@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import MindMap from '../components/MindMap';
+import NodeInsightPanel from '../components/NodeInsightPanel';
 import FileUploadModal from '../components/FileUploadModal';
 import DocumentViewerModal from '../components/DocumentViewerModal';
 import VoiceInputButton from '../components/VoiceInputButton';
@@ -156,6 +157,16 @@ export default function Library() {
   const [buildingFrom, setBuildingFrom] = useState(null);
   const [error, setError] = useState(null);
   const [bionicEnabled, setBionicEnabled] = useState(() => getPrefs().bionicReading === true);
+
+  /**
+   * The branch selected in the map viewer.
+   *
+   * A map opened from the Library is the same map with the same branches, so
+   * selecting one has to do the same thing it does on the mind map page:
+   * explain it. Without this the viewer here was read-only in a way nothing on
+   * screen admitted — you clicked a branch and nothing happened.
+   */
+  const [detail, setDetail] = useState(null);
   // Read once per mount so a map opened here is drawn with the same palette,
   // edges, and text scale the user chose on the mind map page.
   const [mapPrefs] = useState(getPrefs);
@@ -165,6 +176,10 @@ export default function Library() {
     setMaps(listMaps());
     loadFiles();
   }, []);
+
+  useEffect(() => {
+    setDetail(null);
+  }, [openId]);
 
   const loadFiles = async () => {
     setLoadingFiles(true);
@@ -209,6 +224,21 @@ export default function Library() {
   }, [files, query, fileFilter]);
 
   const openMap = maps.find((m) => m.id === openId);
+
+  /**
+   * Send a question about the open map over to the mind map page.
+   *
+   * The Library has no conversation of its own, and the mind map page otherwise
+   * opens whichever map was saved most recently — so the map id travels with
+   * the question. Without it, "tell me more about this branch" would be asked
+   * against a different map entirely.
+   */
+  const handOffToChat = (question) => {
+    if (!openMap) return;
+    navigate(
+      `/mindmap?map=${encodeURIComponent(openMap.id)}&topic=${encodeURIComponent(question)}`
+    );
+  };
 
   const removeMap = (e, id) => {
     e.stopPropagation();
@@ -292,20 +322,41 @@ export default function Library() {
           </div>
         </header>
 
-        <div className="flex-1 min-h-[350px]">
-          <MindMap
-            map={openMap}
-            palette={mapPrefs.mapColorTheme}
-            edgeStyle={mapPrefs.mapEdgeStyle}
-            gridPattern={mapPrefs.mapGridPattern}
-            nodeStyle={mapPrefs.mapNodeStyle}
-            edgeWidth={mapPrefs.mapEdgeWidth}
-            textScale={mapPrefs.mapTextScale}
-            onMapChange={(next) => {
-              saveMap(next);
-              setMaps(listMaps());
-            }}
-          />
+        {/* Canvas and branch explainer, laid out exactly as on the mind map
+            page: side by side where there is room, stacked below it otherwise. */}
+        <div className="flex min-h-0 flex-1 flex-col gap-3 2xl:flex-row">
+          <div className="relative min-h-[350px] flex-1">
+            <MindMap
+              map={openMap}
+              palette={mapPrefs.mapColorTheme}
+              edgeStyle={mapPrefs.mapEdgeStyle}
+              gridPattern={mapPrefs.mapGridPattern}
+              nodeStyle={mapPrefs.mapNodeStyle}
+              edgeWidth={mapPrefs.mapEdgeWidth}
+              textScale={mapPrefs.mapTextScale}
+              onMapChange={(next) => {
+                saveMap(next);
+                setMaps(listMaps());
+              }}
+              onNodeFocus={setDetail}
+            />
+          </div>
+
+          {detail && (
+            <div className="flex max-h-[46vh] min-h-[240px] 2xl:max-h-none 2xl:min-h-0 2xl:w-[380px] 2xl:shrink-0">
+              <NodeInsightPanel
+                node={detail}
+                map={openMap}
+                language={mapPrefs.language}
+                bionicEnabled={bionicEnabled}
+                onClose={() => setDetail(null)}
+                onAsk={(node) => handOffToChat(`Tell me more about "${node.label}"`)}
+                onDeeper={(node) =>
+                  handOffToChat(`Go one level deeper into "${node.label}" in the map`)
+                }
+              />
+            </div>
+          )}
         </div>
       </div>
     );

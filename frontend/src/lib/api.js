@@ -248,6 +248,89 @@ export async function streamChat(payload, handlers = {}, signal) {
   }
 }
 
+/**
+ * Stream a plain-language explanation, token by token.
+ *
+ * Uses the same bare-SSE shape as the backend's `/api/agent/explain/stream`:
+ * `data:` frames carrying `{ text }`, terminated by a literal `[DONE]`. There
+ * are no `event:` names on this endpoint, so the frame parser here is
+ * deliberately simpler than the one `streamChat` needs.
+ *
+ * Streaming is not a nicety on this screen. A node explanation is requested the
+ * instant a branch is selected, and a reader who loses the thread while waiting
+ * is exactly the reader this app exists for — first words on screen in about a
+ * second beats a complete paragraph in fifteen.
+ */
+export async function streamExplain({ text, style = 'plain', language }, handlers = {}, signal) {
+  let response;
+  const body = withLanguage(language ? { text, style, language } : { text, style });
+
+  try {
+    response = await fetch(url('/api/agent/explain/stream'), {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify(body),
+      signal
+    });
+  } catch (error) {
+    if (error.name === 'AbortError') throw error;
+    throw new ApiError(OFFLINE_MESSAGE, 0);
+  }
+
+  if (!response.ok || !response.body) {
+    // The rate limiter and the validator answer with JSON before the stream
+    // opens, and their message is the useful one — "Too many requests, wait a
+    // few seconds" tells a reader what to do; "unavailable" does not.
+    const detail = await response.json().catch(() => ({}));
+    throw new ApiError(
+      detail.error || 'The explanation engine is unavailable.',
+      response.status
+    );
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  const handleFrame = (frame) => {
+    const dataLines = [];
+    for (const line of frame.split('\n')) {
+      if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+    }
+    if (!dataLines.length) return;
+
+    const payload = dataLines.join('\n');
+    if (payload === '[DONE]') {
+      handlers.onDone?.({});
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(payload);
+      if (parsed.error) handlers.onError?.(parsed);
+      else if (typeof parsed.text === 'string') handlers.onChunk?.(parsed.text);
+      if (parsed.done) handlers.onDone?.(parsed);
+    } catch (_) {
+      /* a malformed frame must not kill the stream */
+    }
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split('\n\n');
+      buffer = frames.pop() || '';
+      for (const frame of frames) handleFrame(frame);
+    }
+    if (buffer.trim()) handleFrame(buffer);
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+}
+
 export const api = {
   health: () => get('/api/health', { timeoutMs: 8000 }),
   healthAi: () => get('/api/health/ai', { timeoutMs: 45000 }),
@@ -297,7 +380,16 @@ export const api = {
 
   // General helpers
   summarize: (text) => post('/api/summarize', { text }),
-  explain: (text, language = 'English') => post('/api/agent/explain', { text, language }),
+  /**
+   * Plain-language explanation of any passage.
+   *
+   * The language is deliberately *not* defaulted here. Passing a literal
+   * 'English' — as this used to — set the field before `withLanguage` could
+   * stamp the chosen one on, so every explanation came back in English no
+   * matter what the language picker said.
+   */
+  explain: (text, { style = 'plain', language, signal } = {}) =>
+    post('/api/agent/explain', language ? { text, style, language } : { text, style }, { signal }),
 
   // Eight cognitive modes
   start: (task, isStuck = false) => post('/api/start', { task, isStuck }),

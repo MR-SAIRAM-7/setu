@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { COLOR_PALETTES } from '../lib/layout';
-import { getPrefs, savePrefs } from '../lib/storage';
+import { getPrefs } from '../lib/storage';
 
 const GRID_PATTERNS = [
   { id: 'dots', label: 'Dot Grid', icon: 'ph-dots-nine', desc: 'Classic 24px subtle radial dots' },
@@ -166,7 +166,7 @@ export default function MindMapCustomizerModal({
                         </span>
                         {isSelected && (
                           <span className="w-5 h-5 rounded-full bg-[var(--color-accent)] text-[var(--color-bg)] flex items-center justify-center text-xs">
-                            <i className="ph-bold ph-check"></i>
+                            <i className="ph-duotone ph-check"></i>
                           </span>
                         )}
                       </div>

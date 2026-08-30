@@ -8,6 +8,7 @@ dist/
 build/
 .next/
 out/
+.claude
 
 # Environment variables
 # Ignore all .env files across all directories, keeping only .env.example templates
