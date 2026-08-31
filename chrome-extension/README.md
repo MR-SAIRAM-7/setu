@@ -42,8 +42,31 @@ On first install the options page opens so you can point it at an engine.
 | Gaze Scroll (webcam) | `Alt+E` |
 | 3-step path (read off the page) | `Alt+3` |
 | Visual map (read off the page) | `Alt+M` |
+| **Fill a form from your saved details** | Copilot → "Fill with my details" |
 | Reading themes | popup |
 | Turn everything off | `Alt+X` |
+
+Form filling is worth calling out because it is the one AI-shaped feature that
+needs no AI. You save your details once on the options page — name, date of
+birth, contact, both addresses down to the door number, parents, education,
+employment, emergency contact, and optionally official IDs — and the Copilot
+matches them against the fields on any page **entirely on your device**. Nothing
+is sent anywhere, it works with the engine asleep, and it fills a thirty-field
+government form in one pass instead of six planned steps.
+
+The safety rules are in [`shared/setu-profile.js`](shared/setu-profile.js) and
+are not negotiable:
+
+- The details live in `chrome.storage.local` and are deliberately kept off
+  Chrome Sync, unlike the reading preferences.
+- When the Copilot *plans* a task it tells the engine which details exist and
+  never what they are: it sends `{{profile.pincode}} — PIN code`, gets a plan
+  full of placeholders back, and substitutes the real values in the page.
+- Aadhaar, PAN, passport, bank and the rest are marked sensitive: never
+  described to the engine, never auto-filled, and Auto-run stops at each one.
+- A fresh install ships an invented sample profile so the feature can be seen
+  working — with the ID and bank fields left **empty on purpose**, because a
+  fabricated ID number submitted to a real portal is worse than a blank form.
 
 **Better with the SETU engine** (the backend in `../backend`):
 

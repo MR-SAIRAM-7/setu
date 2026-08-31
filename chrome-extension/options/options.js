@@ -79,6 +79,11 @@ const SAMPLE_WORDS = [
 class Options {
   constructor() {
     this.state = null;
+    /** Raw stored profile values — the editor's source of truth while open. */
+    this.profile = null;
+    /** Field edits waiting on the save debounce. */
+    this.profilePatch = null;
+    this.profileTimer = null;
   }
 
   async init() {
@@ -109,6 +114,7 @@ class Options {
 
     this.renderSettings();
     this.wire();
+    this.renderProfile();
     this.renderDiagnostics();
     this.testEngine();
     this.loadVoices();
@@ -253,6 +259,295 @@ class Options {
     keysList.innerHTML = KEY_MAP.map(
       ([key, description]) => `<li><span>${description}</span><kbd>${key}</kbd></li>`
     ).join('');
+  }
+
+  /* ======================================================================== */
+  /* Your details — the profile the Copilot fills forms from                  */
+  /* ======================================================================== */
+
+  /**
+   * Build the editor from the field catalogue in `shared/setu-profile.js`.
+   *
+   * Generated rather than written out in the markup, and that is not laziness:
+   * the catalogue is also what the matcher scores against, so a field that
+   * exists in one and not the other is a box the user fills in that nothing
+   * ever reads, or a detail the Copilot claims to know and cannot show them.
+   * One list, two consumers.
+   *
+   * The whole section is skipped rather than half-drawn if the profile module
+   * is missing, because a settings page that silently forgets what you typed is
+   * worse than one that plainly does not offer the feature.
+   */
+  async renderProfile() {
+    const root = $('#profile-groups');
+    const P = self.SETU_PROFILE;
+    if (!root || !P) return;
+
+    this.profile = await P.loadRaw();
+
+    root.innerHTML = P.GROUPS.map((group) => this.profileGroupMarkup(group)).join('');
+
+    // Queried by element rather than by class so the reference survives any
+    // later restyle of the generated markup.
+    root.querySelectorAll('input, select, textarea').forEach((el) => {
+      const key = el.dataset.profileKey;
+      if (!key) return;
+
+      const commit = () => {
+        const value = el.type === 'checkbox' ? el.checked : el.value;
+        this.saveProfileField(key, value);
+      };
+
+      // `input` for the live meter and derived chips, `change` for the pickers
+      // that only report on commit. Both funnel through the same debounce, so a
+      // fast typist writes once rather than once per keystroke.
+      el.addEventListener('input', commit);
+      el.addEventListener('change', commit);
+    });
+
+    this.paintProfile();
+  }
+
+  profileGroupMarkup(group) {
+    const P = self.SETU_PROFILE;
+    const fields = P.fieldsIn(group.key);
+    if (!fields.length) return '';
+
+    // Identity, contact and the current address are what almost every form
+    // asks for, so they are open; the other six wait to be asked for.
+    const openByDefault = ['identity', 'contact', 'address'].includes(group.key);
+
+    return `
+      <details class="pgroup" data-group="${escapeHtml(group.key)}" data-sensitive="${group.sensitive ? 'true' : 'false'}"${
+        openByDefault ? ' open' : ''
+      }>
+        <summary>
+          <span>${escapeHtml(group.label)}</span>
+          <output class="pgroup-count"></output>
+        </summary>
+        <div class="pgroup-body">
+          <p class="pgroup-hint">${escapeHtml(group.hint || '')}</p>
+          <div class="pgrid">
+            ${fields.map((field) => this.profileFieldMarkup(field)).join('')}
+          </div>
+          <footer class="pderived"></footer>
+        </div>
+      </details>`;
+  }
+
+  profileFieldMarkup(field) {
+    const value = this.profile?.[field.key];
+    const label = escapeHtml(field.label);
+    const hint = field.hint ? `<small>${escapeHtml(field.hint)}</small>` : '';
+
+    // Searchable text: the label, the key, and the words the matcher looks for.
+    // Someone hunting for their PIN code types "pincode", "postal" or "zip"
+    // depending on which form just asked them for it, and all three should land.
+    const search = escapeHtml(
+      [field.label, field.key, ...(field.match || []).map((re) => re.source.replace(/[\\^$.*+?()[\]{}|]|\\b/g, ' '))]
+        .join(' ')
+        .toLowerCase()
+    );
+
+    // `autocomplete="off"` throughout: the browser offering to autofill the
+    // page where you configure autofill is a loop nobody needs.
+    const shared = `data-profile-key="${escapeHtml(field.key)}" autocomplete="off" spellcheck="false"`;
+
+    if (field.type === 'checkbox') {
+      return `
+        <label class="pfield check" data-search="${search}">
+          <input type="checkbox" ${shared}${value ? ' checked' : ''} />
+          <span>${label}</span>
+        </label>`;
+    }
+
+    if (field.type === 'select') {
+      const options = ['', ...(field.options || [])]
+        .map(
+          (option) =>
+            `<option value="${escapeHtml(option)}"${option === value ? ' selected' : ''}>${
+              option ? escapeHtml(option) : '— not set —'
+            }</option>`
+        )
+        .join('');
+      return `
+        <label class="pfield" data-search="${search}">
+          <span>${label}</span>
+          <select ${shared}>${options}</select>
+          ${hint}
+        </label>`;
+    }
+
+    if (field.type === 'textarea') {
+      return `
+        <label class="pfield wide" data-search="${search}">
+          <span>${label}</span>
+          <textarea rows="3" ${shared}>${escapeHtml(value || '')}</textarea>
+          ${hint}
+        </label>`;
+    }
+
+    const placeholder = field.placeholder ? ` placeholder="${escapeHtml(field.placeholder)}"` : '';
+    return `
+      <label class="pfield" data-search="${search}">
+        <span>${label}</span>
+        <input type="${escapeHtml(field.type || 'text')}" ${shared}${placeholder} value="${escapeHtml(value || '')}" />
+        ${hint}
+      </label>`;
+  }
+
+  /**
+   * Write one field, on a debounce.
+   *
+   * Coalesced because this fires per keystroke and each save is a storage
+   * write plus a full recompute of the derived values. The patch is
+   * accumulated rather than replaced, so a burst that touches three fields
+   * still saves all three.
+   */
+  saveProfileField(key, value) {
+    this.profilePatch = { ...(this.profilePatch || {}), [key]: value };
+
+    clearTimeout(this.profileTimer);
+    this.profileTimer = setTimeout(async () => {
+      const patch = this.profilePatch;
+      this.profilePatch = null;
+
+      try {
+        const saved = await self.SETU_PROFILE.save(patch);
+        // `isSample` comes back from the store rather than being assumed: it is
+        // the store that decides an edit has made the profile the user's own,
+        // and merging only the patch left the "these are not your details"
+        // banner up after the very edit that made it untrue.
+        this.profile = { ...this.profile, ...patch, isSample: saved.isSample };
+        this.paintProfile();
+      } catch (error) {
+        this.toast(`Could not save: ${error.message}`, 'error');
+      }
+    }, 400);
+  }
+
+  /**
+   * Repaint everything computed: the meter, the per-group counts, the derived
+   * chips, and the sample-data warning.
+   *
+   * Kept separate from `renderProfile` so it can run on every keystroke
+   * without rebuilding the markup underneath the cursor — which would move the
+   * caret and lose the selection mid-word.
+   */
+  paintProfile() {
+    const P = self.SETU_PROFILE;
+    const root = $('#profile-groups');
+    if (!P || !root || !this.profile) return;
+
+    const values = P.derive(this.profile);
+
+    const banner = $('#profile-banner');
+    if (banner) banner.dataset.show = this.profile.isSample ? 'true' : 'false';
+
+    // Counted against the *derived* values, not the raw ones. With "same as
+    // current address" ticked, the permanent fields are stored empty and filled
+    // in by the mirror — so counting raw showed "0 / 9 saved" next to a ticked
+    // box, which reads as "this did not work". The number that matters here is
+    // how much the Copilot can actually fill, and that is the derived one.
+    const scored = P.FIELDS.filter((field) => field.type !== 'checkbox');
+    const filled = scored.filter((field) => String(values[field.key] || '').trim()).length;
+
+    const count = $('#profile-count');
+    if (count) count.textContent = `${filled} of ${scored.length}`;
+
+    const fill = $('#profile-fill');
+    if (fill) fill.style.width = `${Math.round((filled / Math.max(1, scored.length)) * 100)}%`;
+
+    for (const details of root.querySelectorAll('details')) {
+      const group = details.dataset.group;
+      const groupFields = P.fieldsIn(group).filter((field) => field.type !== 'checkbox');
+      const groupFilled = groupFields.filter((field) => String(values[field.key] || '').trim()).length;
+
+      const output = details.querySelector('output');
+      if (output) output.textContent = `${groupFilled} / ${groupFields.length} saved`;
+
+      const footer = details.querySelector('footer');
+      if (!footer) continue;
+
+      // What SETU assembles for itself — full name, age, the one-line postal
+      // address. Shown as read-only chips so the exact string that will land in
+      // a form field can be checked here rather than in the form.
+      const chips = P.derivedIn(group)
+        .map((entry) => ({ label: entry.label, value: values[entry.key] }))
+        .filter((entry) => entry.value);
+
+      footer.innerHTML = chips.length
+        ? `<span class="pderived-label">SETU works these out for you</span>${chips
+            .map(
+              (chip) =>
+                `<span class="pchip"><b>${escapeHtml(chip.label)}</b><span>${escapeHtml(chip.value)}</span></span>`
+            )
+            .join('')}`
+        : '';
+    }
+  }
+
+  /** Filter the whole editor down to the fields matching a typed query. */
+  filterProfile(query) {
+    const root = $('#profile-groups');
+    if (!root) return;
+
+    const needle = String(query || '').trim().toLowerCase();
+
+    for (const details of root.querySelectorAll('details')) {
+      let visible = 0;
+
+      for (const field of details.querySelectorAll('label')) {
+        const hit = !needle || (field.dataset.search || '').includes(needle);
+        field.hidden = !hit;
+        if (hit) visible += 1;
+      }
+
+      details.hidden = visible === 0;
+      // Searching means "show me this", so a match opens its group. Clearing
+      // the box restores the default set rather than leaving all nine open.
+      if (needle && visible) details.open = true;
+      else if (!needle) details.open = ['identity', 'contact', 'address'].includes(details.dataset.group);
+    }
+  }
+
+  /**
+   * Two-press confirmation, same as the settings reset.
+   *
+   * A profile is typed once and relied on for months, and a single stray click
+   * on "Clear my details" would silently undo an afternoon of it with nothing
+   * to undo it back.
+   */
+  async clearProfile() {
+    const button = $('#profile-clear');
+    if (!button) return;
+
+    const label = button.querySelector('span:last-child');
+
+    if (button.dataset.armed !== 'true') {
+      button.dataset.armed = 'true';
+      if (label) label.textContent = 'Click again to erase everything';
+      setTimeout(() => {
+        button.dataset.armed = 'false';
+        if (label) label.textContent = 'Clear my details';
+      }, 5000);
+      return;
+    }
+
+    button.dataset.armed = 'false';
+    if (label) label.textContent = 'Clear my details';
+
+    await self.SETU_PROFILE.clear();
+    await this.renderProfile();
+    this.renderDiagnostics();
+    this.toast('Your details have been erased from this browser.', 'success');
+  }
+
+  async restoreSampleProfile() {
+    await self.SETU_PROFILE.restoreSample();
+    await this.renderProfile();
+    this.renderDiagnostics();
+    this.toast('Sample details restored — remember to replace them.', 'success');
   }
 
   renderSettings() {
@@ -405,6 +700,10 @@ class Options {
     });
 
     $('#reset')?.addEventListener('click', () => this.resetAll());
+
+    $('#profile-search')?.addEventListener('input', (event) => this.filterProfile(event.target.value));
+    $('#profile-clear')?.addEventListener('click', () => this.clearProfile());
+    $('#profile-restore')?.addEventListener('click', () => this.restoreSampleProfile());
   }
 
   slider(selector, toSettings) {
@@ -510,10 +809,25 @@ class Options {
       bytes = await chrome.storage.sync.getBytesInUse(null);
     } catch (_) {}
 
+    // Reported separately from synced storage, and labelled "this device only",
+    // because the one thing somebody wants to be certain of about a stored home
+    // address is where it is stored.
+    let profileState = 'not available';
+    try {
+      const P = self.SETU_PROFILE;
+      if (P) {
+        const raw = await P.loadRaw();
+        const derived = P.derive(raw);
+        const filled = P.FIELDS.filter((field) => String(derived[field.key] || '').trim()).length;
+        profileState = raw.isSample ? `${filled} sample details` : `${filled} details saved`;
+      }
+    } catch (_) {}
+
     diag.innerHTML = `
       <div class="diag-item"><dt>Extension</dt><dd>${escapeHtml(chrome.runtime.getManifest().version)}</dd></div>
       <div class="diag-item"><dt>Platform</dt><dd>${IS_MAC ? 'macOS' : 'Windows / Linux'}</dd></div>
       <div class="diag-item"><dt>Synced Storage</dt><dd>${bytes} bytes in use</dd></div>
+      <div class="diag-item"><dt>Your details</dt><dd>${escapeHtml(profileState)} · this device only</dd></div>
       <div class="diag-item"><dt>Install Identifier</dt><dd title="${escapeHtml(installId)}">${escapeHtml(installId.slice(0, 16))}…</dd></div>
     `;
   }
@@ -532,6 +846,10 @@ class Options {
       return;
     }
 
+    // Synced storage only. Your saved details live in local storage and are
+    // deliberately left alone: "reset my reading preferences" must never be a
+    // way to lose an address and a date of birth you spent ten minutes typing.
+    // "Clear my details" in the section above is the button that does that.
     await chrome.storage.sync.clear();
     await chrome.storage.sync.set({
       apiHost: self.SETU_DEFAULTS?.apiHost || '',
@@ -545,8 +863,9 @@ class Options {
 
     button.dataset.armed = 'false';
     button.textContent = 'Reset all settings to defaults';
-    this.toast('All preferences reset to defaults', 'success');
+    this.toast('Reading preferences reset. Your saved details were left alone.', 'success');
     this.testEngine();
+    this.renderDiagnostics();
   }
 
   toast(message, tone = 'info') {

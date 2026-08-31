@@ -12,7 +12,9 @@
  *   - Steps flagged `requiresConfirmation` (submit, pay, delete, send) never
  *     fire automatically — not even during Auto-Run. The run pauses and waits
  *     for a deliberate click.
- *   - Nothing is auto-filled with invented personal data.
+ *   - Nothing is auto-filled with invented personal data. Values come only
+ *     from the details the user saved themselves, and government IDs and bank
+ *     details are never written without a deliberate click.
  *   - Auto-Run never resumes by itself across a page load. Automation that
  *     restarts unattended on a page nobody has looked at is a different and
  *     much worse thing than automation the user is watching.
@@ -32,6 +34,16 @@
 
 (() => {
   const { Feature, UI, API, Text, Store, Page, Dock, Scroll, Session, icon } = window.SETU;
+
+  /**
+   * The saved details the Copilot fills forms from — see shared/setu-profile.js.
+   *
+   * Read through a getter rather than captured once, because the content
+   * scripts load in manifest order and a future reorder that put this file
+   * first would otherwise leave a permanently-undefined binding rather than an
+   * obvious error.
+   */
+  const profileApi = () => window.SETU_PROFILE || null;
 
   /** Per-tab in sessionStorage; per-tab in the local mirror too, via Session.key. */
   const SESSION_KEY = 'setu_agent_session';
@@ -76,7 +88,34 @@
     return QUESTION_INTENT.test(goal);
   }
 
+  /**
+   * Goals that mean "put my saved details into this page's boxes".
+   *
+   * These are routed away from the planner entirely, to the deterministic
+   * matcher in `shared/setu-profile.js`. Three reasons, and all of them are
+   * about the person waiting on the form rather than about elegance:
+   *
+   *  - It is instant. No engine, no cold model, no thirty-second wait for the
+   *    one request where the user is already staring at a page they find hard.
+   *  - It is exhaustive. A plan is capped at six steps because six steps is
+   *    what a *plan* should be; a form has thirty fields and all thirty should
+   *    be offered, not the model's favourite six.
+   *  - It works with the engine asleep, which is the state a free host spends
+   *    most of its life in.
+   */
+  const AUTOFILL_INTENT =
+    /\bauto-?fill\b|\bfill\b[\s\S]{0,32}\b(form|details|fields|application|it in|it out|this in|this out|them in)\b|\b(fill|enter|complete|use|insert|apply)\b[\s\S]{0,12}\bmy\s+(details|info|information|data|profile|address|name)\b/i;
+
   const MAX_AUTORUN_STEPS = 24;
+
+  /**
+   * The most fields one autofill pass will offer.
+   *
+   * Long enough for a full government application form, short enough that the
+   * step list stays something a person can read rather than scroll. Anything
+   * past it is reported honestly and picked up by running it again.
+   */
+  const MAX_AUTOFILL_STEPS = 40;
 
   /**
    * Set a form value in a way component frameworks actually notice.
@@ -109,6 +148,20 @@
 
     if (descriptor) descriptor.set.call(el, value);
     else el.value = value;
+  }
+
+  /**
+   * A short, safe echo of what is about to be typed.
+   *
+   * Shown in the step tip so the user can check the value *before* it lands in
+   * a field rather than reading it back out of the form afterwards, which for
+   * this audience is the harder of the two. Long values are elided so one
+   * address does not push the rest of the plan off the panel.
+   */
+  function previewOf(value) {
+    const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+    if (!text) return '(nothing saved)';
+    return text.length > 64 ? `${text.slice(0, 61)}…` : text;
   }
 
   /** Panel geometry. Spacious design tailored for cognitive accessibility and legible reading. */
@@ -341,6 +394,169 @@
       return Page.resolve(step);
     }
 
+    /* ------------------------------------------------------------------ */
+    /* The user's saved details                                           */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Read the saved details fresh.
+     *
+     * Deliberately re-read per goal rather than cached at enable time and kept
+     * in sync with a storage listener. The options page is where these are
+     * edited, and the overwhelmingly common sequence is "the form asked for
+     * something I hadn't saved → save it → come back and try again". A cache
+     * makes that fail once for no reason the user can see. One storage read per
+     * goal costs nothing next to a model call.
+     *
+     * @returns {Promise<object|null>} derived values, or null if unavailable.
+     */
+    async profileValues() {
+      const api = profileApi();
+      if (!api) return null;
+
+      try {
+        return await api.load();
+      } catch (_) {
+        // Storage can be unavailable in a sandboxed frame or a locked-down
+        // profile. Form filling stops working; nothing else should.
+        return null;
+      }
+    }
+
+    /**
+     * Describe a live element the way the matcher expects a snapshot control.
+     *
+     * Used on the execution path, where we hold the element itself rather than
+     * the snapshot entry that produced the step — and where the page may have
+     * re-rendered since, so the element's current attributes are the truthful
+     * ones.
+     */
+    describeTarget(el) {
+      if (!el) return null;
+      return {
+        tag: el.tagName?.toLowerCase() || '',
+        type: el.type || '',
+        label: Page.labelOf(el),
+        name: el.getAttribute?.('name') || '',
+        fieldId: el.id || '',
+        placeholder: el.getAttribute?.('placeholder') || '',
+        autocomplete: el.getAttribute?.('autocomplete') || '',
+        title: el.getAttribute?.('title') || '',
+        value: el.tagName === 'INPUT' && el.type !== 'password' ? el.value || '' : ''
+      };
+    }
+
+    /**
+     * Fill every field on this page that maps to a saved detail.
+     *
+     * Built as an ordinary plan rather than a bespoke flow, which is the whole
+     * trick: the user gets the step list, the highlight, Back/Skip, Auto-run
+     * and the confirmation gate they already know, and there is one execution
+     * path to keep correct rather than two.
+     *
+     * Values are held as `{{profile.key}}` tokens right up to the moment of
+     * typing, so the plan that gets mirrored into sessionStorage on every
+     * change carries the *shape* of the answer and not a home address.
+     */
+    async autofillForm() {
+      const api = profileApi();
+      const values = await this.profileValues();
+
+      if (!api || !values) {
+        this.say(
+          'agent',
+          "I couldn't read your saved details. Open SETU settings and fill in the \"Your details\" section, then ask me again."
+        );
+        return;
+      }
+
+      // A wider net than a normal snapshot: a plan needs the handful of
+      // controls nearest the reader, a form needs all of its fields.
+      const pageContext = this.snapshot({ maxControls: 160 });
+
+      const matches = api.matchSnapshot(pageContext.controls, values, { includeSensitive: true });
+
+      if (!matches.length) {
+        const anyFields = pageContext.controls.some((c) => ['input', 'textarea', 'select'].includes(c.tag));
+        this.say(
+          'agent',
+          anyFields
+            ? "I can see fields here, but none of them match a detail you've saved. Open SETU settings to add more under \"Your details\", or tell me what to type and where."
+            : "I can't find any empty form fields on this page to fill."
+        );
+        return;
+      }
+
+      const shown = matches.slice(0, MAX_AUTOFILL_STEPS);
+
+      const steps = shown.map((match, index) => ({
+        stepNumber: index + 1,
+        instruction: `Put your ${match.label.toLowerCase()} into "${match.control.label}".`,
+        actionType: match.control.tag === 'select' ? 'select' : 'fill',
+        targetRef: match.ref,
+        targetText: match.control.label,
+        // The token, not the value — resolved in `fill` at the last moment.
+        valueToFill: `{{profile.${match.key}}}`,
+        tip: match.sensitive
+          ? 'This is an ID or bank detail. I will not type it until you confirm this step.'
+          : `I'll type: ${previewOf(match.value)}`,
+        // Same gate the engine applies to a Submit button, for the same reason:
+        // an ID number typed into the wrong portal is not undoable.
+        requiresConfirmation: Boolean(match.sensitive)
+      }));
+
+      const sensitiveCount = shown.filter((match) => match.sensitive).length;
+
+      this.plan = {
+        goal: 'Fill this form with my details',
+        understanding: `I matched ${steps.length} field${steps.length === 1 ? '' : 's'} on this page to details you've saved.`,
+        feasible: true,
+        blockedReason: '',
+        steps,
+        supportiveMessage:
+          "That's everything I could match. Read it over before you submit — I fill boxes, I don't check answers.",
+        // Every step here is a local write to a field this page already showed
+        // us: nothing navigates, so the guard that exists to stop a runaway
+        // click loop does not need to cut a long form short.
+        autoRunLimit: MAX_AUTOFILL_STEPS,
+        local: true
+      };
+
+      this.stepIndex = 0;
+      this.finished = false;
+      this.autoRunInterrupted = false;
+
+      this.say(
+        'agent',
+        `${this.plan.understanding} Press Auto-run to fill them all, or step through one at a time.`
+      );
+
+      if (matches.length > shown.length) {
+        this.say(
+          'agent',
+          `There were ${matches.length - shown.length} more matching fields than I show at once — ask me again once these are in and I'll pick up the rest.`
+        );
+      }
+
+      if (sensitiveCount) {
+        this.say(
+          'agent',
+          `${sensitiveCount} of these ${sensitiveCount === 1 ? 'is an ID or bank detail' : 'are ID or bank details'}. Auto-run stops at each one and waits for you.`
+        );
+      }
+
+      if (values.isSample) {
+        this.say(
+          'agent',
+          "Heads up: these are still SETU's sample details, not yours. Open settings and replace them before you submit anything real."
+        );
+      }
+
+      this.renderPlan();
+      this.highlightCurrent();
+      this.persist();
+    }
+
     /**
      * Remember the page text the user had highlighted.
      *
@@ -384,15 +600,23 @@
       this.busy = true;
       this.controller = new AbortController();
 
-      const asking = wantsAnswer(goal);
+      // Filling a form from saved details never touches the engine, so it gets
+      // its own two-beat narration rather than "Asking the engine" for a step
+      // that is not going to happen.
+      const filling = AUTOFILL_INTENT.test(goal);
+      const asking = !filling && wantsAnswer(goal);
+
       this.startStages(
-        asking
-          ? ['Reading this page', 'Asking the engine', 'Writing it plainly']
-          : ['Reading this page', 'Asking the engine', 'Checking every step']
+        filling
+          ? ['Reading this page', 'Matching your saved details']
+          : asking
+            ? ['Reading this page', 'Asking the engine', 'Writing it plainly']
+            : ['Reading this page', 'Asking the engine', 'Checking every step']
       );
 
       try {
-        if (asking) await this.answer(goal);
+        if (filling) await this.autofillForm();
+        else if (asking) await this.answer(goal);
         else await this.planFor(goal);
       } catch (error) {
         this.reportFailure(error);
@@ -552,13 +776,27 @@
 
     async planFor(goal) {
       const pageContext = this.snapshot();
+      const api = profileApi();
+      const values = await this.profileValues();
+
+      /**
+       * What the engine is told about the user: which details exist, never
+       * what they are.
+       *
+       * The planner needs to know it *can* answer "date of birth" in order to
+       * write a step that fills it; it does not need the date to do that. It
+       * writes `{{profile.dob}}` and `fill` substitutes in the page. So a plan
+       * request carries the shape of a person and no part of the person — and
+       * that holds whatever model the engine happens to be routing to.
+       */
+      const profileFields = api && values ? api.describeForModel(values) : [];
 
       let plan;
       try {
         this.setStage(1);
         plan = await API.post(
           '/api/agent/plan',
-          { task: goal, pageContext },
+          { task: goal, pageContext, profileFields },
           { signal: this.controller.signal }
         );
         this.setStage(2);
@@ -589,7 +827,7 @@
         return;
       }
 
-      this.plan = plan;
+      this.plan = { ...plan, steps: this.gateProfileSteps(plan.steps) };
       this.stepIndex = 0;
       this.finished = false;
       this.autoRunInterrupted = false;
@@ -602,6 +840,35 @@
       }
       this.renderPlan();
       this.highlightCurrent();
+    }
+
+    /**
+     * Add the confirmation gate to any step that would type an ID or a bank
+     * detail.
+     *
+     * The backend gates steps that *do* something irreversible — submit, pay,
+     * delete. This gates steps by what they would *reveal*. The two are
+     * genuinely different: typing an Aadhaar number into a box is a perfectly
+     * reversible edit to a form, and it is still not something that should
+     * happen while the user is watching Auto-run rather than the field.
+     *
+     * Applied client-side because the engine never learns which keys are
+     * sensitive — it is not told the sensitive ones exist at all — so this is
+     * the only place that can know.
+     */
+    gateProfileSteps(steps) {
+      const api = profileApi();
+      if (!api || !Array.isArray(steps)) return steps || [];
+
+      return steps.map((step) =>
+        api.referencesSensitive(step.valueToFill)
+          ? {
+              ...step,
+              requiresConfirmation: true,
+              tip: 'This step types an ID or bank detail. Check the field before you confirm.'
+            }
+          : step
+      );
     }
 
     /**
@@ -778,19 +1045,113 @@
       }
     }
 
+    /**
+     * Work out what actually goes in this field.
+     *
+     * Three sources, in order of how much they were asked for:
+     *
+     *  1. A `{{profile.key}}` token in the plan — the planner deciding that
+     *     this box wants the user's town, without ever being told what it is.
+     *  2. A literal value the plan supplied, which is a value the *user* gave
+     *     it ("set the quantity to 3"); passed through untouched.
+     *  3. Nothing at all — at which point we look at the field ourselves. This
+     *     is the case that matters most in practice: the planner is capped at
+     *     six steps and works from labels, so on a form of any size it leaves
+     *     `valueToFill` empty for fields that are unambiguous once you read
+     *     their `name` or `autocomplete` attribute.
+     *
+     * Source 3 never returns a sensitive detail. An ID number reaching a page
+     * has to be something the user pressed a button for, and the deliberate
+     * click here is the one on "Confirm & do it" — which a step the planner
+     * did not even give a value to has not been through.
+     *
+     * @returns {Promise<{value:string, source:string, key:string}>}
+     */
+    async resolveFillValue(step, target) {
+      const api = profileApi();
+      const raw = String(step.valueToFill ?? '');
+
+      if (raw) {
+        if (!api) return { value: raw, source: 'plan', key: '' };
+
+        const keys = api.tokensIn(raw);
+        if (!keys.length) return { value: raw, source: 'plan', key: '' };
+
+        const values = await this.profileValues();
+        if (!values) return { value: '', source: 'profile-unavailable', key: keys[0] };
+
+        const { text, used, missing } = api.resolveTokens(raw, values);
+        if (!text.trim() && missing.length) {
+          return { value: '', source: 'profile-missing', key: missing[0] };
+        }
+        return { value: text, source: 'profile', key: used[0] || keys[0] };
+      }
+
+      if (!api) return { value: '', source: 'none', key: '' };
+
+      const values = await this.profileValues();
+      if (!values) return { value: '', source: 'none', key: '' };
+
+      const match = api.matchControl(this.describeTarget(target), values);
+      if (!match || !match.hasValue || match.sensitive) return { value: '', source: 'none', key: '' };
+
+      return { value: match.value, source: 'matched', key: match.key };
+    }
+
     async fill(target, step) {
       target.focus();
 
+      const resolved = await this.resolveFillValue(step, target);
+
+      // A token the profile cannot answer is its own failure, and saying so
+      // beats "please type your details here": the user can act on "I don't
+      // have your PAN saved" and cannot act on a generic prompt.
+      if (resolved.source === 'profile-missing' || resolved.source === 'profile-unavailable') {
+        const label = profileApi()?.fieldFor(resolved.key)?.label || resolved.key;
+        Scroll.into(target, { block: 'center' });
+        this.flash(target);
+        this.say(
+          'agent',
+          resolved.source === 'profile-unavailable'
+            ? `I couldn't read your saved details for this one. Type it here and press "Done, next step".`
+            : `I don't have your ${String(label).toLowerCase()} saved, so I can't fill this. Type it here and press "Done, next step" — or add it in SETU settings under "Your details" and ask me again.`
+        );
+        this.stopAutoRun();
+        this.renderPlan({ awaitingInput: true });
+        throw new Error('needs-user-input');
+      }
+
+      // A dropdown with nothing to choose from is the same situation as an
+      // empty text field, and it used to throw "no option matching" — an error
+      // about the page when the actual problem was that we had no answer.
+      if (target.tagName === 'SELECT' && !resolved.value) {
+        Scroll.into(target, { block: 'center' });
+        this.flash(target);
+        this.say('agent', `Please pick your ${step.targetText || 'answer'} here, then press "Done, next step".`);
+        this.stopAutoRun();
+        this.renderPlan({ awaitingInput: true });
+        throw new Error('needs-user-input');
+      }
+
       if (target.tagName === 'SELECT') {
-        const wanted = String(step.valueToFill || '').toLowerCase();
+        const wanted = String(resolved.value).toLowerCase();
+        const options = [...target.options];
         const option =
-          [...target.options].find((o) => o.value.toLowerCase() === wanted) ||
-          [...target.options].find((o) => o.text.toLowerCase() === wanted) ||
-          [...target.options].find((o) => o.text.toLowerCase().includes(wanted));
-        if (!option) throw new Error(`no option matching "${step.valueToFill}"`);
+          options.find((o) => o.value.toLowerCase() === wanted) ||
+          options.find((o) => o.text.toLowerCase().trim() === wanted) ||
+          options.find((o) => o.text.toLowerCase().includes(wanted)) ||
+          // Last resort, and the one that rescues most real dropdowns: a saved
+          // "Male" against an option reading "Male / पुरुष", or "Karnataka"
+          // against "KARNATAKA (KA)". Two characters minimum, or a stray
+          // one-letter option matches almost anything.
+          options.find((o) => {
+            const text = o.text.toLowerCase().trim();
+            return text.length > 1 && wanted.includes(text);
+          });
+        if (!option) throw new Error(`no option matching "${resolved.value}"`);
         setNativeValue(target, option.value);
       } else if (target.type === 'checkbox' || target.type === 'radio') {
-        const wanted = step.valueToFill !== 'false';
+        const wanted = String(resolved.value) !== 'false';
         // Click rather than assign. A checkbox in any component framework is
         // driven by its change handler, and assigning `.checked` updates the
         // pixel without telling the application anything — so the box appeared
@@ -802,20 +1163,21 @@
         this.flash(target);
         return;
       } else {
-        // Without a supplied value we hand control back rather than inventing
-        // personal data — this is someone's real form.
-        if (!step.valueToFill) {
+        // Nothing in the plan, and nothing in the saved details that matches
+        // this field. We hand control back rather than inventing personal data
+        // — this is someone's real form.
+        if (!resolved.value) {
           Scroll.into(target, { block: 'center' });
           this.flash(target);
           this.say(
             'agent',
-            `Please type your ${step.targetText || 'details'} here — I won't guess personal information. Press "Done, next step" when you have.`
+            `Please type your ${step.targetText || 'details'} here — I won't guess personal information. Press "Done, next step" when you have. If this is something you fill in often, save it in SETU settings under "Your details" and I'll do it next time.`
           );
           this.stopAutoRun();
           this.renderPlan({ awaitingInput: true });
           throw new Error('needs-user-input');
         }
-        setNativeValue(target, step.valueToFill);
+        setNativeValue(target, resolved.value);
       }
 
       // Fire the events frameworks listen for, so React/Vue see the change,
@@ -837,7 +1199,7 @@
         target.tagName === 'TEXTAREA' ||
         (target.tagName === 'INPUT' && /^(text|search|email|url|tel|password|)$/i.test(target.type));
 
-      if (freeText && String(target.value).trim() !== String(step.valueToFill).trim()) {
+      if (freeText && String(target.value).trim() !== String(resolved.value).trim()) {
         this.say(
           'agent',
           `I could not set "${step.targetText || 'that field'}" — the page did not accept the value. Please type it yourself, then press "Do this step".`
@@ -882,9 +1244,15 @@
       this.autoRunInterrupted = false;
       this.renderPlan();
 
+      // The guard exists to stop a runaway loop of *clicks*, each of which can
+      // navigate. A plan that only writes into fields this page already showed
+      // us cannot run away, so it says so and gets a longer leash — otherwise
+      // a thirty-field form would silently stop two-thirds of the way down.
+      const limit = Number(this.plan.autoRunLimit) || MAX_AUTORUN_STEPS;
+
       let guard = 0;
       while (this.autoRun && this.plan && this.stepIndex < this.plan.steps.length) {
-        if ((guard += 1) > MAX_AUTORUN_STEPS) break;
+        if ((guard += 1) > limit) break;
 
         const step = this.currentStep();
         if (!step) break;
@@ -1322,6 +1690,7 @@
               <button class="icon-btn" data-variant="primary" data-act="send" aria-label="Send goal" title="Send">${icon('arrow-up', { size: 19 })}</button>
             </div>
             <div class="quick">
+              <button data-goal="Fill this form with my details" data-variant="primary">Fill with my details</button>
               <button data-goal="Summarise this page for me">Summarise page</button>
               <button data-goal="Explain this page in simple words">Explain simply</button>
               <button data-goal="Find the main action button on this page">Find main action</button>
@@ -1659,7 +2028,16 @@
         '  transition: border-color .15s ease, background .15s ease, color .15s ease;',
         '}',
         '.quick button:hover { border-color:var(--accent); color:var(--accent-700); background: var(--accent-100); }',
-        '.quick button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }'
+        '.quick button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }',
+        // Form filling is the one thing here somebody arrives at this panel
+        // already wanting, so it reads as the offer rather than as a fifth
+        // suggestion in a row of five.
+        '.quick button[data-variant="primary"] {',
+        '  background: var(--accent); border-color: var(--accent); color: var(--on-accent);',
+        '}',
+        '.quick button[data-variant="primary"]:hover {',
+        '  background: var(--accent-600); border-color: var(--accent-600); color: var(--on-accent);',
+        '}'
       ].join('\n');
       return style;
     }

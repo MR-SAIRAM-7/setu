@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SETU - Cognitive Companion & AI Copilot",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "description": "Reshape any site for how your brain reads: line focus, spoken explanations in 11 languages, mind maps, and an AI page agent.",
   "minimum_chrome_version": "116",
   "icons": {
@@ -40,6 +40,7 @@
       "matches": ["http://*/*", "https://*/*"],
       "js": [
         "shared/setu-config.js",
+        "shared/setu-profile.js",
         "shared/setu-icons.js",
         "shared/gaze-detector.js",
         "shared/setu-core.js",

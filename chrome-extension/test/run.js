@@ -21,6 +21,7 @@ const suites = [
   { name: 'core runtime', file: 'core.test.js', args: [], needsEngine: false },
   { name: 'gaze control law', file: 'gaze.test.js', args: [], needsEngine: false },
   { name: 'agent behaviour', file: 'agent.test.js', args: [], needsEngine: false },
+  { name: 'saved details', file: 'profile.test.js', args: [], needsEngine: false },
   { name: 'MEMORY.md accuracy', file: 'memory.test.js', args: [], needsEngine: false },
   { name: 'engine end-to-end', file: 'engine.test.js', args: [engineUrl], needsEngine: true }
 ];

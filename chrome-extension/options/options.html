@@ -171,6 +171,62 @@
       </div>
     </section>
 
+    <!-- ============ YOUR DETAILS (FORM FILLING) ============ -->
+    <section class="card">
+      <div class="card-head">
+        <span class="card-kicker">Form Filling</span>
+        <h2>Your details</h2>
+      </div>
+      <p class="lede">
+        Fill this in once and the Copilot can complete forms for you. Ask it to
+        <em>&ldquo;fill this form with my details&rdquo;</em> on any page and it matches every box it
+        recognises &mdash; name, date of birth, address down to the door number, parents, PIN code &mdash;
+        then shows you the list before it types a single character.
+      </p>
+
+      <div class="notice" id="profile-banner" data-show="false" data-tone="warn">
+        <span data-icon="warning" aria-hidden="true"></span>
+        <div>
+          <strong>These are sample details, not yours.</strong>
+          <span>
+            SETU ships with an invented profile so you can see what form filling does. Edit any box
+            below to replace it &mdash; this warning disappears as soon as you do.
+          </span>
+        </div>
+      </div>
+
+      <div class="profile-meter">
+        <div class="profile-meter-head">
+          <span class="field-label"><span>Details saved</span><b id="profile-count">0 of 0</b></span>
+        </div>
+        <div class="meter-track"><div class="meter-fill" id="profile-fill" style="width:0%"></div></div>
+        <small class="help">
+          Everything here is stored on this computer only, in the extension's local storage. It is
+          never synced to your Google account and never sent to the SETU engine or any AI model.
+          When the Copilot plans a form, it tells the engine <em>which</em> details exist &mdash;
+          never what they are &mdash; and puts the real values in on this device.
+        </small>
+      </div>
+
+      <label class="field">
+        <span class="field-label"><span>Find a detail</span></span>
+        <input type="search" id="profile-search" placeholder="e.g. pincode, father, aadhaar" spellcheck="false" />
+      </label>
+
+      <div id="profile-groups" class="profile-groups"></div>
+
+      <div class="diag-actions">
+        <button class="btn ghost" id="profile-restore" type="button">
+          <span data-icon="arrow-counter-clockwise" aria-hidden="true"></span>
+          <span>Restore sample details</span>
+        </button>
+        <button class="btn danger-ghost" id="profile-clear" type="button">
+          <span data-icon="power" aria-hidden="true"></span>
+          <span>Clear my details</span>
+        </button>
+      </div>
+    </section>
+
     <!-- ============ ENGINE CONNECTION ============ -->
     <section class="card">
       <div class="card-head">
@@ -253,6 +309,16 @@
           <span>Camera frames are analyzed on an in-memory canvas and immediately discarded. No video is ever recorded, stored, or transmitted.</span>
         </li>
         <li>
+          <strong>Your details</strong>
+          <span>
+            Stored in this browser's local storage on this device only &mdash; deliberately not synced
+            to your Google account. Filling a form sends nothing at all. When the Copilot plans a
+            task it tells the engine <em>which</em> details you have saved and never what they are;
+            the real values go into the page here. ID and bank details are never typed without you
+            confirming that exact step.
+          </span>
+        </li>
+        <li>
           <strong>Zero password exposure</strong>
           <span>Password fields and sensitive auth tokens are strictly sanitized and never included in page context sent to AI models.</span>
         </li>
@@ -278,6 +344,7 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script src="../shared/setu-config.js"></script>
+  <script src="../shared/setu-profile.js"></script>
   <script src="../shared/setu-icons.js"></script>
   <script src="options.js"></script>
 </body>

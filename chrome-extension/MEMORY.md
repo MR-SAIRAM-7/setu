@@ -7,7 +7,7 @@ section, read [Traps](#traps-bugs-that-keep-coming-back).
 MV3, no build step, no dependencies, no bundler. Plain files loaded in manifest
 order. `node build.js` verifies and zips; `node test/run.js` runs the suites.
 
-- **Version:** 3.3.0 (`manifest.json` and `SETU.VERSION` in `shared/setu-core.js` — keep in step)
+- **Version:** 3.4.0 (`manifest.json` and `SETU.VERSION` in `shared/setu-core.js` — keep in step)
 - **Minimum Chrome:** 116
 - **Permissions:** `activeTab`, `storage`, `scripting`, `contextMenus`, `alarms`
 - **Host access:** `http://*/*`, `https://*/*` — deliberately *not* the broad `tabs` permission
@@ -24,6 +24,7 @@ it reads the finished `SETU.features` registry.
 
 ```
 shared/setu-config.js     deployment constants, LANGUAGES, appearance
+shared/setu-profile.js    the saved-details catalogue, store, and field matcher
 shared/setu-icons.js      generated Phosphor duotone set
 shared/gaze-detector.js   head-tracking maths (no DOM, no permissions)
 shared/setu-core.js       the runtime — everything below depends on it
@@ -32,7 +33,8 @@ content/main.js           orchestrator: registry, messages, shortcuts, state
 ```
 
 The service worker loads `shared/setu-config.js` via `importScripts`. The popup
-and options page load `setu-config.js` + `setu-icons.js` as ordinary scripts —
+loads `setu-config.js` + `setu-icons.js` as ordinary scripts, and the options
+page loads `setu-profile.js` as well (it hosts the details editor) —
 they do **not** get `setu-core.js`, so they use `self.setuResolveLanguage(...)`
 and `self.SETU_LANGUAGES` directly rather than the `SETU.*` namespace.
 
@@ -181,6 +183,57 @@ It used to come from `/api/speech/voices`, so a sleeping or key-less engine
 collapsed every dropdown to English — the UI telling a Hindi speaker that SETU
 has no Hindi. The engine's list is preferred *when non-empty*, never allowed to
 replace a working list with an empty one.
+
+---
+
+## Your details — form filling (`shared/setu-profile.js`)
+
+The Copilot fills forms from a profile the user saves once. ~70 stored fields
+across nine groups (identity, contact, current address, permanent address,
+family, education/work, official IDs, access needs, emergency contact), plus 12
+values derived from them — `fullName`, `age`, `dobDay/Month/Year`, `dobDMY`,
+`addressLine1/2`, `fullAddress`, `permanentFullAddress`, `mobileFull`,
+`initials`.
+
+Three rules, and everything else follows from them:
+
+1. **`chrome.storage.local`, key `setuProfile` — never `chrome.storage.sync`.**
+   Reading preferences sync; a home address and a date of birth do not. Do not
+   merge the two stores. `resetAll` on the options page clears sync only and
+   deliberately leaves the profile alone.
+2. **Values never reach the engine.** `describeForModel()` sends
+   `{key, label, filled}` and nothing else; the planner answers with
+   `{{profile.pincode}}`; `resolveTokens()` substitutes in the page. The
+   controller re-derives the list field by field in `sanitiseProfileFields` so a
+   future client that started attaching values still could not get one into a
+   prompt. `profile.test.js` asserts both halves.
+3. **`sensitive: true` fields are never written automatically.** Every
+   government ID and bank detail carries it, and they ship **empty** — a
+   fabricated Aadhaar in a real portal is worse than an unfilled form. The
+   autofill turns them into steps flagged `requiresConfirmation`, and
+   `gateProfileSteps` in the Copilot applies the same flag to any AI plan whose
+   `valueToFill` names one.
+
+`matchControl(control, values)` scores a page control against the catalogue:
+`autocomplete` token +120, longest label/`name`/`id`/`placeholder` pattern hit
++45..80, declared input type ±25/−55 (with `typeFallback` letting a bare
+`type="email"` stand alone), sensitive-but-empty loses to filled. `MIN_SCORE`
+is 45. `avoid` and `require` are what keep it safe — "Name" appears in Father's
+Name, Bank Name, Company Name and Username, and every collision that would put
+the right value in the wrong box has a case in `profile.test.js`.
+
+"Fill this form with my details" is matched by `AUTOFILL_INTENT` in
+`agent-copilot.js` and routed **away from the planner** to the local matcher:
+instant, exhaustive (up to `MAX_AUTOFILL_STEPS` = 40, not the planner's six),
+and works with the engine asleep. It builds an ordinary plan so it reuses the
+step list, highlight, Skip and confirmation gate rather than growing a second
+execution path. `plan.autoRunLimit` is what lets a 30-field form auto-run past
+the 24-step click guard.
+
+`Page.snapshot` carries `name`, `fieldId`, `placeholder`, `autocomplete`,
+`required` and a `<select>`'s `options` for form controls — the matcher and the
+planner both need them, because a large share of real forms label their inputs
+badly or not at all.
 
 ---
 
@@ -336,7 +389,7 @@ Each of these has been fixed at least once. Most have a test guarding them now.
 
 ## Tests and gates
 
-`node test/run.js` — 124 assertions across six offline suites, plus an
+`node test/run.js` — 220-odd assertions across eight offline suites, plus an
 engine end-to-end suite that skips cleanly with no backend.
 
 | Suite | Covers |
@@ -348,10 +401,15 @@ engine end-to-end suite that skips cleanly with no backend.
 | `core.test.js` | Store echo suppression, Feature lifecycle, Scroll arbiter, Dock, languages, layer ordering, `isOurs` |
 | `gaze.test.js` | control law, detector under dim/small/absent faces, calibration retry, camera-silence watchdog |
 | `agent.test.js` | goal routing, `setNativeValue` against a framework-controlled input |
+| `profile.test.js` | field matching (every "right value in the wrong box" collision), derivation, token substitution, and that no stored value can reach the engine |
 | `memory.test.js` | verifies MEMORY.md accuracy against manifest, runtime, and backend budgets |
 
-Backend: `npm test` in `../backend` → `scripts/test-ai-service.js`, 30 cases, no
-network or key needed. Includes a replay of the three-model budget exhaustion.
+Backend: `npm test` in `../backend` → `scripts/test-ai-service.js` (30 cases,
+including a replay of the three-model budget exhaustion) then
+`scripts/test-agent-profile.js` (25 cases: that no profile *value* can reach a
+prompt through `/api/agent/plan`, and that a placeholder naming a detail the
+user has not saved is stripped rather than filled with an empty string). No
+network or key needed for either.
 
 `node build.js` verifies before zipping and **fails** on: a missing manifest
 reference (including `web_accessible_resources`), a description over 132 chars,
