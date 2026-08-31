@@ -6,7 +6,29 @@
 export type ThemeOption = 'broadsheet' | 'cream' | 'pastel' | 'sage' | 'velvet' | 'contrast';
 export type SpacingOption = 'normal' | 'relaxed' | 'spacious';
 
-export type FontStyleOption = 'serif' | 'system' | 'hyper' | 'lexend' | 'dyslexic';
+/**
+ * Typefaces SETU can actually render.
+ *
+ * This used to also offer 'hyper' (Atkinson Hyperlegible), 'lexend' and
+ * 'dyslexic' (OpenDyslexic). None of those fonts is bundled and none was ever
+ * loaded, so all three silently fell through to the serif — five options, three
+ * of which did nothing. Offering an accommodation that does not exist is worse
+ * than not offering it: somebody picks the dyslexia-friendly font, sees no
+ * change, and concludes the accommodation does not work for them.
+ *
+ * Old stored values migrate to 'sans'. Letter spacing does the work those fonts
+ * were meant to do, and unlike a font it applies to every glyph on the screen.
+ */
+export type FontStyleOption = 'serif' | 'sans' | 'system';
+
+/**
+ * Extra tracking between letters.
+ *
+ * Increased letter spacing has better evidence behind it for dyslexic readers
+ * than any particular typeface does, and it works with whatever font the phone
+ * actually has.
+ */
+export type LetterSpacingOption = 'normal' | 'wide' | 'wider';
 export type TextSizeOption = 'normal' | 'comfortable' | 'large';
 export type MotionOption = 'movement' | 'reduced';
 
@@ -24,6 +46,7 @@ export interface UserPreferences {
   theme: ThemeOption;
   spacing: SpacingOption;
   motion: MotionOption;
+  letterSpacing: LetterSpacingOption;
   bionic: boolean;
   readingRuler: boolean;
   speechRate: number;
@@ -420,6 +443,35 @@ export interface ModeResponseMeta {
 }
 
 
+
+/* -------------------------------------------------------------------------- */
+/* Task chunking — three steps out of one wall of text                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The extension's "break this page into 3 steps", brought over for anything the
+ * reader has in front of them rather than only for a web page.
+ *
+ * Three is a hard limit rather than a guideline. The whole accommodation is
+ * that the list is short enough to hold in your head — a nine-step plan for
+ * somebody in task paralysis is the original problem with numbers on it.
+ */
+export interface ChunkedStep {
+  title: string;
+  what: string;
+  why: string;
+}
+
+export interface ChunkedTaskResult {
+  pageName: string;
+  whatThisPageIsFor: string;
+  estimatedMinutes: number;
+  thingsToHaveReady: string[];
+  steps: ChunkedStep[];
+  encouragement?: string;
+  fallback?: boolean;
+  fallbackReason?: string;
+}
 
 /* -------------------------------------------------------------------------- */
 /* Numbers — dyscalculia support                                              */

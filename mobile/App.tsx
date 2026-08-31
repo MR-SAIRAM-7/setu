@@ -4,8 +4,10 @@
  * Provider order is deliberate: accessibility preferences load first because
  * every layer above them reads from that state, the theme derives from it, and
  * the navigation container needs a resolved palette before it paints anything.
- * The error boundary wraps the lot so a failure anywhere inside still leaves the
- * user a readable screen with a way out.
+ * The shell sits inside the theme (its panels are themed) but outside the
+ * navigator (its panels have to outlive any screen). The error boundary wraps
+ * the lot so a failure anywhere inside still leaves the user a readable screen
+ * with a way out.
  */
 
 import React from 'react';
@@ -18,7 +20,9 @@ import { AccessibilityProvider } from './src/context/AccessibilityContext';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { FocusProvider } from './src/context/FocusContext';
 import { IdentityProvider } from './src/context/IdentityContext';
+import { ShellProvider } from './src/context/ShellContext';
 import { RootNavigator } from './src/navigation/RootNavigator';
+import { navigationRef } from './src/navigation/navigationRef';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 
 /**
@@ -33,6 +37,7 @@ function Shell() {
 
   return (
     <NavigationContainer
+      ref={navigationRef}
       theme={{
         dark: isDark,
         colors: {
@@ -66,7 +71,9 @@ export default function App() {
             <ThemeProvider>
               <FocusProvider>
                 <IdentityProvider>
-                  <Shell />
+                  <ShellProvider>
+                    <Shell />
+                  </ShellProvider>
                 </IdentityProvider>
               </FocusProvider>
             </ThemeProvider>

@@ -11,6 +11,11 @@
  * A note that takes three taps to write is a note nobody writes, and the thought
  * is gone by then anyway.
  *
+ * It used to carry its own floating button, which put a third circular control
+ * in the bottom-right corner alongside the focus banner and the quick-actions
+ * key. Opening it is now the shell's job — from the side menu or from quick
+ * actions — so the corner is quiet again and this component only owns the notes.
+ *
  * Notes never leave the phone.
  */
 
@@ -27,11 +32,12 @@ import {
   KeyboardAvoidingView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Check, Pin, Plus, Trash2, X } from 'lucide-react-native';
+import { Check, Plus, Trash2, X } from 'lucide-react-native';
 
 import { Palette } from '../constants/themes';
-import { RADIUS, SHADOWS, SPACING } from '../constants/theme';
+import { RADIUS, SPACING } from '../constants/theme';
 import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
+import { useShell } from '../context/ShellContext';
 import {
   clearDoneNotes,
   deleteParkedNote,
@@ -49,21 +55,25 @@ export const ParkingLot: React.FC = () => {
   const styles = useThemedStyles(makeStyles);
   const insets = useSafeAreaInsets();
 
-  const [open, setOpen] = useState(false);
+  const { isParkingOpen, closeShell } = useShell();
   const [notes, setNotes] = useState<ParkedNote[]>([]);
   const [draft, setDraft] = useState('');
   const inputRef = useRef<TextInput>(null);
 
+  // Focus the field once the modal has actually mounted; focusing during the
+  // same frame is dropped on Android. The whole point of the parking lot is that
+  // the thought goes down before it evaporates, so a keyboard that needs a
+  // second tap defeats it.
   useEffect(() => {
-    getParkedNotes().then(setNotes);
-  }, []);
+    if (!isParkingOpen) return undefined;
+    const timer = setTimeout(() => inputRef.current?.focus(), 160);
+    return () => clearTimeout(timer);
+  }, [isParkingOpen]);
 
-  const openSheet = useCallback(() => {
-    setOpen(true);
-    // Focusing after the modal has actually mounted; focusing during the same
-    // frame is dropped on Android.
-    setTimeout(() => inputRef.current?.focus(), 120);
-  }, []);
+  // Re-read on open so a note parked from another surface is already here.
+  useEffect(() => {
+    if (isParkingOpen) getParkedNotes().then(setNotes);
+  }, [isParkingOpen]);
 
   const file = useCallback(async () => {
     const text = draft.trim();
@@ -74,181 +84,130 @@ export const ParkingLot: React.FC = () => {
     inputRef.current?.focus();
   }, [draft]);
 
-  const pending = notes.filter((note) => !note.done).length;
-
   return (
-    <>
-      <TouchableOpacity
-        accessibilityRole="button"
-        accessibilityLabel={
-          pending
-            ? `Parking lot, ${pending} ${pending === 1 ? 'thought' : 'thoughts'} parked`
-            : 'Parking lot — park a thought so you can let go of it'
-        }
-        activeOpacity={0.85}
-        onPress={openSheet}
-        style={[styles.fab, { bottom: 76 + insets.bottom }]}
+    <Modal
+      visible={isParkingOpen}
+      animationType="slide"
+      transparent
+      onRequestClose={closeShell}
+    >
+      <Pressable style={styles.backdrop} onPress={closeShell} />
+
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.sheetWrap}
       >
-        <Pin size={18} color={COLORS.textInverse} />
-        {pending > 0 ? (
-          <View style={styles.badge}>
-            <Text variant="caption" weight="bold" color={COLORS.textInverse}>
-              {pending}
-            </Text>
-          </View>
-        ) : null}
-      </TouchableOpacity>
-
-      <Modal
-        visible={open}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setOpen(false)}
-      >
-        <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />
-
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.sheetWrap}
-        >
-          <View style={[styles.sheet, { paddingBottom: SPACING.lg + insets.bottom }]}>
-            <View style={styles.header}>
-              <View style={{ flex: 1 }}>
-                <Kicker color={COLORS.cyan}>Parking lot</Kicker>
-                <Text variant="titleSm" weight="bold">
-                  Put it down for now
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setOpen(false)}
-                accessibilityRole="button"
-                accessibilityLabel="Close the parking lot"
-                style={styles.iconButton}
-              >
-                <X size={18} color={COLORS.textMuted} />
-              </TouchableOpacity>
+        <View style={[styles.sheet, { paddingBottom: SPACING.lg + insets.bottom }]}>
+          <View style={styles.header}>
+            <View style={{ flex: 1 }}>
+              <Kicker color={COLORS.cyan}>Parking lot</Kicker>
+              <Text variant="titleSm" weight="bold">
+                Put it down for now
+              </Text>
             </View>
-
-            <Text variant="caption" color={COLORS.textMuted} style={{ marginBottom: SPACING.sm }}>
-              Anything that just interrupted you. It stays on this phone, and you can come back to
-              it when you are finished with what you were doing.
-            </Text>
-
-            <View style={styles.composer}>
-              <TextInput
-                ref={inputRef}
-                value={draft}
-                onChangeText={setDraft}
-                onSubmitEditing={file}
-                returnKeyType="done"
-                blurOnSubmit={false}
-                placeholder="Remind me to check the invoice date…"
-                placeholderTextColor={COLORS.textSubtle}
-                style={styles.input}
-                accessibilityLabel="What do you want to park?"
-                multiline
-              />
-              <VoiceInputButton
-                onTranscript={(text) => setDraft((prev) => (prev ? `${prev} ${text}` : text))}
-                size={36}
-                showError={false}
-              />
-              <TouchableOpacity
-                onPress={file}
-                disabled={!draft.trim()}
-                accessibilityRole="button"
-                accessibilityLabel="Park this thought"
-                style={[styles.fileButton, !draft.trim() ? styles.fileButtonDisabled : null]}
-              >
-                <Plus size={18} color={COLORS.textInverse} />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
-              {notes.length === 0 ? (
-                <Text variant="bodySm" color={COLORS.textMuted} style={styles.empty}>
-                  Nothing parked. That is a perfectly good state to be in.
-                </Text>
-              ) : (
-                notes.map((note) => (
-                  <View key={note.id} style={styles.noteRow}>
-                    <TouchableOpacity
-                      onPress={async () => setNotes(await toggleParkedNote(note.id))}
-                      accessibilityRole="checkbox"
-                      accessibilityState={{ checked: note.done }}
-                      accessibilityLabel={note.text}
-                      style={[styles.checkbox, note.done ? styles.checkboxDone : null]}
-                    >
-                      {note.done ? <Check size={13} color={COLORS.textInverse} /> : null}
-                    </TouchableOpacity>
-
-                    <Text
-                      variant="bodySm"
-                      color={note.done ? COLORS.textSubtle : COLORS.text}
-                      style={[{ flex: 1 }, note.done ? styles.noteDone : null]}
-                    >
-                      {note.text}
-                    </Text>
-
-                    <TouchableOpacity
-                      onPress={async () => setNotes(await deleteParkedNote(note.id))}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Delete: ${note.text}`}
-                      style={styles.iconButton}
-                    >
-                      <Trash2 size={15} color={COLORS.textSubtle} />
-                    </TouchableOpacity>
-                  </View>
-                ))
-              )}
-            </ScrollView>
-
-            {notes.some((note) => note.done) ? (
-              <TouchableOpacity
-                onPress={async () => setNotes(await clearDoneNotes())}
-                accessibilityRole="button"
-                style={styles.clearDone}
-              >
-                <Text variant="caption" weight="semibold" color={COLORS.cyan}>
-                  Clear the ones you have done
-                </Text>
-              </TouchableOpacity>
-            ) : null}
+            <TouchableOpacity
+              onPress={closeShell}
+            accessibilityRole="button"
+            accessibilityLabel="Close the parking lot"
+              style={styles.iconButton}
+            >
+              <X size={18} color={COLORS.textMuted} />
+            </TouchableOpacity>
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
-    </>
+
+          <Text variant="caption" color={COLORS.textMuted} style={{ marginBottom: SPACING.sm }}>
+            Anything that just interrupted you. It stays on this phone, and you can come back to
+            it when you are finished with what you were doing.
+          </Text>
+
+          <View style={styles.composer}>
+            <TextInput
+              ref={inputRef}
+              value={draft}
+              onChangeText={setDraft}
+              onSubmitEditing={file}
+              returnKeyType="done"
+              blurOnSubmit={false}
+              placeholder="Remind me to check the invoice date…"
+              placeholderTextColor={COLORS.textSubtle}
+              style={styles.input}
+              accessibilityLabel="What do you want to park?"
+              multiline
+            />
+            <VoiceInputButton
+              onTranscript={(text) => setDraft((prev) => (prev ? `${prev} ${text}` : text))}
+              size={36}
+              showError={false}
+            />
+            <TouchableOpacity
+              onPress={file}
+              disabled={!draft.trim()}
+              accessibilityRole="button"
+              accessibilityLabel="Park this thought"
+              style={[styles.fileButton, !draft.trim() ? styles.fileButtonDisabled : null]}
+            >
+              <Plus size={18} color={COLORS.textInverse} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
+            {notes.length === 0 ? (
+              <Text variant="bodySm" color={COLORS.textMuted} style={styles.empty}>
+                Nothing parked. That is a perfectly good state to be in.
+              </Text>
+            ) : (
+              notes.map((note) => (
+                <View key={note.id} style={styles.noteRow}>
+                  <TouchableOpacity
+                    onPress={async () => setNotes(await toggleParkedNote(note.id))}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: note.done }}
+                    accessibilityLabel={note.text}
+                    style={[styles.checkbox, note.done ? styles.checkboxDone : null]}
+                  >
+                    {note.done ? <Check size={13} color={COLORS.textInverse} /> : null}
+                  </TouchableOpacity>
+
+                  <Text
+                    variant="bodySm"
+                    color={note.done ? COLORS.textSubtle : COLORS.text}
+                    style={[{ flex: 1 }, note.done ? styles.noteDone : null]}
+                  >
+                    {note.text}
+                  </Text>
+
+                  <TouchableOpacity
+                    onPress={async () => setNotes(await deleteParkedNote(note.id))}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Delete: ${note.text}`}
+                    style={styles.iconButton}
+                  >
+                    <Trash2 size={15} color={COLORS.textSubtle} />
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
+          </ScrollView>
+
+          {notes.some((note) => note.done) ? (
+            <TouchableOpacity
+              onPress={async () => setNotes(await clearDoneNotes())}
+              accessibilityRole="button"
+              style={styles.clearDone}
+            >
+              <Text variant="caption" weight="semibold" color={COLORS.cyan}>
+                Clear the ones you have done
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      </KeyboardAvoidingView>
+  </Modal>
   );
 };
 
 const makeStyles = (t: Palette) =>
   StyleSheet.create({
-    fab: {
-      position: 'absolute',
-      right: SPACING.md,
-      width: 48,
-      height: 48,
-      borderRadius: 24,
-      backgroundColor: t.cyan,
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 90,
-      ...SHADOWS.lg,
-    },
-    badge: {
-      position: 'absolute',
-      top: -2,
-      right: -2,
-      minWidth: 20,
-      height: 20,
-      paddingHorizontal: 5,
-      borderRadius: 10,
-      backgroundColor: t.magenta,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 2,
-      borderColor: t.bg,
-    },
     backdrop: {
       position: 'absolute',
       top: 0,

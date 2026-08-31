@@ -1,25 +1,39 @@
 /**
- * SETU Mobile — Interactive Mind Map Canvas
- * -----------------------------------------
- * Renders the Broadsheet four-plate mind map with SVG bezier connector curves,
- * interactive collapsible nodes, and touch gestures.
+ * SETU Mobile — the mind map canvas.
+ *
+ * Branch identity is carried by colour, and the colours have to come from the
+ * live palette rather than the reference one. This drew from the static
+ * `PLATE_COLORS` constant, which meant that on the two dark grounds the ink
+ * plate — near-black by definition — was invisible, and a quarter of every map
+ * simply had no visible connectors. `plateColorsFor` exists for exactly this
+ * and is now what the canvas uses.
+ *
+ * Three appearance choices are honoured, all of them accommodations rather
+ * than decoration:
+ *
+ *  - **Edge style.** Curves are pleasant and, for some readers with visual
+ *    processing difficulty, genuinely harder to follow than a straight line
+ *    or a right-angled one.
+ *  - **Node size.** Compact fits more of the map on screen; comfortable gives
+ *    the text room. Which is better depends on the person, not the map.
+ *  - **Picture mode.** The clinical guidance was explicit: mind maps help this
+ *    audience when they carry no text, or when the text is spoken on contact.
+ *    Picture mode strips the notes off the map and moves them to the voice.
+ *
+ * Tapping a branch opens it. Long-pressing edits it — an affordance rather than
+ * a button, because a pencil on every node is forty pencils.
  */
 
 import React, { useMemo } from 'react';
-import {
-  View,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  Dimensions,
-} from 'react-native';
+import { View, ScrollView, StyleSheet, TouchableOpacity, useWindowDimensions } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
-import { MindMapNode, PlacedNode } from '../types';
+
+import { MindMapNode, PlacedNode, PlacedEdge, MapEdgeStyle, MapNodeStyle } from '../types';
 import { layoutTree } from '../utils/layout';
-import { COLORS, PLATE_COLORS, RADIUS, SHADOWS, SPACING } from '../constants/theme';
+import { RADIUS, SHADOWS, SPACING } from '../constants/theme';
 import { Palette } from '../constants/themes';
-import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
+import { useTheme, useThemeColors, useThemedStyles } from '../context/ThemeContext';
 import { Text } from './Typography';
 import { BionicText } from './BionicText';
 
@@ -29,7 +43,32 @@ export interface MindMapCanvasProps {
   collapsedIds: Set<string>;
   onSelectNode: (node: PlacedNode) => void;
   onToggleCollapse: (nodeId: string) => void;
-  onExpandDeeper?: (node: PlacedNode) => void;
+  onEditNode?: (node: PlacedNode) => void;
+
+  edgeStyle?: MapEdgeStyle;
+  nodeStyle?: MapNodeStyle;
+  textScale?: number;
+  /** Picture mode: labels only, detail moves to the read-aloud voice. */
+  hideDetail?: boolean;
+}
+
+/** The SVG path for one connector, in the chosen style. */
+function edgePath(edge: PlacedEdge, style: MapEdgeStyle): string {
+  const { from, to } = edge;
+
+  if (style === 'straight') {
+    return `M ${from.x} ${from.y} L ${to.x} ${to.y}`;
+  }
+
+  if (style === 'orthogonal') {
+    // Turn at the midpoint rather than at either end, so sibling connectors
+    // share a vertical spine instead of crossing each other.
+    const midX = from.x + (to.x - from.x) / 2;
+    return `M ${from.x} ${from.y} L ${midX} ${from.y} L ${midX} ${to.y} L ${to.x} ${to.y}`;
+  }
+
+  const reach = Math.max(24, Math.abs(to.x - from.x) * 0.42);
+  return `M ${from.x} ${from.y} C ${from.x + reach} ${from.y}, ${to.x - reach} ${to.y}, ${to.x} ${to.y}`;
 }
 
 export const MindMapCanvas: React.FC<MindMapCanvasProps> = ({
@@ -38,84 +77,92 @@ export const MindMapCanvas: React.FC<MindMapCanvasProps> = ({
   collapsedIds,
   onSelectNode,
   onToggleCollapse,
+  onEditNode,
+  edgeStyle = 'bezier',
+  nodeStyle = 'comfortable',
+  textScale = 1,
+  hideDetail = false,
 }) => {
   const COLORS = useThemeColors();
+  const { plateColors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  const { nodes, edges, width, height } = useMemo(() => {
-    return layoutTree(rootNode, collapsedIds);
-  }, [rootNode, collapsedIds]);
+  const { width: screenWidth } = useWindowDimensions();
 
-  const screenWidth = Dimensions.get('window').width;
+  const compact = nodeStyle === 'compact';
+
+  const { nodes, edges, width, height } = useMemo(
+    () =>
+      layoutTree(rootNode, collapsedIds, {
+        showDetail: !hideDetail,
+        compact,
+        textScale,
+      }),
+    [rootNode, collapsedIds, hideDetail, compact, textScale]
+  );
+
   const canvasWidth = Math.max(screenWidth - 32, width + 40);
   const canvasHeight = Math.max(340, height + 40);
 
-  const handleNodePress = (node: PlacedNode) => {
+  const buzz = (strength: Haptics.ImpactFeedbackStyle = Haptics.ImpactFeedbackStyle.Light) => {
     try {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    } catch (_) {}
-    onSelectNode(node);
-  };
-
-  const handleToggle = (e: any, nodeId: string) => {
-    e.stopPropagation();
-    try {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    } catch (_) {}
-    onToggleCollapse(nodeId);
+      Haptics.impactAsync(strength);
+    } catch (_) {
+      /* haptics are a nicety, never a requirement */
+    }
   };
 
   return (
-    <View style={styles.outerContainer}>
+    <View style={styles.outer}>
       <ScrollView
         horizontal
-        showsHorizontalScrollIndicator={true}
+        showsHorizontalScrollIndicator
         contentContainerStyle={{ minWidth: canvasWidth }}
       >
         <ScrollView
-          showsVerticalScrollIndicator={true}
+          showsVerticalScrollIndicator
           contentContainerStyle={{ minHeight: canvasHeight, padding: SPACING.md }}
         >
-          <View style={[styles.canvasSurface, { width: canvasWidth, height: canvasHeight }]}>
-            {/* SVG Connecting Curves */}
+          <View style={[styles.surface, { width: canvasWidth, height: canvasHeight }]}>
             <Svg style={StyleSheet.absoluteFill} width={canvasWidth} height={canvasHeight}>
-              {edges.map((edge) => {
-                const strokeColor = PLATE_COLORS[edge.branch % PLATE_COLORS.length];
-                const strokeWidth = edge.depth === 1 ? 2.2 : 1.5;
-                const opacity = edge.depth === 1 ? 0.75 : 0.45;
-                const pathD = `M ${edge.from.x} ${edge.from.y} C ${edge.from.x + 32} ${
-                  edge.from.y
-                }, ${edge.to.x - 32} ${edge.to.y}, ${edge.to.x} ${edge.to.y}`;
-
-                return (
-                  <Path
-                    key={edge.id}
-                    d={pathD}
-                    stroke={strokeColor}
-                    strokeWidth={strokeWidth}
-                    strokeOpacity={opacity}
-                    fill="none"
-                  />
-                );
-              })}
+              {edges.map((edge) => (
+                <Path
+                  key={edge.id}
+                  d={edgePath(edge, edgeStyle)}
+                  stroke={plateColors[edge.branch % plateColors.length]}
+                  strokeWidth={edge.depth === 1 ? 2.2 : 1.5}
+                  strokeOpacity={edge.depth === 1 ? 0.75 : 0.45}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  fill="none"
+                />
+              ))}
             </Svg>
 
-            {/* Absolutely Placed Button Nodes */}
             {nodes.map((node) => {
-              const isSelected = selectedNodeId === node.id;
+              const selected = selectedNodeId === node.id;
               const branchColor =
                 node.depth === 0
-                  ? COLORS.ink
-                  : PLATE_COLORS[node.branch % PLATE_COLORS.length];
+                  ? plateColors[3] || COLORS.ink
+                  : plateColors[node.branch % plateColors.length];
 
               return (
                 <TouchableOpacity
                   key={node.id}
                   activeOpacity={0.85}
                   accessibilityRole="button"
-                  accessibilityLabel={`${node.label}, ${node.detail || ''}`}
-                  accessibilityState={{ selected: isSelected }}
+                  accessibilityLabel={
+                    hideDetail
+                      ? node.label
+                      : [node.label, node.detail].filter(Boolean).join(', ')
+                  }
+                  accessibilityHint={
+                    onEditNode
+                      ? 'Opens this branch. Press and hold to rename it or add to it.'
+                      : 'Opens this branch'
+                  }
+                  accessibilityState={{ selected }}
                   style={[
-                    styles.nodeBox,
+                    styles.node,
                     {
                       left: node.x,
                       top: node.y,
@@ -123,18 +170,30 @@ export const MindMapCanvas: React.FC<MindMapCanvasProps> = ({
                       minHeight: node.height,
                       borderLeftColor: branchColor,
                     },
-                    isSelected ? styles.nodeSelected : styles.nodeUnselected,
+                    selected ? styles.nodeSelected : styles.nodeIdle,
                   ]}
-                  onPress={() => handleNodePress(node)}
+                  onPress={() => {
+                    buzz();
+                    onSelectNode(node);
+                  }}
+                  onLongPress={
+                    onEditNode
+                      ? () => {
+                          buzz(Haptics.ImpactFeedbackStyle.Medium);
+                          onEditNode(node);
+                        }
+                      : undefined
+                  }
+                  delayLongPress={420}
                 >
                   <BionicText
                     text={node.label}
                     variant={node.depth === 0 ? 'body' : 'bodySm'}
                     color={COLORS.text}
-                    style={styles.nodeLabel}
+                    style={[styles.nodeLabel, { fontSize: undefined }]}
                   />
 
-                  {node.detail ? (
+                  {!hideDetail && node.detail ? (
                     <Text
                       variant="caption"
                       color={COLORS.textMuted}
@@ -145,33 +204,39 @@ export const MindMapCanvas: React.FC<MindMapCanvasProps> = ({
                     </Text>
                   ) : null}
 
-                  {/* Circular Collapse / Expand Indicator */}
-                  {node.childCount > 0 && (
+                  {node.childCount > 0 ? (
                     <TouchableOpacity
                       activeOpacity={0.8}
                       accessibilityRole="button"
                       accessibilityLabel={
                         node.collapsed
-                          ? `Expand ${node.childCount} branches`
-                          : 'Collapse branch'
+                          ? `Open ${node.childCount} branches under ${node.label}`
+                          : `Fold away the branches under ${node.label}`
                       }
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       style={[
-                        styles.toggleBadge,
+                        styles.badge,
                         { borderColor: branchColor },
-                        node.collapsed ? styles.toggleBadgeCollapsed : styles.toggleBadgeOpen,
+                        node.collapsed
+                          ? { backgroundColor: branchColor }
+                          : styles.badgeOpen,
                       ]}
-                      onPress={(e) => handleToggle(e, node.id)}
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        buzz();
+                        onToggleCollapse(node.id);
+                      }}
                     >
                       <Text
                         variant="caption"
                         weight="bold"
                         color={node.collapsed ? COLORS.textInverse : branchColor}
-                        style={styles.toggleBadgeText}
+                        style={styles.badgeText}
                       >
                         {node.collapsed ? node.childCount : '−'}
                       </Text>
                     </TouchableOpacity>
-                  )}
+                  ) : null}
                 </TouchableOpacity>
               );
             })}
@@ -184,71 +249,67 @@ export const MindMapCanvas: React.FC<MindMapCanvasProps> = ({
 
 const makeStyles = (t: Palette) =>
   StyleSheet.create({
-  outerContainer: {
-    flex: 1,
-    backgroundColor: t.surface,
-    borderRadius: RADIUS.lg,
-    borderWidth: 1,
-    borderColor: t.dividerSubtle,
-    overflow: 'hidden',
-    minHeight: 360,
-  },
-  canvasSurface: {
-    position: 'relative',
-    backgroundColor: t.surface,
-  },
-  nodeBox: {
-    position: 'absolute',
-    backgroundColor: t.bg,
-    borderRadius: RADIUS.sm,
-    borderLeftWidth: 3.5,
-    paddingHorizontal: SPACING.sm + 2,
-    paddingVertical: SPACING.xs + 4,
-    justifyContent: 'center',
-    ...SHADOWS.sm,
-  },
-  nodeUnselected: {
-    borderWidth: 1,
-    borderColor: t.dividerSubtle,
-  },
-  nodeSelected: {
-    borderWidth: 2,
-    borderColor: t.cyan,
-    shadowColor: t.cyan,
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  nodeLabel: {
-    fontWeight: '700',
-    marginBottom: 2,
-  },
-  nodeDetail: {
-    fontSize: 11,
-    lineHeight: 14,
-  },
-  toggleBadge: {
-    position: 'absolute',
-    right: -10,
-    top: '50%',
-    marginTop: -10,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 10,
-  },
-  toggleBadgeCollapsed: {
-    backgroundColor: t.cyan,
-    borderColor: t.cyan,
-  },
-  toggleBadgeOpen: {
-    backgroundColor: t.bg,
-  },
-  toggleBadgeText: {
-    fontSize: 10,
-    lineHeight: 12,
-  },
-});
+    outer: {
+      flex: 1,
+      backgroundColor: t.surface,
+      borderRadius: RADIUS.lg,
+      borderWidth: 1,
+      borderColor: t.dividerSubtle,
+      overflow: 'hidden',
+      minHeight: 320,
+    },
+    surface: {
+      position: 'relative',
+      backgroundColor: t.surface,
+    },
+    node: {
+      position: 'absolute',
+      backgroundColor: t.bg,
+      borderRadius: RADIUS.md,
+      borderLeftWidth: 3.5,
+      paddingHorizontal: SPACING.sm + 2,
+      paddingVertical: SPACING.xs + 4,
+      justifyContent: 'center',
+      ...SHADOWS.sm,
+    },
+    nodeIdle: {
+      borderWidth: 1,
+      borderColor: t.dividerSubtle,
+    },
+    nodeSelected: {
+      borderWidth: 2,
+      borderColor: t.cyan,
+      shadowColor: t.cyan,
+      shadowOpacity: 0.3,
+      shadowRadius: 6,
+      elevation: 3,
+    },
+    nodeLabel: {
+      fontWeight: '700',
+      marginBottom: 2,
+    },
+    nodeDetail: {
+      fontSize: 11,
+      lineHeight: 14,
+    },
+    badge: {
+      position: 'absolute',
+      right: -10,
+      top: '50%',
+      marginTop: -10,
+      width: 20,
+      height: 20,
+      borderRadius: 10,
+      borderWidth: 1.5,
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 10,
+    },
+    badgeOpen: {
+      backgroundColor: t.bg,
+    },
+    badgeText: {
+      fontSize: 10,
+      lineHeight: 12,
+    },
+  });

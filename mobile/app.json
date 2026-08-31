@@ -1,23 +1,18 @@
 {
   "expo": {
     "name": "SETU Sanctuary",
-    "slug": "setu-sanctuary",
-    "version": "1.0.0",
+    "slug": "setu",
+    "version": "2.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "setu",
     "userInterfaceStyle": "light",
     "primaryColor": "#0088b0",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#f3f2f2"
-    },
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.setu.sanctuary",
-      "buildNumber": "1",
+      "buildNumber": "2",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "SETU records short clips so you can speak instead of type, and turns them into text.",
         "NSCameraUsageDescription": "SETU uses the camera to read printed pages, letters and notices so they can be simplified or read aloud.",
@@ -26,8 +21,7 @@
     },
     "android": {
       "package": "com.setu.sanctuary",
-      "versionCode": 1,
-      "edgeToEdgeEnabled": true,
+      "versionCode": 2,
       "adaptiveIcon": {
         "backgroundColor": "#f3f2f2",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -44,6 +38,18 @@
       ]
     },
     "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 180,
+          "resizeMode": "contain",
+          "backgroundColor": "#f3f2f2",
+          "dark": {
+            "backgroundColor": "#18181a"
+          }
+        }
+      ],
       "expo-font",
       [
         "expo-camera",
@@ -67,6 +73,11 @@
     ],
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "70c54892-0ed3-409f-9fbc-94d6e1f929aa"
+      }
     }
   }
 }

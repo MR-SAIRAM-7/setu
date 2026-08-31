@@ -1,663 +1,449 @@
 /**
  * SETU Mobile — Home.
  *
- * The launchpad, ordered by what someone opening the app is most likely to be
- * in the middle of: ask a question, scan the thing in front of them, pick a
- * mode, or pick up a map they already made.
+ * The old Home tried to be a dashboard: a status pill, four counters, three
+ * toggle chips, a timer, a hero card, eight horizontally-scrolling mode cards,
+ * a tip and a map list — all above the fold on a tall phone. Every element was
+ * defensible on its own, and together they were a wall. For an audience that
+ * came here *because* dense pages are hard, opening the app onto a dense page
+ * is the one thing it must not do.
  *
- * The quick toggles sit near the top on purpose. Whether the ruler or the tint
- * is on is not a setup decision that gets made once; it changes with the hour,
- * the light and how tired someone is, and burying it two screens deep means it
- * simply does not get used.
+ * So Home now answers one question — what do you want to do right now? — in
+ * four blocks, in the order somebody actually needs them: ask something, carry
+ * on with what you were doing, name the problem you are stuck on, or look after
+ * yourself. The counters moved to Momentum, the toggles and the timer to the
+ * side menu, and the full tool list to Tools.
+ *
+ * Tools are named by the problem, not the feature. Somebody in task paralysis
+ * does not search for "Start mode"; they know that they cannot get going.
  */
 
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  SafeAreaView,
-  RefreshControl,
-} from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import {
   Sparkles,
   Camera,
   PlayCircle,
   Waves,
-  GraduationCap,
-  Users,
-  MessageCircle,
-  PenTool,
-  Route,
-  ArrowRight,
-  BookOpen,
-  Volume2,
-  VolumeX,
   Calculator,
+  MessageCircle,
   Heart,
-  TrendingUp,
-  Flame,
+  Wind,
+  Timer,
+  Network,
+  Lightbulb,
+  ChevronRight,
+  CloudOff,
 } from 'lucide-react-native';
-import { COLORS, RADIUS, SPACING, PLATE_COLORS } from '../constants/theme';
+
+import { SPACING, RADIUS } from '../constants/theme';
 import { Palette } from '../constants/themes';
 import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
-import { Text, Heading, Subheading, Kicker } from '../components/Typography';
-import { Input } from '../components/Input';
-import { Button } from '../components/Button';
-import { Card, Tag } from '../components/Card';
-import { FocusTimerWidget } from '../components/FocusTimerWidget';
-import { EngineBadge } from '../components/EngineBadge';
-import { VoiceInputButton } from '../components/VoiceInputButton';
 import { useAccessibility } from '../context/AccessibilityContext';
 import { useFocus } from '../context/FocusContext';
+import { useShell } from '../context/ShellContext';
+import { useIdentity } from '../context/IdentityContext';
+import { Screen } from '../components/Screen';
+import { Section } from '../components/Section';
+import { ListGroup, ListRow } from '../components/ListRow';
+import { Text } from '../components/Typography';
+import { Input } from '../components/Input';
+import { Button } from '../components/Button';
+import { VoiceInputButton } from '../components/VoiceInputButton';
 import { getSavedMindMaps } from '../services/storage';
 import { MindMapDocument, CognitiveModeKey } from '../types';
-import { tts } from '../services/tts';
-import { getProgress, getRank, subscribeProgress } from '../services/progress';
-import { languageSample } from '../constants/languages';
 import { formatRelativeDate, truncateText } from '../utils/formatters';
 
 export interface HomeScreenProps {
   navigation: any;
 }
 
-type PlateKey = 'cyan' | 'magenta' | 'yellow' | 'ink';
-
-const MODES_PREVIEWS: {
-  key: CognitiveModeKey;
-  name: string;
-  tagline: string;
-  tintKey: PlateKey;
+/**
+ * The four openings people arrive with most often.
+ *
+ * Four, not eight. The full set is one tap away in Tools, and a list of eight
+ * on the first screen is a decision rather than a starting point — which is the
+ * exact executive-function tax this app exists to remove.
+ */
+const COMMON_PROBLEMS: {
+  mode: CognitiveModeKey;
+  label: string;
+  hint: string;
   icon: any;
 }[] = [
   {
-    key: 'start',
-    name: 'Start',
-    tagline: 'Break task freeze',
-    tintKey: 'yellow',
+    mode: 'start',
+    label: 'I cannot get started',
+    hint: 'One ten-minute action, small enough to actually begin',
     icon: PlayCircle,
   },
   {
-    key: 'simplify',
-    name: 'Simplify',
-    tagline: 'Plain language rewrite',
-    tintKey: 'cyan',
+    mode: 'simplify',
+    label: 'This text is too dense',
+    hint: 'Plain language, with nothing left out',
     icon: Waves,
   },
   {
-    key: 'learn',
-    name: 'Learn',
-    tagline: 'Study notes & self-quiz',
-    tintKey: 'magenta',
-    icon: GraduationCap,
-  },
-  {
-    key: 'meet',
-    name: 'Meet',
-    tagline: 'Decisions & action items',
-    tintKey: 'cyan',
-    icon: Users,
-  },
-  {
-    key: 'practice',
-    name: 'Practice',
-    tagline: 'Rehearse conversations',
-    tintKey: 'magenta',
-    icon: MessageCircle,
-  },
-  {
-    key: 'write',
-    name: 'Write',
-    tagline: 'Accessible writing check',
-    tintKey: 'yellow',
-    icon: PenTool,
-  },
-  {
-    key: 'guide',
-    name: 'Guide',
-    tagline: 'Step-by-step workflow',
-    tintKey: 'ink',
-    icon: Route,
-  },
-  {
-    key: 'numbers',
-    name: 'Numbers',
-    tagline: 'Sums with objects',
-    tintKey: 'magenta',
+    mode: 'numbers',
+    label: 'The numbers will not sit still',
+    hint: 'The sum as countable things, one step at a time',
     icon: Calculator,
+  },
+  {
+    mode: 'practice',
+    label: 'I have to say something hard',
+    hint: 'Rehearse it in a few tones before it is real',
+    icon: MessageCircle,
   },
 ];
 
 /**
  * One line a day, rotated.
  *
- * These are the features people do not find on their own — every one of them
- * came out of watching somebody miss it. Nothing here is a productivity slogan.
+ * Every one of these came out of watching somebody miss a feature. Nothing here
+ * is a productivity slogan — a tip that does not teach something specific is
+ * just another thing on the screen.
  */
 const TIPS = [
   'Tap the microphone anywhere you can type. Dictation handles all eleven languages.',
-  'The 25-minute focus session keeps running while you use another app.',
-  'The reading ruler isolates one line at a time. It is in Settings, or the ribbon above.',
-  'Tap a mind map branch to hear it read aloud instead of decoding it.',
-  'The pin button parks a thought so you can let go of it and finish what you were doing.',
+  'The focus session keeps running while you use another app.',
+  'The reading ruler isolates one line at a time. It is in the menu, under Reading aids.',
+  'Tap a mind map branch and SETU explains that idea in your language, out loud.',
+  'The parking lot holds a thought so you can let go of it and finish what you were doing.',
   'If text seems to shimmer, try a colour tint in Settings. Which colour helps is personal.',
-  'Every mode opens on a worked example, so no screen is ever blank.',
-  'Numbers mode explains a sum with countable things rather than notation.',
+  'Every tool opens on a worked example, so no screen is ever blank.',
+  'Numbers explains a sum with countable things rather than notation.',
+  'The plus button in the bar opens everything SETU can do, searchable.',
 ];
+
+function greeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 5) return 'Still up';
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  if (hour < 22) return 'Good evening';
+  return 'Late one';
+}
+
+function tipOfTheDay(): string {
+  const dayOfYear = Math.floor(
+    (Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000
+  );
+  return TIPS[dayOfYear % TIPS.length];
+}
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   const COLORS = useThemeColors();
   const styles = useThemedStyles(makeStyles);
-  const { bionic, readingRuler, language, toggleBionic, toggleReadingRuler } = useAccessibility();
-  const { totalSessionsCompleted } = useFocus();
-  const [researchTopic, setResearchTopic] = useState('');
-  const [recentMaps, setRecentMaps] = useState<MindMapDocument[]>([]);
+  const { isActive, formattedTime, startSession } = useFocus();
+  const { openActions } = useShell();
+  const { engineState } = useIdentity();
+
+  const [topic, setTopic] = useState('');
+  const [recent, setRecent] = useState<MindMapDocument[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [progress, setProgress] = useState(getProgress);
 
-  useEffect(() => subscribeProgress(setProgress), []);
-
-  const loadData = async () => {
+  const load = useCallback(async () => {
     try {
       const maps = await getSavedMindMaps();
-      setRecentMaps(maps.slice(0, 4));
-    } catch (_) {}
-  };
+      // Only what the reader made. The bundled reference maps are useful, but
+      // "pick up where you left off" is a lie if it offers something they have
+      // never opened.
+      const own = maps.filter((map) => map.sourceType !== 'seed');
+      setRecent((own.length ? own : maps).slice(0, 2));
+    } catch (_) {
+      /* the section simply does not render */
+    }
+  }, []);
 
   useEffect(() => {
-    loadData();
-    const unsubscribe = navigation.addListener('focus', () => {
-      loadData();
-    });
-    return unsubscribe;
-  }, [navigation]);
+    load();
+    return navigation.addListener('focus', load);
+  }, [navigation, load]);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadData();
+    await load();
     setRefreshing(false);
   };
 
-  const handleStartResearch = (topicToResearch?: string) => {
-    const query = topicToResearch || researchTopic.trim();
-    if (!query) return;
-    navigation.navigate('MindMapTab', {
-      screen: 'MindMapScreen',
-      params: { initialTopic: query },
-    });
-    setResearchTopic('');
-  };
-
-  const handleVoiceTranscript = (text: string) => {
-    setResearchTopic(text);
-    handleStartResearch(text);
-  };
-
-  const handleToggleTtsSample = () => {
-    if (isSpeaking) {
-      tts.stop();
-      setIsSpeaking(false);
-    } else {
-      setIsSpeaking(true);
-      // Spoken in the chosen language, so the sample demonstrates the voice the
-      // user will actually get rather than an English one.
-      tts.speak(languageSample(language), {
-        onDone: () => setIsSpeaking(false),
-        onError: () => setIsSpeaking(false),
-      });
-    }
-  };
-
-  const getTipOfTheDay = () => {
-    const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 1000 / 60 / 60 / 24);
-    return TIPS[dayOfYear % TIPS.length];
+  const draw = (query?: string) => {
+    const value = (query ?? topic).trim();
+    if (!value) return;
+    setTopic('');
+    navigation.navigate('MapTab', { initialTopic: value });
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={[COLORS.cyan]}
-            tintColor={COLORS.cyan}
-          />
-        }
-      >
-        {/* Top Header */}
-        <View style={styles.topHeader}>
-          <View>
-            <Text variant="titleLg" weight="bold" color={COLORS.text}>
-              SETU Sanctuary
-            </Text>
-            <Text variant="caption" color={COLORS.textMuted}>
-              Cognitive accessibility for ADHD & dyslexic minds
-            </Text>
-          </View>
-          <EngineBadge />
-        </View>
-
-        {/* Quick Stats Row */}
-        <View style={styles.statsRow}>
-          <View style={styles.statBlock} accessible={true} accessibilityRole="text" accessibilityLabel={`${recentMaps.length} Maps saved`}>
-            <Text variant="titleSm" weight="bold" color={COLORS.text}>{recentMaps.length}</Text>
-            <Text variant="caption" color={COLORS.textMuted}>Maps saved</Text>
-          </View>
-          <View style={styles.statBlock} accessible={true} accessibilityRole="text" accessibilityLabel={`${totalSessionsCompleted} Focus sessions`}>
-            <Text variant="titleSm" weight="bold" color={COLORS.text}>{totalSessionsCompleted}</Text>
-            <Text variant="caption" color={COLORS.textMuted}>Focus sessions</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.statBlock}
-            accessibilityRole="button"
-            accessibilityLabel={`${progress.streakDays} day streak. Open Momentum.`}
-            onPress={() => navigation.navigate('Momentum')}
-          >
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Flame size={13} color={COLORS.yellowDark} />
-              <Text variant="titleSm" weight="bold" style={{ marginLeft: 3 }}>
-                {progress.streakDays}
-              </Text>
-            </View>
-            <Text variant="caption" color={COLORS.textMuted}>Day streak</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.statBlock}
-            accessibilityRole="button"
-            accessibilityLabel={`${progress.points} points, ${getRank(progress.points).name}. Open Momentum.`}
-            onPress={() => navigation.navigate('Momentum')}
-          >
-            <Text variant="titleSm" weight="bold" color={COLORS.text}>{progress.points}</Text>
-            <Text variant="caption" color={COLORS.textMuted}>Points</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Quick Accessibility Toggles Ribbon */}
-        <View style={styles.accessibilityRibbon}>
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel={`Bold word starts, currently ${bionic ? 'on' : 'off'}`}
-            activeOpacity={0.8}
-            style={[styles.ribbonChip, bionic ? styles.ribbonChipActive : {}]}
-            onPress={toggleBionic}
-          >
-            <Sparkles size={14} color={bionic ? COLORS.cyanDark : COLORS.textMuted} />
-            <Text
-              variant="caption"
-              weight={bionic ? 'semibold' : 'normal'}
-              color={bionic ? COLORS.cyanDark : COLORS.text}
-              style={{ marginLeft: 4 }}
-            >
-              Bold word starts
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel={`Reading ruler, currently ${readingRuler ? 'on' : 'off'}`}
-            activeOpacity={0.8}
-            style={[styles.ribbonChip, readingRuler ? styles.ribbonChipActive : {}]}
-            onPress={toggleReadingRuler}
-          >
-            <BookOpen
-              size={14}
-              color={readingRuler ? COLORS.cyanDark : COLORS.textMuted}
-            />
-            <Text
-              variant="caption"
-              weight={readingRuler ? 'semibold' : 'normal'}
-              color={readingRuler ? COLORS.cyanDark : COLORS.text}
-              style={{ marginLeft: 4 }}
-            >
-              Reading ruler
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel={isSpeaking ? 'Stop the sample' : 'Hear how the voice sounds'}
-            activeOpacity={0.8}
-            style={[styles.ribbonChip, isSpeaking ? styles.ribbonChipActive : {}]}
-            onPress={handleToggleTtsSample}
-          >
-            {isSpeaking ? (
-              <VolumeX size={14} color={COLORS.magenta} />
-            ) : (
-              <Volume2 size={14} color={COLORS.textMuted} />
-            )}
-            <Text
-              variant="caption"
-              weight={isSpeaking ? 'semibold' : 'normal'}
-              color={isSpeaking ? COLORS.magenta : COLORS.text}
-              style={{ marginLeft: 4 }}
-            >
-              {isSpeaking ? 'Stop' : 'Hear the voice'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Focus Session Pomodoro Widget */}
-        <FocusTimerWidget />
-
-        {/* Research Input Hero Box */}
-        <Card elevated style={styles.heroResearchCard}>
-          <Kicker color={COLORS.magenta}>One question in. One map out.</Kicker>
-          <Heading variant="title" style={{ marginTop: 2, marginBottom: 4 }}>
-            Understand it in one look.
-          </Heading>
-          <Text variant="bodySm" color={COLORS.textMuted} style={{ marginBottom: SPACING.md }}>
-            Ask about anything in plain language. SETU researches it and lays it out as an
-            interactive mind map you open one branch at a time.
-          </Text>
-
-          <Input
-            placeholder="How does a transformer neural network work?"
-            value={researchTopic}
-            onChangeText={setResearchTopic}
-            returnKeyType="search"
-            onSubmitEditing={() => handleStartResearch()}
-            trailingIcon={<VoiceInputButton onTranscript={handleVoiceTranscript} size={36} />}
-          />
-
-          <View style={styles.heroActionsRow}>
-            <Button
-              title="Draw map"
-              variant="primary"
-              size="md"
-              icon={<Sparkles size={16} color={COLORS.textInverse} />}
-              onPress={() => handleStartResearch()}
-              accessibilityLabel="Draw map from research topic"
-              style={{ flex: 1 }}
-            />
-            <Button
-              title="Scan OCR"
-              variant="secondary"
-              size="md"
-              icon={<Camera size={16} color={COLORS.text} />}
-              onPress={() => navigation.navigate('CameraOCR')}
-              accessibilityLabel="Scan document with OCR"
-              style={{ flex: 1 }}
-            />
-          </View>
-        </Card>
-
-        {/* Seven Cognitive Modes Section */}
-        <View style={styles.sectionHeader}>
-          <View>
-            <Kicker color={COLORS.cyan}>Cognitive Assistance</Kicker>
-            <Subheading variant="titleSm">Seven Accessibility Tools</Subheading>
-          </View>
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel="View all cognitive modes"
-            onPress={() => navigation.navigate('ModesTab')}
-            style={styles.viewAllRow}
-          >
-            <Text variant="caption" color={COLORS.cyan} weight="semibold">
-              View all
-            </Text>
-            <ArrowRight size={14} color={COLORS.cyan} />
-          </TouchableOpacity>
-        </View>
-
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.modesScroll}
+    <Screen
+      title="SETU"
+      subtitle={greeting()}
+      refreshing={refreshing}
+      onRefresh={onRefresh}
+      bottomInset={SPACING.xl}
+    >
+      {/*
+        Said once, at the top, and only when it is true.
+        An app that quietly fails every AI request and never says why is one
+        people conclude is broken — and this one keeps a great deal working
+        without a server, so the honest thing is to name what still does.
+      */}
+      {engineState === 'down' || engineState === 'nokey' ? (
+        <TouchableOpacity
+          style={styles.offline}
+          activeOpacity={0.85}
+          onPress={() => navigation.navigate('Settings')}
+          accessibilityRole="button"
+          accessibilityLabel={
+            engineState === 'down'
+              ? 'The engine cannot be reached. Saved maps, the reading aids, the timer and read-aloud all still work. Opens Settings.'
+              : 'The engine has no AI key set. Opens Settings.'
+          }
         >
-          {MODES_PREVIEWS.map((mode) => {
-            const IconComp = mode.icon;
-            const tint = COLORS[mode.tintKey];
-            return (
-              <Card
-                key={mode.key}
-                plateColor={tint}
-                elevated
-                style={styles.modeCard}
-                onPress={() =>
-                  navigation.navigate('ModesTab', {
-                    screen: 'ModesScreen',
-                    params: { initialMode: mode.key },
-                  })
-                }
-                accessibilityRole="button"
-                accessibilityLabel={`${mode.name} mode: ${mode.tagline}`}
-                accessibilityHint={`Opens ${mode.name} cognitive mode`}
-              >
-                <View style={[styles.modeIconCircle, { backgroundColor: COLORS.surfaceAlt }]}>
-                  <IconComp size={20} color={tint} />
-                </View>
-                <Text variant="body" weight="bold" color={COLORS.text} style={{ marginTop: 6 }}>
-                  {mode.name}
-                </Text>
-                <Text variant="caption" color={COLORS.textMuted} numberOfLines={2}>
-                  {mode.tagline}
-                </Text>
-              </Card>
-            );
-          })}
-        </ScrollView>
-
-        {/* Tip of the day */}
-        <Card style={styles.tipCard} elevated={false}>
-          <View style={styles.tipHeader}>
-            <Sparkles size={16} color={COLORS.yellowDark} />
-            <Text variant="caption" weight="bold" color={COLORS.yellowDark} style={{ marginLeft: 6 }}>
-              Something you might not have found
+          <CloudOff size={16} color={COLORS.yellowDark} />
+          <View style={{ flex: 1, marginLeft: SPACING.sm }}>
+            <Text variant="caption" weight="bold" color={COLORS.yellowDark}>
+              {engineState === 'down' ? 'Cannot reach the engine' : 'The engine has no AI key'}
+            </Text>
+            <Text variant="caption" color={COLORS.textMuted} style={{ marginTop: 2 }}>
+              Your saved maps, the reading aids, the focus timer, the parking lot and read-aloud
+              all still work. Anything that needs the AI will wait. Tap to check the address.
             </Text>
           </View>
-          <Text variant="bodySm" color={COLORS.text} style={{ lineHeight: 20 }}>
-            {getTipOfTheDay()}
-          </Text>
-        </Card>
+        </TouchableOpacity>
+      ) : null}
 
-        {/* Recent Mind Maps Section */}
-        <View style={styles.sectionHeader}>
-          <View>
-            <Kicker color={COLORS.cyan}>Your Library</Kicker>
-            <Subheading variant="titleSm">Recent Researched Maps</Subheading>
-          </View>
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel="View all items in your library"
-            onPress={() => navigation.navigate('LibraryTab')}
-            style={styles.viewAllRow}
-          >
-            <Text variant="caption" color={COLORS.cyan} weight="semibold">
-              Library
-            </Text>
-            <ArrowRight size={14} color={COLORS.cyan} />
-          </TouchableOpacity>
-        </View>
+      {/* The one thing this app is for, asked plainly. */}
+      <View style={styles.hero}>
+        <Text variant="titleSm" weight="bold">
+          What do you want to understand?
+        </Text>
+        <Text variant="bodySm" color={COLORS.textMuted} style={styles.heroBody}>
+          Ask in your own words. SETU researches it and lays it out as a map you open one
+          branch at a time — and reads any branch aloud.
+        </Text>
 
-        {recentMaps.length === 0 ? (
-          <Card style={styles.emptyStateCard} elevated={false}>
-            <Route size={32} color={COLORS.textMuted} style={{ marginBottom: SPACING.sm }} />
-            <Text variant="body" weight="semibold" color={COLORS.text}>
-              Your research maps will appear here
-            </Text>
-            <Text variant="bodySm" color={COLORS.textMuted} style={{ textAlign: 'center', marginTop: 4, marginBottom: SPACING.md }}>
-              Start your first research session above to build your personal knowledge library.
-            </Text>
-            <Button
-              title="Start Research"
-              variant="secondary"
-              icon={<Sparkles size={16} color={COLORS.text} />}
-              onPress={() => handleStartResearch()}
-              accessibilityLabel="Start your first research session"
+        <Input
+          placeholder="How does a heat pump actually work?"
+          value={topic}
+          onChangeText={setTopic}
+          returnKeyType="search"
+          onSubmitEditing={() => draw()}
+          containerStyle={styles.heroInput}
+          accessibilityLabel="What do you want to understand?"
+          trailingIcon={
+            <VoiceInputButton
+              onTranscript={(text) => {
+                setTopic(text);
+                draw(text);
+              }}
+              size={36}
             />
-          </Card>
-        ) : (
-          <View style={styles.recentMapsStack}>
-            {recentMaps.map((item, index) => (
-              <Card
-                key={item.id || item._id}
-                elevated
-                plateColor={PLATE_COLORS[index % PLATE_COLORS.length]}
-                style={styles.recentMapCard}
-                onPress={() =>
-                  navigation.navigate('MindMapTab', {
-                    screen: 'MindMapScreen',
-                    params: { selectedMap: item },
-                  })
-                }
+          }
+        />
+
+        <View style={styles.heroActions}>
+          <Button
+            title="Draw a map"
+            variant="primary"
+            size="md"
+            icon={<Network size={16} color={COLORS.textInverse} />}
+            onPress={() => draw()}
+            style={{ flex: 1 }}
+            accessibilityLabel="Draw a map of this topic"
+          />
+          <Button
+            title="Scan a page"
+            variant="secondary"
+            size="md"
+            icon={<Camera size={16} color={COLORS.text} />}
+            onPress={() => navigation.navigate('CameraOCR')}
+            style={{ flex: 1 }}
+            accessibilityLabel="Read a printed page with the camera"
+          />
+        </View>
+      </View>
+
+      {recent.length > 0 ? (
+        <Section
+          title="Pick up where you left off"
+          actionLabel="Library"
+          onAction={() => navigation.navigate('LibraryTab')}
+        >
+          <View style={styles.recentStack}>
+            {recent.map((map) => (
+              <TouchableOpacity
+                key={map.id || map._id}
+                style={styles.recentCard}
+                activeOpacity={0.8}
+                onPress={() => navigation.navigate('MapTab', { selectedMap: map })}
                 accessibilityRole="button"
-                accessibilityLabel={`Open map: ${item.topic}`}
-                accessibilityHint="Opens the mind map for viewing"
+                accessibilityLabel={`Open the map for ${map.topic}`}
+                accessibilityHint={map.summary ? truncateText(map.summary, 90) : undefined}
               >
-                <View style={styles.mapCardHeader}>
-                  <Tag
-                    label={item.sourceType === 'seed' ? 'Reference Library' : 'Researched Map'}
-                    variant={item.sourceType === 'seed' ? 'neutral' : 'cyan'}
-                  />
-                  <Text variant="caption" color={COLORS.textSubtle}>
-                    {item.createdAt ? formatRelativeDate(item.createdAt) : 'Recently'} · {item.totalTopics || 12} branches
+                <View style={styles.recentIcon}>
+                  <Network size={18} color={COLORS.cyan} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text variant="bodySm" weight="semibold" numberOfLines={1}>
+                    {map.topic}
+                  </Text>
+                  <Text variant="caption" color={COLORS.textMuted} numberOfLines={1}>
+                    {map.totalTopics || 12} branches ·{' '}
+                    {map.createdAt ? formatRelativeDate(map.createdAt) : 'recently'}
                   </Text>
                 </View>
-
-                <Text variant="body" weight="bold" color={COLORS.text} style={{ marginTop: 4 }}>
-                  {item.topic}
-                </Text>
-                <Text variant="caption" color={COLORS.textMuted} numberOfLines={2} style={{ marginTop: 2 }}>
-                  {truncateText(item.summary, 80)}
-                </Text>
-              </Card>
+                <ChevronRight size={18} color={COLORS.textSubtle} />
+              </TouchableOpacity>
             ))}
           </View>
-        )}
-      </ScrollView>
-    </SafeAreaView>
+        </Section>
+      ) : null}
+
+      <Section
+        title="What is in the way?"
+        description="Named by the problem, not the feature"
+        actionLabel="All tools"
+        onAction={() => navigation.navigate('ToolsTab')}
+      >
+        <ListGroup>
+          {COMMON_PROBLEMS.map((problem, index) => (
+            <ListRow
+              key={problem.mode}
+              icon={<problem.icon size={18} color={COLORS.cyan} />}
+              title={problem.label}
+              description={problem.hint}
+              divider={index < COMMON_PROBLEMS.length - 1}
+              onPress={() => navigation.navigate('ModeWorkspace', { mode: problem.mode })}
+            />
+          ))}
+        </ListGroup>
+      </Section>
+
+      <Section title="Right now">
+        <ListGroup>
+          <ListRow
+            icon={<Timer size={18} color={COLORS.cyan} />}
+            title={isActive ? `Focus session — ${formattedTime} left` : 'Focus for 25 minutes'}
+            description={
+              isActive
+                ? 'Open Momentum to see how the session is going'
+                : 'Keeps running while you use other apps'
+            }
+            onPress={() => (isActive ? navigation.navigate('Momentum') : startSession())}
+          />
+          <ListRow
+            icon={<Heart size={18} color={COLORS.magenta} />}
+            title="Say it to someone"
+            description="A listener that does not judge, and never scores you"
+            onPress={() => navigation.navigate('Listen')}
+          />
+          <ListRow
+            icon={<Wind size={18} color={COLORS.cyan} />}
+            title="Settle for a minute"
+            description="A slow breathing guide, no talking required"
+            divider={false}
+            onPress={() => navigation.navigate('Breathe')}
+          />
+        </ListGroup>
+      </Section>
+
+      <TouchableOpacity
+        style={styles.tip}
+        activeOpacity={0.85}
+        onPress={openActions}
+        accessibilityRole="button"
+        accessibilityLabel={`Tip: ${tipOfTheDay()}. Opens quick actions.`}
+      >
+        <Lightbulb size={16} color={COLORS.yellowDark} />
+        <View style={{ flex: 1, marginLeft: SPACING.sm }}>
+          <Text variant="caption" weight="bold" color={COLORS.yellowDark}>
+            Something you might not have found
+          </Text>
+          <Text variant="bodySm" style={{ marginTop: 2 }}>
+            {tipOfTheDay()}
+          </Text>
+        </View>
+      </TouchableOpacity>
+
+      <View style={styles.footer}>
+        <Sparkles size={13} color={COLORS.textSubtle} />
+        <Text variant="caption" color={COLORS.textSubtle} style={{ marginLeft: 6 }}>
+          Nothing here is tied to a name or an email.
+        </Text>
+      </View>
+    </Screen>
   );
 };
 
 const makeStyles = (t: Palette) =>
   StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: t.bg,
-  },
-  scrollContent: {
-    padding: SPACING.lg,
-    paddingBottom: SPACING.huge,
-  },
-  topHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: SPACING.md,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: SPACING.lg,
-    paddingHorizontal: SPACING.xs,
-  },
-  statBlock: {
-    alignItems: 'center',
-    flex: 1,
-    minHeight: 48,
-    justifyContent: 'center',
-  },
-  accessibilityRibbon: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: SPACING.xs,
-    marginBottom: SPACING.md,
-  },
-  ribbonChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: t.surface,
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 6,
-    borderRadius: RADIUS.pill,
-    borderWidth: 1,
-    borderColor: t.dividerSubtle,
-    minHeight: 48,
-  },
-  ribbonChipActive: {
-    backgroundColor: t.cyanLight,
-    borderColor: t.cyanBorder,
-  },
-  heroResearchCard: {
-    padding: SPACING.lg,
-    marginBottom: SPACING.lg,
-    borderLeftWidth: 4,
-    borderLeftColor: t.cyan,
-  },
-  heroActionsRow: {
-    flexDirection: 'row',
-    gap: SPACING.sm,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    marginTop: SPACING.sm,
-    marginBottom: SPACING.sm,
-  },
-  viewAllRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginBottom: 4,
-    minHeight: 48,
-    paddingHorizontal: SPACING.sm,
-  },
-  modesScroll: {
-    paddingRight: SPACING.md,
-    gap: SPACING.sm,
-    marginBottom: SPACING.lg,
-  },
-  modeCard: {
-    width: 140,
-    minHeight: 120,
-    padding: SPACING.md,
-  },
-  modeIconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tipCard: {
-    backgroundColor: t.yellowLight,
-    padding: SPACING.md,
-    marginBottom: SPACING.lg,
-    borderWidth: 0,
-    borderLeftWidth: 4,
-    borderLeftColor: t.yellow,
-  },
-  tipHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: SPACING.xs,
-  },
-  recentMapsStack: {
-    gap: SPACING.sm,
-  },
-  recentMapCard: {
-    padding: SPACING.md,
-    minHeight: 48,
-  },
-  mapCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  emptyStateCard: {
-    alignItems: 'center',
-    padding: SPACING.xl,
-    backgroundColor: t.surface,
-    borderStyle: 'dashed',
-    borderWidth: 1,
-    borderColor: t.divider,
-  },
-});
+    offline: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      backgroundColor: t.yellowLight,
+      borderRadius: RADIUS.lg,
+      borderLeftWidth: 3,
+      borderLeftColor: t.yellow,
+      padding: SPACING.md,
+      marginBottom: SPACING.md,
+    },
+    hero: {
+      backgroundColor: t.surface,
+      borderRadius: RADIUS.lg,
+      borderWidth: 1,
+      borderColor: t.dividerSubtle,
+      borderLeftWidth: 3,
+      borderLeftColor: t.cyan,
+      padding: SPACING.lg,
+    },
+    heroBody: {
+      marginTop: SPACING.xs,
+      marginBottom: SPACING.lg,
+    },
+    heroInput: {
+      marginBottom: SPACING.md,
+    },
+    heroActions: {
+      flexDirection: 'row',
+      gap: SPACING.sm,
+    },
+    recentStack: {
+      gap: SPACING.sm,
+    },
+    recentCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: t.surface,
+      borderRadius: RADIUS.lg,
+      borderWidth: 1,
+      borderColor: t.dividerSubtle,
+      padding: SPACING.md,
+      minHeight: 64,
+      gap: SPACING.md,
+    },
+    recentIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: t.bg,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    tip: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      backgroundColor: t.yellowLight,
+      borderRadius: RADIUS.lg,
+      borderLeftWidth: 3,
+      borderLeftColor: t.yellow,
+      padding: SPACING.md,
+      marginTop: SPACING.xxl,
+    },
+    footer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: SPACING.xxl,
+    },
+  });

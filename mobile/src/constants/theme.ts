@@ -100,9 +100,20 @@ export const SIZE_SCALE = {
   large: 1.22,
 };
 
-export type FontStyleOption = 'serif' | 'system' | 'hyper';
 export type TextSizeOption = 'normal' | 'comfortable' | 'large';
 export type MotionOption = 'movement' | 'reduced';
+
+/**
+ * Extra tracking, in points, added to every glyph.
+ *
+ * Small numbers on purpose. Past about a point and a half the words stop
+ * holding together as words, which is the opposite of the intended effect.
+ */
+export const LETTER_SPACING = {
+  normal: 0,
+  wide: 0.6,
+  wider: 1.2,
+};
 
 export const SHADOWS = {
   sm: {
