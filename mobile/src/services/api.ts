@@ -35,6 +35,7 @@ import {
   ProgressState,
   DocumentFileResult,
   VoiceCatalogue,
+  ChunkedTaskResult,
 } from '../types';
 
 export class ApiError extends Error {
@@ -367,6 +368,147 @@ export function streamChat(
 }
 
 /* -------------------------------------------------------------------------- */
+/* Streaming explanation                                                      */
+/* -------------------------------------------------------------------------- */
+
+export interface ExplainStreamHandlers {
+  onText?: (chunk: string) => void;
+  onDone?: (info: { fallback?: boolean; fallbackReason?: string }) => void;
+  onError?: (message: string) => void;
+}
+
+export interface ExplainStreamPayload {
+  text: string;
+  /** 'simple' | 'plain' | 'detailed' — how far the explanation goes. */
+  style?: string;
+  language?: string;
+}
+
+/**
+ * Stream a plain-language explanation of a passage.
+ *
+ * Selecting a mind-map branch used to read the branch's own note back, in
+ * whatever language that note happened to be written in. For a reader who chose
+ * Tamil that is not an accommodation, it is an English sentence spoken at them.
+ * So a branch is now *explained* rather than recited, and the audio follows the
+ * explanation.
+ *
+ * The frames here are plain `data:` lines with no `event:` name — a different
+ * shape from `/api/chat`, which is why this cannot reuse `streamChat`. The
+ * terminator is the literal string `[DONE]`, and a mid-stream failure arrives
+ * as a final frame carrying `fallback: true` rather than as an error, because
+ * the server would rather hand over a rougher offline rewrite than nothing.
+ */
+export function streamExplain(
+  payload: ExplainStreamPayload,
+  handlers: ExplainStreamHandlers = {},
+  signal?: AbortSignal
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    let consumed = 0;
+    let buffer = '';
+    let settled = false;
+    let doneInfo: { fallback?: boolean; fallbackReason?: string } = {};
+
+    const handleFrame = (frame: string) => {
+      const dataLines: string[] = [];
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+      }
+      if (!dataLines.length) return;
+
+      const raw = dataLines.join('\n');
+      if (raw === '[DONE]') return;
+
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed.error) {
+          handlers.onError?.(String(parsed.error));
+          return;
+        }
+        if (typeof parsed.text === 'string' && parsed.text) handlers.onText?.(parsed.text);
+        if (parsed.done) {
+          doneInfo = { fallback: parsed.fallback, fallbackReason: parsed.fallbackReason };
+        }
+      } catch (_) {
+        /* a malformed frame must not kill the stream */
+      }
+    };
+
+    const drain = (text: string) => {
+      buffer += text;
+      const frames = buffer.split('\n\n');
+      buffer = frames.pop() || '';
+      for (const frame of frames) handleFrame(frame);
+    };
+
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener('abort', onAbort);
+      if (error) reject(error);
+      else {
+        handlers.onDone?.(doneInfo);
+        resolve();
+      }
+    };
+
+    const onAbort = () => {
+      try {
+        xhr.abort();
+      } catch (_) {}
+      finish(new ApiError('Request cancelled.', 499));
+    };
+
+    xhr.open('POST', url('/api/agent/explain/stream'));
+    for (const [key, value] of Object.entries(headers({ Accept: 'text/event-stream' }))) {
+      xhr.setRequestHeader(key, value);
+    }
+    xhr.timeout = TIMEOUTS.ai;
+
+    xhr.onprogress = () => {
+      const chunk = xhr.responseText.slice(consumed);
+      consumed = xhr.responseText.length;
+      if (chunk) drain(chunk);
+    };
+
+    xhr.onload = () => {
+      const chunk = xhr.responseText.slice(consumed);
+      consumed = xhr.responseText.length;
+      if (chunk) drain(chunk);
+      if (buffer.trim()) handleFrame(buffer);
+
+      if (xhr.status >= 400) {
+        finish(new ApiError('The explainer is unavailable right now.', xhr.status));
+        return;
+      }
+      finish();
+    };
+
+    xhr.onerror = () => finish(new ApiError(OFFLINE_MESSAGE, 0));
+    xhr.ontimeout = () => finish(new ApiError('The engine took too long to answer.', 408));
+    xhr.onabort = () => finish(new ApiError('Request cancelled.', 499));
+
+    signal?.addEventListener('abort', onAbort);
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+
+    xhr.send(
+      JSON.stringify(
+        withLanguage({
+          text: payload.text,
+          style: payload.style || 'plain',
+          ...(payload.language ? { language: payload.language } : {}),
+        })
+      )
+    );
+  });
+}
+
+/* -------------------------------------------------------------------------- */
 /* API surface                                                                */
 /* -------------------------------------------------------------------------- */
 
@@ -433,6 +575,26 @@ export const api = {
   chat: (topic: string, message: string, history: { role: string; content: string }[] = []) =>
     post<{ reply: string; mapData?: MindMapNode }>('/api/chat', { topic, message, history }),
   streamChat,
+  streamExplain,
+
+  /**
+   * Break a passage into exactly three steps.
+   *
+   * The engine's chunker was written for a web page, so it takes a
+   * `pageContext` shaped like one. There is no page here — the input is
+   * whatever the reader pasted or scanned — so the text goes in the `text`
+   * slot and the rest is left empty rather than invented. Sending a fake URL
+   * and fake headings would only give the model something wrong to reason
+   * about.
+   */
+  chunkIntoSteps: (text: string, title: string = '') =>
+    post<ChunkedTaskResult>('/api/agent/chunk', {
+      pageContext: { title, text, headings: [], controls: [] },
+    }),
+
+  /** Turn a chart, table or dense passage into a structure worth drawing. */
+  visualize: (payload: { text?: string; image?: string; mimeType?: string; context?: string }) =>
+    post<any>('/api/agent/visualize', payload),
 
   /* Summaries & settings */
   listSummaries: () => get<any>('/api/summaries'),

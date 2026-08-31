@@ -13,8 +13,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, TouchableOpacity, View, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { StyleSheet, TouchableOpacity, View, Alert } from 'react-native';
 import { Award, Flame, RotateCcw } from 'lucide-react-native';
 
 import { Palette } from '../constants/themes';
@@ -31,10 +30,11 @@ import {
   subscribeProgress,
 } from '../services/progress';
 import { ProgressState } from '../types';
-import { Text, Heading, Kicker } from '../components/Typography';
+import { Text, Kicker } from '../components/Typography';
+import { Screen } from '../components/Screen';
 import { MomentumRing } from '../components/MomentumRing';
 
-export const MomentumScreen: React.FC = () => {
+export const MomentumScreen: React.FC<{ navigation?: any }> = ({ navigation }) => {
   const COLORS = useThemeColors();
   const styles = useThemedStyles(makeStyles);
   const { rewards, toggleRewards } = useAccessibility();
@@ -75,17 +75,17 @@ export const MomentumScreen: React.FC = () => {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <ScrollView
-        contentContainerStyle={styles.body}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={COLORS.cyan} />
-        }
-      >
+    <Screen
+      title="Momentum"
+      subtitle="What you have been doing"
+      leading="back"
+      onBack={() => navigation?.goBack?.()}
+      refreshing={refreshing}
+      onRefresh={refresh}
+      contentStyle={styles.body}
+    >
         <View>
-          <Kicker color={COLORS.cyan}>Momentum</Kicker>
-          <Heading variant="titleLg">What you have been doing</Heading>
-          <Text variant="bodySm" color={COLORS.textMuted} style={{ marginTop: 6 }}>
+          <Text variant="bodySm" color={COLORS.textMuted}>
             Not a target and not a score to beat. Just a record that the effort happened, because
             the effort is usually the part that goes unnoticed.
           </Text>
@@ -241,20 +241,14 @@ export const MomentumScreen: React.FC = () => {
             </Text>
           </TouchableOpacity>
         </View>
-      </ScrollView>
-    </SafeAreaView>
+    </Screen>
   );
 };
 
 const makeStyles = (t: Palette) =>
   StyleSheet.create({
-    safeArea: {
-      flex: 1,
-      backgroundColor: t.bg,
-    },
     body: {
-      padding: SPACING.lg,
-      paddingBottom: SPACING.huge * 2,
+      paddingBottom: SPACING.huge,
       gap: SPACING.xl,
     },
     ringCard: {

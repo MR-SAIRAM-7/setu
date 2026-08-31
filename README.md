@@ -37,7 +37,7 @@ Built for Capgemini Hack4Positive 2026 · Disability Inclusion & Accessibility
 |---|---|---|
 | **SETU Lens** | Chrome extension. Rewrites the page you are on — bionic text, line focus, reader view, read-aloud, and an AI agent that navigates the page for you. | `chrome-extension/` |
 | **SETU Sanctuary** | Redesigned Broadsheet React workspace. Research any topic into an interactive talking mind map that explains any branch in your language, 8 cognitive tools that each look and work like the job they do, reflective support, a reward system, 3-step onboarding, command palette, and focus sessions. | `frontend/` |
-| **SETU Mobile** | React Native + TypeScript Expo Android client with SVG touch mind maps, camera OCR document ingestion, 7 cognitive modes, and ADHD focus timers. | `mobile/` |
+| **SETU Mobile** | React Native + TypeScript Expo client. Four tabs for the places you work and a side menu for everything else, SVG touch mind maps whose branches are explained aloud on contact, all eight cognitive tools in their own workspaces, camera OCR, document Q&A, a breathing space, and ADHD focus timers. | `mobile/` |
 | **SETU Engine** | The shared AI orchestration layer and MongoDB persistence service that all surfaces call transparently via `x-user-id`. | `backend/` |
 
 ---
@@ -237,6 +237,11 @@ cd mobile && npm install && npm start
 
 - Run on Android Emulator: `npm run android`
 - Run on Physical Phone: Scan QR code with the **Expo Go** app.
+
+A phone in Expo Go finds the laptop's backend by itself — it reuses the host it
+downloaded the bundle from. Leave **Settings → Engine address** empty unless you
+are pointing it somewhere unusual. See [`mobile/README.md`](mobile/README.md)
+for the full resolution order and the pre-build checks.
 
 ### 5. Load the Chrome Extension
 

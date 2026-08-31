@@ -24,6 +24,20 @@ export function truncateText(text: string, maxLen: number): string {
   return text.substring(0, maxLen).trim() + '…';
 }
 
+/**
+ * A file size somebody can actually picture.
+ *
+ * Rounded hard — one decimal place at most, and none once past a megabyte.
+ * "1.4 MB" is a size; "1,468,006 bytes" is a number to decode, which is the
+ * exact tax this app exists to remove.
+ */
+export function formatFileSize(bytes: number): string {
+  if (!bytes || bytes < 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export function countWords(text: string): number {
   if (!text) return 0;
   return text.trim().split(/\s+/).filter(word => word.length > 0).length;

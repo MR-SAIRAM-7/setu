@@ -91,10 +91,20 @@ const PROFILE_OPTIONS: {
   },
 ];
 
+/**
+ * Only what the phone can actually render.
+ *
+ * This list used to name Atkinson Hyperlegible, which is not bundled with the
+ * app and never was — picking it changed nothing at all. Naming a real
+ * dyslexia typeface and then not shipping it is worse than not offering one,
+ * because the reader concludes the accommodation does not work for them.
+ * Settings offers letter spacing instead, which does more of the same job and
+ * works with whatever font is installed.
+ */
 const FONT_OPTIONS: { id: FontStyleOption; label: string; hint: string }[] = [
-  { id: 'serif', label: 'Source Serif', hint: 'The Broadsheet newsprint default' },
-  { id: 'hyper', label: 'Atkinson Hyperlegible', hint: 'Drawn for distinct letterforms' },
-  { id: 'system', label: 'System sans', hint: 'Clean modern sans-serif' },
+  { id: 'serif', label: 'Serif', hint: 'Strokes on the ends of letters' },
+  { id: 'sans', label: 'Sans', hint: 'Plainer letterforms, no strokes' },
+  { id: 'system', label: 'Your phone’s', hint: 'Follows your own system settings' },
 ];
 
 const SIZE_OPTIONS: { id: TextSizeOption; label: string; hint: string }[] = [

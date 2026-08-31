@@ -24,6 +24,12 @@ module.exports = ({ config }) => {
     ...expo,
     plugins: [
       ...(expo.plugins || []),
+      // A peer dependency of expo-audio rather than something SETU imports
+      // directly. Without it a standalone build can crash the first time
+      // read-aloud tries to play a clip — which is fine in Expo Go, where the
+      // module is already present, and exactly the class of failure that only
+      // shows up in the APK.
+      'expo-asset',
       [
         'expo-build-properties',
         {

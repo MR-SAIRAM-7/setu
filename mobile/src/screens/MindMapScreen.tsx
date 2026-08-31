@@ -1,45 +1,54 @@
 /**
- * SETU Mobile — mind map research and explorer.
+ * SETU Mobile — the mind map.
  *
- * Turns a question into a branching map, then lets the reader go deeper on any
- * branch or ask about it in words.
+ * Turns a question into a branching map, then lets the reader open any branch
+ * and have that idea *explained* — in their language, out loud — rather than
+ * having the map's own note read back at them.
  *
- * Tapping a branch reads it aloud. That is not a convenience feature: the
- * clinical guidance for this project was explicit that diagrams only work for
- * this audience when paired with audio on interaction. A map made of silent text
- * is, for a reader whose difficulty is decoding rather than eyesight, just a
- * differently-shaped wall of words.
+ * The old screen stacked a search field, a tab switcher, a summary ribbon, the
+ * canvas and a hint bar into one column, which left the map itself about half
+ * the screen on a normal phone. The search field now lives behind a control in
+ * the header, the summary is one line, and the canvas gets everything else.
  *
- * The chat turn is streamed rather than awaited whole. A research answer takes
- * tens of seconds end to end, and watching a spinner for that long is exactly
- * the wait an ADHD reader will not sit through.
+ * Branch audio is not a convenience. The clinical guidance for this project was
+ * explicit that diagrams only work for this audience when paired with audio on
+ * interaction: a map made of silent text is, for a reader whose difficulty is
+ * decoding rather than eyesight, just a differently-shaped wall of words.
+ *
+ * Nothing here invents a map. A failed research call leaves whatever was open
+ * still open and says what happened — a generic "Fundamentals / Applications"
+ * tree looks like a researched answer, and a reader who cannot easily evaluate
+ * text is exactly the reader who would take it as one.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { View, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import {
-  View,
-  ScrollView,
-  StyleSheet,
-  SafeAreaView,
-  TouchableOpacity,
-  Alert,
-} from 'react-native';
-import {
-  Share2,
+  Search,
+  SlidersHorizontal,
   Volume2,
+  VolumeX,
+  Share2,
   Send,
   MessageSquare,
   Network,
+  X,
 } from 'lucide-react-native';
-import { COLORS, RADIUS, SPACING } from '../constants/theme';
+import * as Haptics from 'expo-haptics';
+
+import { SPACING, RADIUS } from '../constants/theme';
 import { Palette } from '../constants/themes';
 import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
-import { Text, Heading, Kicker } from '../components/Typography';
+import { useAccessibility } from '../context/AccessibilityContext';
+import { Screen } from '../components/Screen';
+import { Segmented } from '../components/Segmented';
+import { Text } from '../components/Typography';
 import { Input } from '../components/Input';
 import { Button } from '../components/Button';
-import { Card, Tag } from '../components/Card';
 import { MindMapCanvas } from '../components/MindMapCanvas';
-import { NodeDetailSheet } from '../components/NodeDetailSheet';
+import { NodeInsightSheet } from '../components/NodeInsightSheet';
+import { NodeEditorSheet, NodeEdit } from '../components/NodeEditorSheet';
+import { MapAppearanceSheet } from '../components/MapAppearanceSheet';
 import { StagedLoader } from '../components/StagedLoader';
 import { VoiceInputButton } from '../components/VoiceInputButton';
 import { SEED_MIND_MAPS } from '../services/seedData';
@@ -47,143 +56,171 @@ import { api, streamChat } from '../services/api';
 import { saveMindMap } from '../services/storage';
 import { tts } from '../services/tts';
 import { award } from '../services/progress';
-import { useAccessibility } from '../context/AccessibilityContext';
 import { copyToClipboard, mapToMarkdown, mapToOutline, shareText } from '../services/exportUtils';
 import { MindMapDocument, MindMapNode, PlacedNode, ChatMessage } from '../types';
-import * as Haptics from 'expo-haptics';
 
 export interface MindMapScreenProps {
   route?: any;
-  navigation?: any;
+  navigation: any;
+}
+
+/** Rewrite one node in a tree, leaving the rest untouched. */
+function editNode(root: MindMapNode, id: string, edit: NodeEdit): MindMapNode {
+  if (root.id === id) return { ...root, label: edit.label, detail: edit.detail };
+  return { ...root, children: (root.children || []).map((child) => editNode(child, id, edit)) };
+}
+
+/** Attach children under one node. */
+function attachChildren(root: MindMapNode, id: string, children: MindMapNode[]): MindMapNode {
+  if (root.id === id) return { ...root, children: [...(root.children || []), ...children] };
+  return {
+    ...root,
+    children: (root.children || []).map((child) => attachChildren(child, id, children)),
+  };
+}
+
+/** Drop a node and everything under it. The root is never removable. */
+function removeNode(root: MindMapNode, id: string): MindMapNode {
+  return {
+    ...root,
+    children: (root.children || [])
+      .filter((child) => child.id !== id)
+      .map((child) => removeNode(child, id)),
+  };
+}
+
+function countNodes(node?: MindMapNode | null): number {
+  if (!node) return 0;
+  return 1 + (node.children || []).reduce((sum, child) => sum + countNodes(child), 0);
 }
 
 export const MindMapScreen: React.FC<MindMapScreenProps> = ({ route, navigation }) => {
   const COLORS = useThemeColors();
   const styles = useThemedStyles(makeStyles);
-  const initialMap = route?.params?.selectedMap || SEED_MIND_MAPS[0];
-  const initialTopic = route?.params?.initialTopic || '';
+  const { speakOnTap, preferences } = useAccessibility();
 
-  const [currentMap, setCurrentMap] = useState<MindMapDocument>(initialMap);
-  const [topicInput, setTopicInput] = useState(initialTopic);
-  const [isLoading, setIsLoading] = useState(false);
-  const [selectedNode, setSelectedNode] = useState<PlacedNode | null>(null);
-  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
-  const [isExpandingNode, setIsExpandingNode] = useState(false);
-  const [activeTab, setActiveTab] = useState<'canvas' | 'chat'>('canvas');
-
-  // Conversational Chat State
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'm_welcome',
-      role: 'assistant',
-      content: `I’ve mapped "${currentMap.topic}". Tap any branch to read key facts or ask follow-up questions.`,
-      timestamp: new Date().toISOString(),
-    },
-  ]);
-  const [chatInput, setChatInput] = useState('');
-  const [isSendingChat, setIsSendingChat] = useState(false);
-  const [streamStatus, setStreamStatus] = useState<string | null>(null);
+  const [map, setMap] = useState<MindMapDocument>(
+    route?.params?.selectedMap || SEED_MIND_MAPS[0]
+  );
+  const [view, setView] = useState<'map' | 'ask'>('map');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [topic, setTopic] = useState('');
+  const [researching, setResearching] = useState(false);
   const [researchError, setResearchError] = useState<string | null>(null);
 
-  const { speakOnTap } = useAccessibility();
+  const [selected, setSelected] = useState<PlacedNode | null>(null);
+  const [editing, setEditing] = useState<PlacedNode | null>(null);
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const [pictureMode, setPictureMode] = useState(false);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [expanding, setExpanding] = useState(false);
+  const [speakingMap, setSpeakingMap] = useState(false);
 
-  useEffect(
-    () => () => {
-      tts.stop();
-    },
-    []
-  );
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const [streamStatus, setStreamStatus] = useState<string | null>(null);
+
+  const chatScroll = useRef<ScrollView>(null);
+  const alive = useRef(true);
 
   useEffect(() => {
-    if (route?.params?.selectedMap) {
-      setCurrentMap(route.params.selectedMap);
-      setCollapsedIds(new Set());
-    } else if (route?.params?.initialTopic) {
-      handlePerformResearch(route.params.initialTopic);
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      tts.stop();
+    };
+  }, []);
+
+  /* Params arrive from Home, the Library and the document reader. */
+  useEffect(() => {
+    const incoming = route?.params?.selectedMap;
+    const initialTopic = route?.params?.initialTopic;
+
+    if (incoming) {
+      setMap(incoming);
+      setCollapsed(new Set());
+      setSelected(null);
+      setMessages([]);
+    } else if (initialTopic) {
+      setSearchOpen(false);
+      research(initialTopic);
     }
-  }, [route?.params]);
+    // Clearing the params stops a tab switch from re-running the same research.
+    if (incoming || initialTopic) navigation.setParams?.({ selectedMap: undefined, initialTopic: undefined });
+  }, [route?.params?.selectedMap, route?.params?.initialTopic]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handlePerformResearch = async (queryTopic?: string) => {
-    const topic = (queryTopic || topicInput).trim();
-    if (!topic) return;
+  const persist = useCallback(async (next: MindMapDocument) => {
+    setMap(next);
+    await saveMindMap(next);
+  }, []);
 
-    setIsLoading(true);
-    setSelectedNode(null);
+  async function research(query?: string) {
+    const value = (query ?? topic).trim();
+    if (!value || researching) return;
+
+    setResearching(true);
     setResearchError(null);
-    setCollapsedIds(new Set());
+    setSelected(null);
+    setCollapsed(new Set());
+    setSearchOpen(false);
 
     try {
-      try {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      } catch (_) {}
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch (_) {
+      /* haptics are a nicety */
+    }
 
-      const result = await api.mindMap(topic);
+    try {
+      // The engine returns the saved record itself, so the tree is on `root` —
+      // reading a `map` property here yields undefined and draws nothing.
+      const result = await api.mindMap(value);
 
-      // The engine returns the saved record itself, so the tree is on `root`.
-      // An older build read `result.map` here, which is always undefined and
-      // produced a document with nothing to draw.
-      const newDoc: MindMapDocument = {
+      const next: MindMapDocument = {
         id: `map_${Date.now()}`,
-        topic,
-        summary: result.summary || `Researched overview of ${topic}`,
+        topic: value,
+        summary: result.summary || `An overview of ${value}`,
         root: result.root,
-        totalTopics: result.totalTopics || 10,
+        totalTopics: result.totalTopics || countNodes(result.root),
         sourceType: 'query',
         createdAt: new Date().toISOString(),
       };
 
-      setCurrentMap(newDoc);
+      if (!alive.current) return;
+      setTopic('');
+      setMessages([]);
+      // `persist` already mirrors the map to the engine through the storage
+      // layer's fire-and-forget sync. Calling `saveMindMapToDb` here as well
+      // wrote it twice, and — because that call rejects rather than resolving
+      // to null — left an unhandled rejection behind every time the engine was
+      // unreachable, which is exactly when it fired.
+      await persist(next);
       award('mapCreated');
-      await saveMindMap(newDoc);
-      try {
-        api.saveMindMapToDb(newDoc);
-      } catch (_) {}
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `m_${Date.now()}`,
-          role: 'assistant',
-          content: `Here is the interactive mind map for "${topic}". ${result.summary}`,
-          timestamp: new Date().toISOString(),
-        },
-      ]);
     } catch (error: any) {
-      // No invented map. A generic "Fundamentals / Real-world Application" tree
-      // looks like a researched answer and is not one, and a reader who cannot
-      // easily evaluate text is exactly the reader who will take it as read.
-      // Whatever map was already open stays open, which is more useful than a
-      // blank screen anyway.
+      if (!alive.current) return;
       setResearchError(
         error?.message ||
-          'Could not research that topic just now. The map already open is still yours to explore.'
+          'Could not research that just now. The map already open is still yours to explore.'
       );
     } finally {
-      setIsLoading(false);
+      if (alive.current) setResearching(false);
+    }
+  }
+
+  const openNode = (node: PlacedNode) => {
+    setSelected(node);
+    // In picture mode the note is not on screen at all, so the audio is the
+    // only way to reach it — speak the map's own note immediately while the
+    // generated explanation streams in behind it.
+    if (speakOnTap && pictureMode) {
+      const spoken = [node.label, node.detail].filter(Boolean).join('. ');
+      if (spoken) tts.speak(spoken, { quiet: true });
     }
   };
 
-  /**
-   * Read a branch aloud when it is opened.
-   *
-   * Label then detail, in that order, because the label is the thing being
-   * located and the detail is what it means. Marked `quiet` so it does not fire
-   * a haptic — the tap already gave one.
-   */
-  const speakNode = (node: PlacedNode) => {
-    if (!speakOnTap) return;
-    const spoken = [node.label, node.detail].filter(Boolean).join('. ');
-    if (spoken) tts.speak(spoken, { quiet: true });
-  };
-
-  const handleSelectNode = (node: PlacedNode) => {
-    setSelectedNode(node);
-    speakNode(node);
-  };
-
-  const handleToggleCollapse = (nodeId: string) => {
+  const toggleCollapse = (nodeId: string) => {
     tts.stop();
-    setCollapsedIds((prev) => {
+    setCollapsed((prev) => {
       const next = new Set(prev);
       if (next.has(nodeId)) next.delete(nodeId);
       else next.add(nodeId);
@@ -191,63 +228,106 @@ export const MindMapScreen: React.FC<MindMapScreenProps> = ({ route, navigation 
     });
   };
 
-  const handleExpandDeeper = async (node: PlacedNode) => {
-    setIsExpandingNode(true);
+  const goDeeper = async (node: PlacedNode) => {
+    setExpanding(true);
     try {
-      const result = await api.expandNode(currentMap.topic, node.label, node.detail);
-      if (result.children && result.children.length > 0) {
-        // Attach children to tree
-        const addChildrenRecursive = (curr: MindMapNode): MindMapNode => {
-          if (curr.id === node.id) {
-            return {
-              ...curr,
-              children: [...(curr.children || []), ...result.children],
-            };
-          }
-          return {
-            ...curr,
-            children: curr.children ? curr.children.map(addChildrenRecursive) : [],
-          };
+      const result = await api.expandNode(map.topic, node.label, node.detail);
+      if (result?.children?.length) {
+        const next: MindMapDocument = {
+          ...map,
+          root: attachChildren(map.root, node.id, result.children),
         };
-
-        const updatedRoot = addChildrenRecursive(currentMap.root);
-        const updatedDoc = {
-          ...currentMap,
-          root: updatedRoot,
-          totalTopics: (currentMap.totalTopics || 8) + result.children.length,
-        };
-        setCurrentMap(updatedDoc);
+        next.totalTopics = countNodes(next.root);
+        await persist(next);
         award('branchExpanded');
-        await saveMindMap(updatedDoc);
+      } else {
+        setResearchError('The engine had nothing more to add under that branch.');
       }
     } catch (error: any) {
-      // A placeholder branch labelled "<topic> Deep Dive" is not an expansion,
+      // A placeholder branch labelled "<topic> deep dive" is not an expansion,
       // it is a lie shaped like one — and it would be saved into the map and
-      // exported alongside real research. Say the request failed instead.
+      // exported alongside real research.
       setResearchError(
         error?.message ||
-          'Could not go deeper on that branch right now. Nothing was changed on the map.'
+          'Could not go deeper on that branch. Nothing on the map was changed.'
       );
     } finally {
-      setIsExpandingNode(false);
-      setSelectedNode(null);
+      if (alive.current) {
+        setExpanding(false);
+        setSelected(null);
+      }
     }
   };
 
-  const handleSendMessage = async () => {
-    const text = chatInput.trim();
-    if (!text || isSendingChat) return;
+  const saveNodeEdit = async (nodeId: string, edit: NodeEdit) => {
+    const next = { ...map, root: editNode(map.root, nodeId, edit) };
+    await persist(next);
+    setSelected(null);
+  };
 
-    const userMsg: ChatMessage = {
-      id: `u_${Date.now()}`,
-      role: 'user',
-      content: text,
-      timestamp: new Date().toISOString(),
+  const addChild = async (nodeId: string, edit: NodeEdit) => {
+    const child: MindMapNode = {
+      id: `n_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      label: edit.label,
+      detail: edit.detail,
+      children: [],
     };
+    const next = { ...map, root: attachChildren(map.root, nodeId, [child]) };
+    next.totalTopics = countNodes(next.root);
+    await persist(next);
+  };
 
-    setMessages((prev) => [...prev, userMsg]);
+  const deleteNode = async (nodeId: string) => {
+    const next = { ...map, root: removeNode(map.root, nodeId) };
+    next.totalTopics = countNodes(next.root);
+    await persist(next);
+    setSelected(null);
+  };
+
+  const speakMap = () => {
+    if (speakingMap) {
+      tts.stop();
+      setSpeakingMap(false);
+      return;
+    }
+    const spoken = [
+      map.topic,
+      map.summary,
+      ...(map.root?.children || []).map((child) =>
+        [child.label, child.detail].filter(Boolean).join('. ')
+      ),
+    ]
+      .filter(Boolean)
+      .join('. ');
+    if (!spoken) return;
+    setSpeakingMap(true);
+    tts.speak(spoken, {
+      onDone: () => setSpeakingMap(false),
+      onError: () => setSpeakingMap(false),
+    });
+  };
+
+  const exportMap = () => {
+    Alert.alert('Take this map with you', `“${map.topic}”`, [
+      { text: 'Copy as plain text', onPress: () => copyToClipboard(mapToOutline(map)) },
+      {
+        text: 'Share as Markdown',
+        onPress: () => shareText(mapToMarkdown(map), map.topic, 'md'),
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const send = async () => {
+    const text = chatInput.trim();
+    if (!text || sending) return;
+
+    setMessages((prev) => [
+      ...prev,
+      { id: `u_${Date.now()}`, role: 'user', content: text, timestamp: new Date().toISOString() },
+    ]);
     setChatInput('');
-    setIsSendingChat(true);
+    setSending(true);
 
     const replyId = `a_${Date.now()}`;
     let received = false;
@@ -255,13 +335,11 @@ export const MindMapScreen: React.FC<MindMapScreenProps> = ({ route, navigation 
     try {
       await streamChat(
         {
-          topic: currentMap.topic,
+          topic: map.topic,
           message: text,
           history: messages.map((m) => ({ role: m.role, content: m.content })),
         },
         {
-          // The status frames name the stage the engine is at. Showing them is
-          // the difference between "it is working" and "it has hung".
           onStatus: (data) => setStreamStatus(data?.message || null),
 
           onReply: (data) => {
@@ -271,8 +349,7 @@ export const MindMapScreen: React.FC<MindMapScreenProps> = ({ route, navigation 
             setStreamStatus(null);
 
             setMessages((prev) => {
-              const existing = prev.find((m) => m.id === replyId);
-              if (!existing) {
+              if (!prev.find((m) => m.id === replyId)) {
                 return [
                   ...prev,
                   {
@@ -298,23 +375,22 @@ export const MindMapScreen: React.FC<MindMapScreenProps> = ({ route, navigation 
             });
           },
 
-          // A turn can also answer with a whole new map when the question turns
-          // out to be a research request rather than a follow-up.
+          // A turn can answer with a whole new map when the question turns out
+          // to be a research request rather than a follow-up.
           onMap: (mapData) => {
             if (!mapData?.root) return;
-            const nextDoc: MindMapDocument = {
+            const next: MindMapDocument = {
               id: `map_${Date.now()}`,
-              topic: mapData.topic || mapData.title || currentMap.topic,
+              topic: mapData.topic || mapData.title || map.topic,
               summary: mapData.summary || '',
               root: mapData.root,
-              totalTopics: mapData.totalTopics,
+              totalTopics: mapData.totalTopics || countNodes(mapData.root),
               sourceType: 'query',
               createdAt: new Date().toISOString(),
             };
-            setCurrentMap(nextDoc);
-            setCollapsedIds(new Set());
+            setCollapsed(new Set());
+            persist(next);
             award('mapCreated');
-            saveMindMap(nextDoc).catch(() => {});
           },
 
           onError: (data) => {
@@ -325,8 +401,8 @@ export const MindMapScreen: React.FC<MindMapScreenProps> = ({ route, navigation 
                 id: `err_${Date.now()}`,
                 role: 'assistant',
                 content:
-                  (data as any)?.message ||
-                  'The engine could not answer that one. Your question is still in the box above.',
+                  (data as any)?.error ||
+                  'The engine could not answer that one. Your question is still above.',
                 timestamp: new Date().toISOString(),
               },
             ]);
@@ -352,365 +428,372 @@ export const MindMapScreen: React.FC<MindMapScreenProps> = ({ route, navigation 
           id: `err_${Date.now()}`,
           role: 'assistant',
           content:
-            error?.message ||
-            'Could not reach the engine. The map on screen is still yours to explore.',
+            error?.message || 'Could not reach the engine. The map on screen is still yours.',
           timestamp: new Date().toISOString(),
         },
       ]);
     } finally {
-      setStreamStatus(null);
-      setIsSendingChat(false);
+      if (alive.current) {
+        setStreamStatus(null);
+        setSending(false);
+      }
     }
   };
 
-  /**
-   * Get the map out of the app.
-   *
-   * Three formats because they go to different places: Markdown into notes
-   * apps, a plain outline into anything that chokes on asterisks (including a
-   * screen reader), and JSON for anyone who wants the structure back.
-   */
-  const handleExportMap = () => {
-    Alert.alert('Take this map with you', `"${currentMap.topic}"`, [
-      {
-        text: 'Copy as text',
-        onPress: () => copyToClipboard(mapToOutline(currentMap)),
-      },
-      {
-        text: 'Share as Markdown',
-        onPress: () => shareText(mapToMarkdown(currentMap), currentMap.topic, 'md'),
-      },
-      {
-        text: 'Share as JSON',
-        onPress: () =>
-          shareText(JSON.stringify(currentMap, null, 2), currentMap.topic, 'json'),
-      },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  };
-
-  const handleReadMapAloud = () => {
-    const spoken = [
-      currentMap.topic,
-      currentMap.summary,
-      ...(currentMap.root?.children || []).map((child) =>
-        [child.label, child.detail].filter(Boolean).join('. ')
-      ),
-    ]
-      .filter(Boolean)
-      .join('. ');
-    tts.speak(spoken);
-  };
-
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
-        {/* Research Input Bar */}
-        <View style={styles.searchBarContainer}>
-          <Input
-            placeholder="Research any topic into a mind map…"
-            value={topicInput}
-            onChangeText={setTopicInput}
-            returnKeyType="search"
-            onSubmitEditing={() => handlePerformResearch()}
-            trailingIcon={
-              <VoiceInputButton
-                onTranscript={(text) => {
-                  setTopicInput(text);
-                  handlePerformResearch(text);
-                }}
-                size={34}
+    <Screen
+      title={map.topic}
+      subtitle={`${map.totalTopics || countNodes(map.root)} branches${pictureMode ? ' · picture mode' : ''}`}
+      scroll={false}
+      avoidKeyboard
+      contentStyle={styles.content}
+      actions={[
+        {
+          key: 'search',
+          label: 'Research a different topic',
+          icon: searchOpen ? (
+            <X size={18} color={COLORS.text} />
+          ) : (
+            <Search size={18} color={COLORS.text} />
+          ),
+          onPress: () => setSearchOpen((prev) => !prev),
+          active: searchOpen,
+        },
+        {
+          key: 'appearance',
+          label: 'How the map is drawn',
+          icon: <SlidersHorizontal size={18} color={COLORS.text} />,
+          onPress: () => setAppearanceOpen(true),
+        },
+      ]}
+      headerBelow={
+        searchOpen ? (
+          <View>
+            <View style={styles.searchRow}>
+              <Input
+                placeholder="Research any topic into a map…"
+                value={topic}
+                onChangeText={setTopic}
+                returnKeyType="search"
+                onSubmitEditing={() => research()}
+                autoFocus
+                containerStyle={styles.searchInput}
+                accessibilityLabel="Topic to research"
+                trailingIcon={
+                  <VoiceInputButton
+                    onTranscript={(text) => {
+                      setTopic(text);
+                      research(text);
+                    }}
+                    size={34}
+                  />
+                }
               />
-            }
-            containerStyle={{ marginBottom: 0, flex: 1 }}
-          />
-          <Button
-            title="Draw"
-            variant="primary"
-            size="md"
-            loading={isLoading}
-            onPress={() => handlePerformResearch()}
-            style={styles.drawBtn}
-          />
-        </View>
-
-        {researchError ? (
-          <Text variant="bodySm" color={COLORS.magenta} style={{ marginBottom: SPACING.sm }}>
-            {researchError}
-          </Text>
-        ) : null}
-
-        {/* Tab Switcher (Canvas / Conversation) */}
-        <View style={styles.tabSwitcher}>
-          <TouchableOpacity
-            style={[styles.tabBtn, activeTab === 'canvas' ? styles.tabBtnActive : {}]}
-            onPress={() => setActiveTab('canvas')}
-          >
-            <Network size={15} color={activeTab === 'canvas' ? COLORS.cyanDark : COLORS.textMuted} />
-            <Text
-              variant="bodySm"
-              weight="semibold"
-              color={activeTab === 'canvas' ? COLORS.cyanDark : COLORS.textMuted}
-              style={{ marginLeft: 6 }}
-            >
-              Interactive Map
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.tabBtn, activeTab === 'chat' ? styles.tabBtnActive : {}]}
-            onPress={() => setActiveTab('chat')}
-          >
-            <MessageSquare size={15} color={activeTab === 'chat' ? COLORS.cyanDark : COLORS.textMuted} />
-            <Text
-              variant="bodySm"
-              weight="semibold"
-              color={activeTab === 'chat' ? COLORS.cyanDark : COLORS.textMuted}
-              style={{ marginLeft: 6 }}
-            >
-              Ask AI ({messages.length})
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Loading Progress State */}
-        {isLoading ? (
-          <View style={styles.loaderContainer}>
-            <StagedLoader />
-          </View>
-        ) : activeTab === 'canvas' ? (
-          /* CANVAS TAB */
-          <View style={styles.canvasTabContent}>
-            {/* Map Summary Ribbon */}
-            <View style={styles.mapInfoCard}>
-              <View style={styles.mapInfoHeader}>
-                <View style={{ flex: 1 }}>
-                  <Text variant="titleSm" weight="bold" numberOfLines={1}>
-                    {currentMap.topic}
-                  </Text>
-                  <Text variant="caption" color={COLORS.textMuted} numberOfLines={1}>
-                    {currentMap.summary}
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  accessibilityLabel="Read this map aloud"
-                  style={styles.iconBtn}
-                  onPress={handleReadMapAloud}
-                >
-                  <Volume2 size={16} color={COLORS.cyan} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  accessibilityLabel="Copy, share or export this map"
-                  style={styles.iconBtn}
-                  onPress={handleExportMap}
-                >
-                  <Share2 size={16} color={COLORS.cyan} />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Interactive Canvas */}
-            <MindMapCanvas
-              rootNode={currentMap.root}
-              selectedNodeId={selectedNode?.id}
-              collapsedIds={collapsedIds}
-              onSelectNode={handleSelectNode}
-              onToggleCollapse={handleToggleCollapse}
-              onExpandDeeper={handleExpandDeeper}
-            />
-
-            <View style={styles.bottomHintBar}>
-              <Text variant="caption" color={COLORS.textSubtle}>
-                {speakOnTap
-                  ? 'Tap a branch to open and hear it · tap the count circle to fold it away'
-                  : 'Tap a branch to open it · tap the count circle to fold it away'}
-              </Text>
+              <Button
+                title="Draw"
+                variant="primary"
+                size="md"
+                loading={researching}
+                disabled={!topic.trim()}
+                onPress={() => research()}
+              />
             </View>
           </View>
         ) : (
-          /* CHAT TAB */
-          <View style={styles.chatTabContent}>
-            <ScrollView
-              style={styles.chatMessagesScroll}
-              contentContainerStyle={{ padding: SPACING.md }}
+          <Segmented
+            options={[
+              { key: 'map', label: 'The map', icon: <Network size={14} color={COLORS.cyan} /> },
+              {
+                key: 'ask',
+                label: messages.length ? `Ask (${messages.length})` : 'Ask about it',
+                icon: <MessageSquare size={14} color={COLORS.cyan} />,
+              },
+            ]}
+            value={view}
+            onChange={setView}
+          />
+        )
+      }
+    >
+      {researchError ? (
+        <TouchableOpacity
+          style={styles.error}
+          onPress={() => setResearchError(null)}
+          accessibilityRole="button"
+          accessibilityLabel={`${researchError}. Tap to dismiss.`}
+        >
+          <Text variant="caption" color={COLORS.error}>
+            {researchError}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
+
+      {researching ? (
+        <View style={styles.loading}>
+          <StagedLoader />
+        </View>
+      ) : view === 'map' ? (
+        <View style={styles.mapPane}>
+          <View style={styles.summaryRow}>
+            <Text variant="caption" color={COLORS.textMuted} numberOfLines={2} style={{ flex: 1 }}>
+              {map.summary}
+            </Text>
+            <TouchableOpacity
+              style={styles.iconBtn}
+              onPress={speakMap}
+              accessibilityRole="button"
+              accessibilityLabel={speakingMap ? 'Stop reading the map aloud' : 'Read the whole map aloud'}
             >
-              {messages.map((msg) => (
-                <View
-                  key={msg.id}
-                  style={[
-                    styles.msgBubble,
-                    msg.role === 'user' ? styles.userMsg : styles.assistantMsg,
-                  ]}
-                >
-                  <Text
-                    variant="body"
-                    color={msg.role === 'user' ? COLORS.textInverse : COLORS.text}
-                  >
-                    {msg.content}
-                  </Text>
-                </View>
-              ))}
-
-              {streamStatus ? (
-                <View style={[styles.msgBubble, styles.assistantMsg]}>
-                  <Text variant="bodySm" color={COLORS.textMuted}>
-                    {streamStatus}
-                  </Text>
-                </View>
-              ) : null}
-            </ScrollView>
-
-            <View style={styles.chatInputRow}>
-              <Input
-                placeholder="Ask about this mind map…"
-                value={chatInput}
-                onChangeText={setChatInput}
-                returnKeyType="send"
-                onSubmitEditing={handleSendMessage}
-                containerStyle={{ flex: 1, marginBottom: 0 }}
-              />
-              <Button
-                variant="primary"
-                size="md"
-                loading={isSendingChat}
-                icon={<Send size={16} color={COLORS.textInverse} />}
-                onPress={handleSendMessage}
-                style={styles.sendBtn}
-              />
-            </View>
+              {speakingMap ? (
+                <VolumeX size={16} color={COLORS.magenta} />
+              ) : (
+                <Volume2 size={16} color={COLORS.cyan} />
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.iconBtn}
+              onPress={exportMap}
+              accessibilityRole="button"
+              accessibilityLabel="Copy or share this map"
+            >
+              <Share2 size={16} color={COLORS.cyan} />
+            </TouchableOpacity>
           </View>
-        )}
 
-        {/* Selected Node Details Bottom Sheet */}
-        <NodeDetailSheet
-          node={selectedNode}
-          isExpanding={isExpandingNode}
-          onClose={() => setSelectedNode(null)}
-          onExpandDeeper={handleExpandDeeper}
-          onAskAboutNode={(node) => {
-            setSelectedNode(null);
-            setActiveTab('chat');
-            setChatInput(`Explain "${node.label}" in simpler terms`);
-          }}
-        />
-      </View>
-    </SafeAreaView>
+          <MindMapCanvas
+            rootNode={map.root}
+            selectedNodeId={selected?.id}
+            collapsedIds={collapsed}
+            onSelectNode={openNode}
+            onToggleCollapse={toggleCollapse}
+            onEditNode={setEditing}
+            edgeStyle={preferences.mapEdgeStyle}
+            nodeStyle={preferences.mapNodeStyle}
+            textScale={preferences.mapTextScale}
+            hideDetail={pictureMode}
+          />
+
+          <Text variant="caption" color={COLORS.textSubtle} style={styles.hint}>
+            Tap a branch to have it explained · hold one to edit it · tap the circle to fold it away
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.chatPane}>
+          <ScrollView
+            ref={chatScroll}
+            style={styles.chatScroll}
+            contentContainerStyle={styles.chatContent}
+            onContentSizeChange={() => chatScroll.current?.scrollToEnd({ animated: true })}
+            keyboardShouldPersistTaps="handled"
+          >
+            {messages.length === 0 ? (
+              <View style={styles.chatEmpty}>
+                <Text variant="bodySm" color={COLORS.textMuted} align="center">
+                  Ask anything about “{map.topic}”. Answers come back in the language you have
+                  chosen, and a question that turns out to be a new topic draws a new map instead.
+                </Text>
+              </View>
+            ) : null}
+
+            {messages.map((message) => (
+              <View
+                key={message.id}
+                style={[
+                  styles.bubble,
+                  message.role === 'user' ? styles.bubbleUser : styles.bubbleAssistant,
+                ]}
+              >
+                <Text
+                  variant="body"
+                  color={message.role === 'user' ? COLORS.textInverse : COLORS.text}
+                >
+                  {message.content}
+                </Text>
+                {message.role === 'assistant' ? (
+                  <TouchableOpacity
+                    style={styles.bubbleSpeak}
+                    onPress={() => tts.speak(message.content)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Read this answer aloud"
+                  >
+                    <Volume2 size={13} color={COLORS.cyan} />
+                    <Text variant="caption" color={COLORS.cyan} style={{ marginLeft: 4 }}>
+                      Read it to me
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ))}
+
+            {streamStatus ? (
+              <View style={[styles.bubble, styles.bubbleAssistant]}>
+                <Text variant="bodySm" color={COLORS.textMuted}>
+                  {streamStatus}
+                </Text>
+              </View>
+            ) : null}
+          </ScrollView>
+
+          <View style={styles.chatComposer}>
+            <Input
+              placeholder="Ask about this map…"
+              value={chatInput}
+              onChangeText={setChatInput}
+              returnKeyType="send"
+              onSubmitEditing={send}
+              containerStyle={styles.chatInput}
+              accessibilityLabel="Ask about this map"
+              trailingIcon={<VoiceInputButton onTranscript={setChatInput} size={32} />}
+            />
+            <Button
+              variant="primary"
+              size="md"
+              loading={sending}
+              disabled={!chatInput.trim()}
+              icon={<Send size={16} color={COLORS.textInverse} />}
+              onPress={send}
+              style={styles.sendBtn}
+              accessibilityLabel="Send"
+            />
+          </View>
+        </View>
+      )}
+
+      <NodeInsightSheet
+        node={selected}
+        map={map}
+        isExpanding={expanding}
+        onClose={() => setSelected(null)}
+        onExpandDeeper={goDeeper}
+        onEditNode={(node) => {
+          setSelected(null);
+          setEditing(node);
+        }}
+        onAskAboutNode={(node) => {
+          setSelected(null);
+          setView('ask');
+          setChatInput(`Tell me more about “${node.label}”`);
+        }}
+      />
+
+      <NodeEditorSheet
+        node={editing}
+        isRoot={editing?.id === map.root?.id}
+        onClose={() => setEditing(null)}
+        onSave={saveNodeEdit}
+        onAddChild={addChild}
+        onDelete={deleteNode}
+      />
+
+      <MapAppearanceSheet
+        visible={appearanceOpen}
+        onClose={() => setAppearanceOpen(false)}
+        pictureMode={pictureMode}
+        onTogglePictureMode={setPictureMode}
+      />
+    </Screen>
   );
 };
 
 const makeStyles = (t: Palette) =>
   StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: t.bg,
-  },
-  container: {
-    flex: 1,
-    padding: SPACING.md,
-  },
-  searchBarContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.sm,
-    marginBottom: SPACING.sm,
-  },
-  drawBtn: {
-    minWidth: 70,
-  },
-  tabSwitcher: {
-    flexDirection: 'row',
-    backgroundColor: t.surface,
-    borderRadius: RADIUS.sm,
-    padding: 3,
-    marginBottom: SPACING.sm,
-    borderWidth: 1,
-    borderColor: t.dividerSubtle,
-  },
-  tabBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    borderRadius: RADIUS.sm,
-  },
-  tabBtnActive: {
-    backgroundColor: t.bg,
-    borderWidth: 1,
-    borderColor: t.divider,
-  },
-  loaderContainer: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  canvasTabContent: {
-    flex: 1,
-  },
-  mapInfoCard: {
-    backgroundColor: t.surface,
-    padding: SPACING.sm + 2,
-    borderRadius: RADIUS.sm,
-    borderWidth: 1,
-    borderColor: t.dividerSubtle,
-    marginBottom: SPACING.sm,
-  },
-  mapInfoHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  iconBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: RADIUS.sm,
-    backgroundColor: t.bg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: SPACING.sm,
-  },
-  bottomHintBar: {
-    paddingVertical: 4,
-    alignItems: 'center',
-  },
-  chatTabContent: {
-    flex: 1,
-    backgroundColor: t.surface,
-    borderRadius: RADIUS.md,
-    overflow: 'hidden',
-  },
-  chatMessagesScroll: {
-    flex: 1,
-  },
-  msgBubble: {
-    padding: SPACING.md,
-    borderRadius: RADIUS.md,
-    marginBottom: SPACING.sm,
-    maxWidth: '88%',
-  },
-  userMsg: {
-    backgroundColor: t.cyan,
-    alignSelf: 'flex-end',
-    borderBottomRightRadius: 2,
-  },
-  assistantMsg: {
-    backgroundColor: t.bg,
-    alignSelf: 'flex-start',
-    borderWidth: 1,
-    borderColor: t.dividerSubtle,
-    borderBottomLeftRadius: 2,
-  },
-  chatInputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: SPACING.sm,
-    backgroundColor: t.bg,
-    borderTopWidth: 1,
-    borderTopColor: t.dividerSubtle,
-    gap: SPACING.sm,
-  },
-  sendBtn: {
-    width: 48,
-  },
-});
+    content: {
+      paddingBottom: 0,
+    },
+    searchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: SPACING.sm,
+    },
+    searchInput: {
+      flex: 1,
+      marginBottom: 0,
+    },
+    error: {
+      backgroundColor: t.errorLight,
+      borderRadius: RADIUS.md,
+      padding: SPACING.md,
+      marginBottom: SPACING.sm,
+    },
+    loading: {
+      flex: 1,
+      justifyContent: 'center',
+    },
+    mapPane: {
+      flex: 1,
+      paddingBottom: SPACING.sm,
+    },
+    summaryRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: SPACING.sm,
+      gap: SPACING.xs,
+    },
+    iconBtn: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: t.surface,
+    },
+    hint: {
+      textAlign: 'center',
+      paddingTop: SPACING.sm,
+    },
+    chatPane: {
+      flex: 1,
+      paddingBottom: SPACING.sm,
+    },
+    chatScroll: {
+      flex: 1,
+      backgroundColor: t.surface,
+      borderRadius: RADIUS.lg,
+      borderWidth: 1,
+      borderColor: t.dividerSubtle,
+    },
+    chatContent: {
+      padding: SPACING.md,
+    },
+    chatEmpty: {
+      paddingVertical: SPACING.xxxl,
+      paddingHorizontal: SPACING.md,
+    },
+    bubble: {
+      padding: SPACING.md,
+      borderRadius: RADIUS.lg,
+      marginBottom: SPACING.sm,
+      maxWidth: '90%',
+    },
+    bubbleUser: {
+      backgroundColor: t.cyan,
+      alignSelf: 'flex-end',
+      borderBottomRightRadius: 2,
+    },
+    bubbleAssistant: {
+      backgroundColor: t.bg,
+      alignSelf: 'flex-start',
+      borderWidth: 1,
+      borderColor: t.dividerSubtle,
+      borderBottomLeftRadius: 2,
+    },
+    bubbleSpeak: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: SPACING.sm,
+      minHeight: 36,
+    },
+    chatComposer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingTop: SPACING.sm,
+      gap: SPACING.sm,
+    },
+    chatInput: {
+      flex: 1,
+      marginBottom: 0,
+    },
+    sendBtn: {
+      width: 52,
+    },
+  });
