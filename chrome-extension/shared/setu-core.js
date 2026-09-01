@@ -1527,7 +1527,60 @@
      */
     seq: 0,
 
-    /** Best human-visible name for a control. */
+    /**
+     * The text of a wrapping `<label>`, minus the control's own text.
+     *
+     * `<label><span>Father's Name</span><input name="father_name"></label>` is
+     * one of the two most common ways a field is labelled on the web, and
+     * nothing in the old lookup saw it — there is no `for` attribute to follow
+     * and an `<input>` has no `innerText` of its own. Every such field fell all
+     * the way through to its `name` attribute, so the model was reading
+     * `father_name` where the page plainly said "Father's Name", and an
+     * unnamed one described itself as nothing at all.
+     *
+     * The subtraction matters for `<select>`, whose own `innerText` is the list
+     * of its options: without it, a labelled dropdown reports itself as
+     * "Category Select General OBC SC ST" instead of "Category".
+     */
+    wrappingLabel(el) {
+      const label = el.closest?.('label');
+      if (!label || label === el) return '';
+
+      let text = '';
+
+      const walk = (node) => {
+        if (node === el) return;
+        if (node.nodeType === 3) {
+          text += node.nodeValue;
+          return;
+        }
+        if (node.nodeType !== 1) return;
+        // Descend only where we have to, so the control's own subtree is the
+        // only thing skipped and everything else is taken whole.
+        if (node.contains?.(el)) {
+          for (const child of node.childNodes) walk(child);
+          return;
+        }
+        text += node.innerText ?? node.textContent ?? '';
+      };
+
+      for (const child of label.childNodes) walk(child);
+      return text;
+    },
+
+    /**
+     * Best human-visible name for a control.
+     *
+     * Ordered by how deliberately each source describes the field. The
+     * accessible name comes first, then the two kinds of `<label>`, then the
+     * element's own text (which is the whole story for a button and empty for
+     * an input), then the attributes a developer wrote for themselves.
+     *
+     * `value` is last, and was fourth. A text input arriving with something
+     * already in it was being described by its *contents* rather than by its
+     * purpose — a Nationality box holding "Indian" reported itself as
+     * "Indian" — which is the one thing a label must never do.
+     */
     labelOf(el) {
       if (!el) return '';
       const labelled = el.getAttribute?.('aria-labelledby');
@@ -1546,13 +1599,14 @@
       return String(
         el.getAttribute?.('aria-label') ||
           fromLabelledBy ||
+          forLabel ||
+          Page.wrappingLabel(el) ||
           el.innerText ||
-          el.value ||
           el.placeholder ||
           el.title ||
-          forLabel ||
           el.getAttribute?.('alt') ||
           el.name ||
+          el.value ||
           ''
       )
         .replace(/\s+/g, ' ')
@@ -1627,12 +1681,36 @@
         }
         Page.refs.set(ref, { ref: new WeakRef(el), label });
 
+        const isField = ['input', 'textarea', 'select'].includes(el.tagName.toLowerCase());
+
         controls.push({
           ref,
           tag: el.tagName.toLowerCase(),
           type: el.type || el.getAttribute?.('role') || '',
           label,
           onScreen: candidate.distance < 0.6,
+          // The attributes that say what a field is *for*.
+          //
+          // A very large share of real forms label their inputs badly or not at
+          // all, and carry the whole meaning in `name="dateOfBirth"`,
+          // `id="pin_code"`, a placeholder, or an `autocomplete` token. Without
+          // these the label is all there is to go on, and "Enter here" is not a
+          // label. They are cheap — four short strings per field — and they are
+          // what lets the profile matcher fill an unlabelled form correctly.
+          //
+          // Read only for actual fields: a link's `name` is an anchor target and
+          // would be noise in the snapshot the model reads.
+          name: isField ? String(el.getAttribute?.('name') || '').slice(0, 60) : '',
+          fieldId: isField ? String(el.id || '').slice(0, 60) : '',
+          placeholder: isField ? String(el.getAttribute?.('placeholder') || '').slice(0, 70) : '',
+          autocomplete: isField ? String(el.getAttribute?.('autocomplete') || '').slice(0, 40) : '',
+          required: isField ? Boolean(el.required || el.getAttribute?.('aria-required') === 'true') : false,
+          // Every option a <select> offers, so a caller can pick the one that
+          // matches a stored value instead of guessing at its wording.
+          options:
+            el.tagName === 'SELECT'
+              ? [...el.options].slice(0, 40).map((option) => String(option.text || '').trim().slice(0, 40))
+              : undefined,
           // A password's current value is never described to the model.
           value:
             el.tagName === 'INPUT' && el.type !== 'password'
@@ -2216,7 +2294,7 @@
 
   window.SETU = {
     ready: true,
-    VERSION: '3.3.0',
+    VERSION: '3.4.0',
     DEFAULTS,
     LAYERS,
     icon,

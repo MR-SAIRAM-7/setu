@@ -111,7 +111,14 @@ const planSchema = {
             description: 'The exact "ref" value of the target control from the page snapshot. Empty for scroll/read/wait.'
           },
           targetText: { type: 'string', description: 'Visible label of the target, for fuzzy re-matching.' },
-          valueToFill: { type: 'string', description: 'Value for fill/select actions. Empty otherwise.' },
+          valueToFill: {
+            type: 'string',
+            description:
+              'Value for fill/select actions. Empty otherwise. To use one of the user\'s saved ' +
+              'details, write the placeholder "{{profile.KEY}}" using a key from SAVED DETAILS — ' +
+              'the extension substitutes the real value in the browser. Never write a literal ' +
+              'name, number, address, or date the user did not give you in their goal.'
+          },
           tip: { type: 'string', description: 'A calm, reassuring note for the user.' }
         },
         required: ['stepNumber', 'instruction', 'actionType', 'targetRef', 'targetText', 'valueToFill', 'tip']
@@ -135,11 +142,28 @@ Hard rules:
   plain language. A short honest answer beats a plausible fake plan.
 - Use actionType "submit" for anything that sends data, buys, deletes, or posts.
   Do not disguise those as ordinary clicks.
-- Never fill real personal data you were not given. Leave valueToFill empty and let
-  the user type, unless they supplied the value themselves.
+- Never invent personal data. You are never shown the user's actual details and you
+  must never guess at them. A name, number, date, or address that did not come from
+  the user's own goal must be written as a "{{profile.KEY}}" placeholder or left empty.
 - Instructions address the user directly, calmly, one action at a time.
 
-Keep plans to 6 steps or fewer. Fewer, clearer steps beat exhaustive ones.`;
+Filling in the user's details:
+- The SAVED DETAILS list below names the details the user has stored on their own
+  device. You are told which keys exist; you are never told what they contain.
+- To put one into a field, set valueToFill to "{{profile.KEY}}" — for example
+  "{{profile.fullName}}" or "{{profile.pincode}}". The browser extension replaces it
+  with the real value locally, after this plan reaches it.
+- Only use keys that appear in SAVED DETAILS. A key that is not listed is not
+  available: leave valueToFill empty so the user is asked to type it.
+- Match the field to the key by meaning, not by wording. A box labelled "Applicant
+  Name" takes {{profile.fullName}}; "PIN"/"Postal Code"/"ZIP" all take
+  {{profile.pincode}}; a permanent-address block takes the permanent* keys.
+- Details the user has not saved are simply absent from the list. Do not substitute a
+  near-miss key for a missing one.
+
+Keep plans to 6 steps or fewer. Fewer, clearer steps beat exhaustive ones.
+The one exception is filling in a form the user asked you to fill: there, one step per
+field is correct, up to 20 steps, because a half-filled form is not a finished task.`;
 
 /**
  * Flag steps the extension must not auto-execute.
@@ -201,23 +225,77 @@ function pruneUnresolvableSteps(steps, controls) {
 }
 
 /**
- * Build an action plan for `task` against the supplied page snapshot.
+ * One line describing a control to the model.
+ *
+ * The extra attributes matter more than they look. A very large share of real
+ * forms are labelled badly or not at all and carry their whole meaning in
+ * `name="dateOfBirth"` or `autocomplete="postal-code"`; without those the model
+ * is matching a goal against the string "Enter here". `required` is included
+ * because a plan that fills the optional boxes and skips a mandatory one leaves
+ * the user with a form that still will not submit.
  */
-async function planPageTask({ task, pageContext = {} }) {
+function describeControl(c) {
+  const parts = [`[${c.ref}] <${c.tag}${c.type ? ` type=${c.type}` : ''}>`, `"${c.label}"`];
+
+  if (c.name) parts.push(`name=${c.name}`);
+  if (c.autocomplete) parts.push(`autocomplete=${c.autocomplete}`);
+  if (c.placeholder) parts.push(`placeholder="${c.placeholder}"`);
+  if (c.required) parts.push('REQUIRED');
+  if (Array.isArray(c.options) && c.options.length) {
+    parts.push(`options: ${c.options.slice(0, 12).join(' / ')}`);
+  }
+  if (c.value) parts.push(`(current value: "${c.value}")`);
+
+  return parts.join(' ');
+}
+
+/**
+ * The user's saved details, as a list of keys with no values attached.
+ *
+ * This is the entire privacy contract of the feature, and it is one function
+ * long: the model is told that `pincode` exists and is filled, and never that
+ * it is 560102. It answers with `{{profile.pincode}}`, and the substitution
+ * happens in the browser after the plan has come back. Nothing personal is
+ * ever in a prompt, a provider's logs, or this process's memory.
+ *
+ * Values are stripped here as well as in the client. The client is the one
+ * that decides what to send, but a server that would happily forward a home
+ * address into a prompt if a future client sent one is not actually holding
+ * the guarantee.
+ */
+function describeProfile(profileFields) {
+  if (!Array.isArray(profileFields) || !profileFields.length) {
+    return 'SAVED DETAILS: (the user has not saved any details, or has not shared which they have.\nLeave valueToFill empty for every personal field and let them type it.)';
+  }
+
+  const lines = profileFields
+    .slice(0, 120)
+    .map((field) => `- {{profile.${field.key}}} — ${field.label}`)
+    .join('\n');
+
+  return `SAVED DETAILS the user has stored locally (keys only — you are not shown the values):\n${lines}`;
+}
+
+/**
+ * Build an action plan for `task` against the supplied page snapshot.
+ *
+ * @param {object}  args
+ * @param {string}  args.task           the user's goal, in their own words
+ * @param {object}  args.pageContext    snapshot from the extension
+ * @param {Array}   args.profileFields  `{key,label}` of details the user holds;
+ *                                      never values — see `describeProfile`.
+ */
+async function planPageTask({ task, pageContext = {}, profileFields = [] }) {
   const controls = Array.isArray(pageContext.controls) ? pageContext.controls : [];
 
   const snapshot = `PAGE TITLE: ${pageContext.title || 'Untitled'}
 PAGE URL: ${pageContext.url || 'unknown'}
 HEADINGS: ${(pageContext.headings || []).slice(0, 12).join(' | ') || 'none'}
 
+${describeProfile(profileFields)}
+
 INTERACTIVE CONTROLS ON SCREEN:
-${
-  controls.length
-    ? controls
-        .map((c) => `[${c.ref}] <${c.tag}${c.type ? ` type=${c.type}` : ''}> "${c.label}"${c.value ? ` (current value: "${c.value}")` : ''}`)
-        .join('\n')
-    : '(none detected)'
-}
+${controls.length ? controls.map(describeControl).join('\n') : '(none detected)'}
 
 VISIBLE TEXT EXCERPT:
 ${(pageContext.text || '').slice(0, 2500) || '(no text captured)'}`;
@@ -231,7 +309,10 @@ ${(pageContext.text || '').slice(0, 2500) || '(no text captured)'}`;
     ...PLANNING
   });
 
-  const steps = markConfirmations(pruneUnresolvableSteps(plan.steps || [], controls), controls);
+  const steps = markConfirmations(
+    pruneUnknownTokens(pruneUnresolvableSteps(plan.steps || [], controls), profileFields),
+    controls
+  );
 
   return {
     ...plan,
@@ -239,6 +320,45 @@ ${(pageContext.text || '').slice(0, 2500) || '(no text captured)'}`;
     totalSteps: steps.length,
     currentStepIndex: 0
   };
+}
+
+/** `{{profile.key}}` in whatever shape a model under load actually emitted it. */
+const PROFILE_TOKEN = /\{\{\s*(?:profile\s*\.\s*)?([a-zA-Z][a-zA-Z0-9_]*)\s*\}\}/g;
+
+/**
+ * Strip placeholders naming a detail the user does not have.
+ *
+ * Models fill gaps. Told the user has saved a `pincode` and asked to complete an
+ * address, one will happily also write `{{profile.aadhaar}}` for the ID box on
+ * the same form — a key it was never given, for a number the user never saved.
+ * Left alone that produces a step which claims it will fill a field and then
+ * writes an empty string into it, which is the specific failure this whole
+ * feature exists to stop.
+ *
+ * Emptying `valueToFill` is the right repair rather than dropping the step: the
+ * extension then either matches the field from the saved details itself or asks
+ * the user to type it, and either way the field is still on their list.
+ */
+function pruneUnknownTokens(steps, profileFields) {
+  const known = new Set((profileFields || []).map((field) => field.key));
+
+  return steps.map((step) => {
+    const value = String(step.valueToFill || '');
+    if (!value.includes('{{')) return step;
+
+    PROFILE_TOKEN.lastIndex = 0;
+    const referenced = [...value.matchAll(PROFILE_TOKEN)].map((match) => match[1]);
+    if (!referenced.length || referenced.every((key) => known.has(key))) return step;
+
+    // The tip is replaced rather than kept. The model wrote it to describe a
+    // step that is no longer going to happen — "Your Aadhaar." above a field
+    // the agent is now going to leave for the user is worse than no tip at all.
+    return {
+      ...step,
+      valueToFill: '',
+      tip: 'I do not have this one saved — type it in and carry on.'
+    };
+  });
 }
 
 /**
@@ -677,6 +797,10 @@ function normaliseVisual(raw) {
 
 module.exports = {
   planPageTask,
+  // Exported for the profile test suite: both are pure, and both are places a
+  // regression would leak or silently drop a value rather than throw.
+  describeProfile,
+  pruneUnknownTokens,
   explainContent,
   streamExplanation,
   chunkPageIntoTasks,
