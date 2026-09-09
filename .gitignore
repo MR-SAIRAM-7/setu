@@ -1,7 +1,14 @@
 # Dependencies
 node_modules/
 .pnpm-store/
-package-lock.json
+
+# package-lock.json is deliberately NOT ignored.
+#
+# It used to be, which meant builds were not reproducible: a transitive
+# dependency could change between the last rehearsal and the demo, and nothing
+# in the repository pinned it. Committing the lockfiles is the whole fix, and
+# .gitattributes collapses them in diffs so a dependency bump does not bury the
+# change that actually needs review.
 
 # Build outputs
 dist/
