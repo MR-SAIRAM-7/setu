@@ -9,9 +9,7 @@
 import React, { useState } from 'react';
 import {
   View,
-  ScrollView,
   StyleSheet,
-  SafeAreaView,
   Image,
   TouchableOpacity,
   Alert,
@@ -33,7 +31,8 @@ import {
 import { COLORS, RADIUS, SPACING } from '../constants/theme';
 import { Palette } from '../constants/themes';
 import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
-import { Text, Heading, Subheading, Kicker } from '../components/Typography';
+import { Text, Kicker } from '../components/Typography';
+import { Screen } from '../components/Screen';
 import { Button } from '../components/Button';
 import { Card, Tag } from '../components/Card';
 import { BionicText } from '../components/BionicText';
@@ -72,7 +71,7 @@ export const CameraOcrScreen: React.FC<CameraOcrScreenProps> = ({ navigation }) 
       }
 
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         quality: 0.8,
         base64: true,
@@ -91,7 +90,7 @@ export const CameraOcrScreen: React.FC<CameraOcrScreenProps> = ({ navigation }) 
   const handlePickImage = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         quality: 0.8,
         base64: true,
@@ -169,38 +168,33 @@ export const CameraOcrScreen: React.FC<CameraOcrScreenProps> = ({ navigation }) 
   };
 
   const handleSendToSimplify = () => {
-    navigation.navigate('ModesTab', {
-      screen: 'ModesScreen',
-      params: { initialMode: 'simplify', initialInput: extractedText },
-    });
+    navigation.navigate('ModeWorkspace', { mode: 'simplify', initialInput: extractedText });
   };
 
   const handleSendToMindMap = () => {
-    navigation.navigate('MindMapTab', {
-      screen: 'MindMapScreen',
+    // The map takes a topic, not a wall of scanned text — the first line is
+    // almost always the letterhead or the title, which is what you want mapped.
+    navigation.navigate('MainTabs', {
+      screen: 'MapTab',
       params: { initialTopic: extractedText.slice(0, 80) },
     });
   };
 
   const handleSendToLearn = () => {
-    navigation.navigate('ModesTab', {
-      screen: 'ModesScreen',
-      params: { initialMode: 'learn', initialInput: extractedText },
-    });
+    navigation.navigate('ModeWorkspace', { mode: 'learn', initialInput: extractedText });
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Header */}
+    <Screen
+      title="Scan a page"
+      subtitle="Letters, forms, notices, book pages"
+      leading="back"
+      onBack={() => navigation.goBack()}
+    >
         <View style={styles.header}>
-          <Kicker color={COLORS.cyan}>Document Ingestion</Kicker>
-          <Heading variant="titleLg" style={{ marginTop: 2 }}>
-            Camera OCR & Scanner
-          </Heading>
           <Text variant="bodySm" color={COLORS.textMuted}>
-            Snap photos of physical documents, books, or notices for instant plain-language
-            rewriting and interactive mind mapping.
+            Point the camera at anything printed. SETU pulls the words out, and then you can have
+            it in plain language, read aloud, or drawn as a map.
           </Text>
         </View>
 
@@ -326,21 +320,12 @@ export const CameraOcrScreen: React.FC<CameraOcrScreenProps> = ({ navigation }) 
             </View>
           </View>
         ) : null}
-      </ScrollView>
-    </SafeAreaView>
+    </Screen>
   );
 };
 
 const makeStyles = (t: Palette) =>
   StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: t.bg,
-  },
-  scrollContent: {
-    padding: SPACING.md,
-    paddingBottom: SPACING.huge,
-  },
   header: {
     marginBottom: SPACING.md,
   },

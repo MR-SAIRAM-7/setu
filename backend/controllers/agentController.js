@@ -27,6 +27,42 @@ function localPlan(task, pageContext = {}, reason) {
   };
 }
 
+/**
+ * Reduce the client's profile manifest to keys and labels, and nothing else.
+ *
+ * The extension already sends only `{key, label}` — but "the client promises
+ * not to" is not a privacy guarantee, it is a hope about a client we do not
+ * control the version of. Rebuilding the list field by field here means a
+ * future build that starts attaching values, or a third-party caller that
+ * copies the endpoint shape and sends a whole profile, cannot get a home
+ * address into a prompt through this route.
+ *
+ * The 120-key cap and the length limits are the other half: an unbounded array
+ * of unbounded strings from a request body is a prompt-injection surface and a
+ * token bill.
+ */
+function sanitiseProfileFields(raw) {
+  if (!Array.isArray(raw)) return [];
+
+  const seen = new Set();
+  const fields = [];
+
+  for (const entry of raw.slice(0, 200)) {
+    if (!entry || typeof entry !== 'object') continue;
+
+    // A key is an identifier. Anything else is not a key, whatever it claims.
+    const key = String(entry.key || '').trim();
+    if (!/^[a-zA-Z][a-zA-Z0-9_]{0,40}$/.test(key) || seen.has(key)) continue;
+
+    seen.add(key);
+    fields.push({ key, label: String(entry.label || key).slice(0, 60) });
+
+    if (fields.length >= 120) break;
+  }
+
+  return fields;
+}
+
 /** POST /api/agent/plan — natural-language goal + page snapshot -> action plan. */
 async function handleAgentPlan(req, res, next) {
   try {
@@ -34,13 +70,14 @@ async function handleAgentPlan(req, res, next) {
     if (!task) return res.status(400).json({ error: 'A task is required.' });
 
     const pageContext = req.body.pageContext || {};
+    const profileFields = sanitiseProfileFields(req.body.profileFields);
 
     if (!config.aiEnabled) {
       return res.json(localPlan(task, pageContext, 'No AI provider is configured on the server.'));
     }
 
     try {
-      const plan = await agent.planPageTask({ task, pageContext });
+      const plan = await agent.planPageTask({ task, pageContext, profileFields });
       res.json({ ...plan, fallback: false });
     } catch (error) {
       console.warn('[SETU Agent] Planning failed, using local heuristics:', error.message);
@@ -282,6 +319,7 @@ async function handleDescribeImage(req, res, next) {
 
 module.exports = {
   handleAgentPlan,
+  sanitiseProfileFields,
   handleExplain,
   handleExplainStream,
   handleVisualize,

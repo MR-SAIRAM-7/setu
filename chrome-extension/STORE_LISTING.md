@@ -75,14 +75,24 @@ English
 > • Break any dense page into a 3-step path, with a list of what to have ready first
 > • Ask it to explain a chart, table or diagram in plain language
 >
+> **Fill in a form once, not twenty times**
+>
+> Long forms are where a lot of things stop being possible. Save your details once in SETU's settings — name, date of birth, contact, both addresses down to the door number, parents' names, education, employment, emergency contact — then say "fill this form with my details" on any page.
+>
+> SETU shows you the whole list of what it matched, and exactly what it will type in each box, before it types anything. You can fill them all at once or go one at a time.
+>
+> This one needs no AI and no internet connection. Your details are matched against the page **on your own computer**, and they are stored there too — in this browser's local storage, deliberately not synced to your Google account.
+>
 > **Built to be safe on real websites**
 >
 > Commander runs on banking and government portals, so it is deliberately cautious:
 >
 > • It can only act on controls it can actually see on the page
 > • Anything irreversible — submit, pay, send, delete — stops and waits for you to confirm. Auto-run will not do it for you.
-> • It never invents personal details. If a form needs your information, it hands control back to you.
-> • Password fields are never included in what is sent to the AI.
+> • It never invents personal details. Everything it types comes from what you saved yourself, and it says so before it types it.
+> • Aadhaar, PAN, passport, bank and health details are never filled without you confirming that exact step, and are never sent to the AI at all
+> • When Commander plans a task, the AI is told *which* details you have saved and never what they are. Your browser puts the real values in afterwards.
+> • Password fields are never stored, never filled, and never included in what is sent to the AI.
 >
 > **Your engine, your keys**
 >
@@ -118,12 +128,19 @@ The dashboard asks for one per permission. These are the answers.
 
 ## Data-use disclosures
 
+Chrome's disclosures ask what is *collected*, which it defines as transmitted
+off the user's local device. The "Your details" form-filling profile is stored
+in `chrome.storage.local` and is never transmitted — so these rows stay "not
+collected", but say so explicitly rather than by omission, because a reviewer
+looking at the options page will see a form asking for an Aadhaar number and
+should find the answer here rather than have to go looking.
+
 | Question | Answer |
 | --- | --- |
-| Personally identifiable information | Not collected |
-| Health information | Not collected |
-| Financial and payment information | Not collected |
-| Authentication information | Not collected (password fields are explicitly excluded) |
+| Personally identifiable information | **Not collected.** The user may optionally save their own name, date of birth, addresses, and contact details on the options page, for filling in web forms. It is stored on their device in `chrome.storage.local`, deliberately not in `chrome.storage.sync`, and is never transmitted anywhere. When the AI Copilot plans a task, the extension sends the engine the *names* of the details the user has saved (e.g. `pincode — PIN code`) and never their values; the substitution into the page happens locally. |
+| Health information | **Not collected.** The profile above includes optional "disability status" and "accommodations needed" fields. Same storage, same guarantee, and both are marked sensitive: they are excluded from everything sent to the engine and are never filled without a per-field confirmation click. |
+| Financial and payment information | **Not collected.** The profile includes optional bank account, IFSC and UPI fields, on the same local-only, never-transmitted, confirmation-gated terms. The extension has no payment flow and does not read payment fields from any page. |
+| Authentication information | Not collected. Password fields are explicitly excluded from page descriptions, are never stored, and are never filled. |
 | Personal communications | Not collected |
 | Location | Not collected |
 | Web history | Not collected |
@@ -171,6 +188,20 @@ Suggested screenshots, in order:
 > after a period of inactivity takes up to a minute while the service wakes. The
 > extension shows this as "waking up" rather than an error. If a review step
 > appears to hang, this is why — the second request will be fast.
+>
+> **On the "Your details" section of the options page.** This is the profile the
+> form-filling feature draws on. It is stored in `chrome.storage.local` and is
+> never transmitted — not to our engine, not to the AI provider, not to Chrome
+> Sync. Form filling itself makes no network request of any kind; it matches the
+> saved details against the page in the content script. When the AI Copilot
+> plans a task it sends the engine a list of *key names* (`pincode — PIN code`)
+> and receives a plan containing `{{profile.pincode}}` placeholders, which the
+> extension substitutes locally; the server strips values again on its side.
+>
+> A fresh install seeds an invented sample profile (Aarav Sharma, a Bengaluru
+> address) so the feature can be tried without typing anything. Its ID and bank
+> fields are left empty on purpose, and a banner says the details are samples
+> until the user edits one.
 >
 > Without any engine the extension still installs and the entire reading toolkit
 > works; the AI panels report that the engine is unreachable and offer the

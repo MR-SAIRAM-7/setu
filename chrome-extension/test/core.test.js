@@ -113,7 +113,7 @@ vm.runInContext(fs.readFileSync(path.join(EXT, 'shared', 'setu-core.js'), 'utf8'
   filename: 'setu-core.js'
 });
 
-const { Store, Feature, Text, Scroll, Dock, LAYERS, LANGUAGES, resolveLanguage, languageLabel } =
+const { Store, Feature, Text, Scroll, Dock, Page, LAYERS, LANGUAGES, resolveLanguage, languageLabel } =
   sandbox.window.SETU;
 
 /* ---- tiny assertion harness --------------------------------------------- */
@@ -598,6 +598,92 @@ function testReadableContent() {
   check('a null node is not ours', Text.isOurs(null) === false);
 }
 
+/**
+ * What a control calls itself.
+ *
+ * `Page.labelOf` is the single input to everything downstream — what the model
+ * is shown, and what the profile matcher scores against. Get it wrong and the
+ * agent reasons confidently about a field it has misread.
+ *
+ * Two arrangements here were live bugs. `<label><span>Text</span><input></label>`
+ * is one of the two normal ways to label a field and was not handled at all, so
+ * a very large share of real forms described themselves to the model by their
+ * `name` attribute — `father_name` where the page said "Father's Name". And a
+ * text input arriving with a value already in it was labelled by its *contents*
+ * rather than its purpose, so a Nationality box holding "Indian" was described
+ * to the model as a field called "Indian".
+ */
+function testLabelOf() {
+  console.log('\nPage.labelOf');
+
+  const TEXT = 3;
+  const ELEMENT = 1;
+
+  const text = (value) => ({ nodeType: TEXT, nodeValue: value });
+
+  /** A stand-in element carrying only what labelOf actually touches. */
+  const node = ({ tag = 'INPUT', attrs = {}, children = [], innerText = '', value = '', name = '', id = '' } = {}) => {
+    const el = {
+      nodeType: ELEMENT,
+      tagName: tag,
+      childNodes: children,
+      innerText,
+      value,
+      name,
+      id,
+      // Reflected the way the real DOM reflects them: `labelOf` reads
+      // `el.placeholder` as a property and `alt`/`aria-*` as attributes.
+      placeholder: attrs.placeholder || '',
+      title: attrs.title || '',
+      getAttribute: (key) => attrs[key] ?? null,
+      getRootNode: () => null,
+      closest: () => null,
+      contains: (other) => children.some((child) => child === other || child.contains?.(other))
+    };
+    for (const child of children) child.parent = el;
+    return el;
+  };
+
+  /** Wrap `control` in a label containing `before` as its visible text. */
+  const wrap = (before, control) => {
+    const label = node({ tag: 'LABEL', children: [before, control] });
+    control.closest = (selector) => (selector === 'label' ? label : null);
+    return control;
+  };
+
+  const wrapped = wrap(node({ tag: 'SPAN', innerText: "Father's Name *" }), node({ name: 'father_name' }));
+  check('a wrapping label is read', Page.labelOf(wrapped) === "Father's Name *", Page.labelOf(wrapped));
+
+  // The select's own innerText is its option list. Subtracting the control's
+  // own subtree is what stops "Category" coming back as
+  // "Category Select General OBC SC ST".
+  const select = wrap(
+    node({ tag: 'SPAN', innerText: 'Category' }),
+    node({ tag: 'SELECT', innerText: 'Select General OBC SC ST', name: 'category' })
+  );
+  check('a wrapped select does not swallow its options', Page.labelOf(select) === 'Category', Page.labelOf(select));
+
+  const prefilled = node({ name: 'nationality', value: 'Indian' });
+  check('a value is not mistaken for a label', Page.labelOf(prefilled) === 'nationality', Page.labelOf(prefilled));
+
+  const named = node({ attrs: { placeholder: 'Enter your PIN code' }, name: 'pin', value: '560102' });
+  check('a placeholder still beats the name', Page.labelOf(named) === 'Enter your PIN code', Page.labelOf(named));
+
+  const aria = wrap(
+    node({ tag: 'SPAN', innerText: 'Wrong' }),
+    node({ attrs: { 'aria-label': 'Date of birth' }, name: 'dob' })
+  );
+  check('an explicit aria-label outranks the wrapper', Page.labelOf(aria) === 'Date of birth', Page.labelOf(aria));
+
+  const button = node({ tag: 'BUTTON', innerText: 'Submit Application' });
+  check('a button is still named by its own text', Page.labelOf(button) === 'Submit Application', Page.labelOf(button));
+
+  const bare = node({ value: 'only a value' });
+  check('a value is the last resort, not no label at all', Page.labelOf(bare) === 'only a value', Page.labelOf(bare));
+
+  check('a null element has no label', Page.labelOf(null) === '');
+}
+
 /* ---- run ----------------------------------------------------------------- */
 
 (async () => {
@@ -610,6 +696,7 @@ function testReadableContent() {
   await testStoreLanguage();
   testLayers();
   testReadableContent();
+  testLabelOf();
 
   console.log(`\n${passed} passed, ${failures.length} failed`);
   if (failures.length) {

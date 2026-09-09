@@ -19,6 +19,7 @@ import {
   ReadingProfile,
   ThemeOption,
   SpacingOption,
+  LetterSpacingOption,
 } from '../types';
 import {
   getStoredPreferences,
@@ -26,6 +27,7 @@ import {
   DEFAULT_PREFERENCES,
 } from '../services/storage';
 import { SIZE_SCALE } from '../constants/theme';
+import { SPACING_SCALE } from '../constants/themes';
 import { DEFAULT_LANGUAGE } from '../constants/languages';
 import { tts } from '../services/tts';
 import { setApiBaseUrl, setApiLanguage } from '../services/api';
@@ -40,6 +42,9 @@ interface AccessibilityContextValue {
   sizeScale: number;
   theme: ThemeOption;
   spacing: SpacingOption;
+  /** Line-height multiplier derived from `spacing`. Read by every Text. */
+  spacingScale: number;
+  letterSpacing: LetterSpacingOption;
   motion: MotionOption;
   reduceMotion: boolean;
   bionic: boolean;
@@ -62,6 +67,7 @@ interface AccessibilityContextValue {
   setSize: (size: TextSizeOption) => Promise<void>;
   setTheme: (theme: ThemeOption) => Promise<void>;
   setSpacing: (spacing: SpacingOption) => Promise<void>;
+  setLetterSpacing: (letterSpacing: LetterSpacingOption) => Promise<void>;
   setMotion: (motion: MotionOption) => Promise<void>;
   toggleBionic: () => Promise<void>;
   toggleReadingRuler: () => Promise<void>;
@@ -152,6 +158,10 @@ export const AccessibilityProvider: React.FC<{ children: React.ReactNode }> = ({
     (spacing: SpacingOption) => updatePreferences({ spacing }),
     [updatePreferences]
   );
+  const setLetterSpacing = useCallback(
+    (letterSpacing: LetterSpacingOption) => updatePreferences({ letterSpacing }),
+    [updatePreferences]
+  );
   const setMotion = useCallback((motion: MotionOption) => updatePreferences({ motion }), [updatePreferences]);
   const setSpeechRate = useCallback(
     (speechRate: number) => updatePreferences({ speechRate }),
@@ -209,6 +219,7 @@ export const AccessibilityProvider: React.FC<{ children: React.ReactNode }> = ({
   );
 
   const sizeScale = (SIZE_SCALE as Record<string, number>)[preferences.size] || 1.0;
+  const spacingScale = SPACING_SCALE[preferences.spacing] || 1;
 
   return (
     <AccessibilityContext.Provider
@@ -219,6 +230,8 @@ export const AccessibilityProvider: React.FC<{ children: React.ReactNode }> = ({
         sizeScale,
         theme: preferences.theme,
         spacing: preferences.spacing,
+        spacingScale,
+        letterSpacing: preferences.letterSpacing,
         motion: preferences.motion,
         reduceMotion: preferences.motion === 'reduced',
         bionic: preferences.bionic,
@@ -240,6 +253,7 @@ export const AccessibilityProvider: React.FC<{ children: React.ReactNode }> = ({
         setSize,
         setTheme,
         setSpacing,
+        setLetterSpacing,
         setMotion,
         toggleBionic,
         toggleReadingRuler,

@@ -1,6 +1,6 @@
 # SETU Lens — Privacy Policy
 
-_Last updated: 29 August 2026_
+_Last updated: 31 August 2026_
 
 SETU Lens is an accessibility extension for people with ADHD, dyslexia, autism,
 or memory difficulties. This document states exactly what it reads, what it
@@ -45,7 +45,8 @@ nothing is sent on pages where you have not invoked an AI feature.
 | --- | --- | --- |
 | Press play in Explain This, or choose "Explain this out loud" | The text you selected, or up to 6,000 characters of the page's main text if you selected nothing, plus your chosen language | Your configured SETU engine |
 | Have Explain This speak with the natural voice | The sentences of the explanation, one clip at a time, so they can be turned into audio. With no engine configured, your browser's own voice is used and nothing is sent | Your configured SETU engine |
-| Ask the Commander to do something | Your typed or spoken request, the page title and URL, its headings, up to 3,000 characters of visible text, and a list of the visible interactive controls with their labels | Your configured SETU engine |
+| Ask the Commander to do something | Your typed or spoken request, the page title and URL, its headings, up to 3,000 characters of visible text, a list of the visible interactive controls with their labels, and — see "Your details" below — the **names** of the details you have saved, never their contents | Your configured SETU engine |
+| Ask the Commander to fill a form with your details | **Nothing.** Form filling is matched entirely on your own device and does not contact the engine at all | Nowhere |
 | Ask the Commander a question, or press Summarise | Your question plus your current selection, or up to 6,000 characters of the page's main text | Your configured SETU engine |
 | Request the 3-step path | Page title, URL, headings, form field labels, and up to 4,000 characters of text | Your configured SETU engine |
 | Click a node on a mind map to have it explained | That node's label and detail line, the map's title, and your chosen language | Your configured SETU engine |
@@ -63,10 +64,58 @@ identifier (below) for rate limiting and nothing else that identifies you.
 ### What is deliberately excluded
 
 - **Password fields.** The contents of any `type="password"` input are never
-  included in the page description sent to the model.
+  included in the page description sent to the model. SETU never stores a
+  password and will not type one into a page.
 - **Hidden fields** and controls that are not visible on screen.
 - **Whole-page screenshots.** Image description crops to the single element you
   picked before sending.
+- **Everything you save under "Your details".** See the next section.
+
+---
+
+## Your details, and form filling
+
+SETU can fill in forms for you from a set of details you save once on the
+options page — your name, date of birth, contact details, addresses, family
+names, education and employment, and optionally official ID numbers.
+
+This is the most sensitive thing the extension holds, so it is worth being
+precise about it.
+
+**Where it is kept.** In `chrome.storage.local` on this computer. Deliberately
+*not* `chrome.storage.sync`, which is where your reading preferences live —
+those follow your Chrome profile between machines, and your address and date of
+birth are not allowed to. Nothing you type there is uploaded, backed up, or
+synchronised anywhere by SETU.
+
+**What reaches the AI engine: the names of the details, never the details.**
+When the Commander plans a task, it tells the engine which details exist — a
+list reading `{{profile.pincode}} — PIN code` and so on. The engine's answer
+comes back containing placeholders, and your browser substitutes the real values
+into the page afterwards. So a request carries the *shape* of a person and no
+part of the person. The engine strips values again on its side, so a future or
+third-party client that tried to send them could not.
+
+**Filling a form sends nothing at all.** "Fill this form with my details" is
+matched against the page entirely on your device. It works with no engine
+configured and no internet connection.
+
+**ID numbers and bank details are never typed without your click.** Aadhaar,
+PAN, passport, voter ID, driving licence, ABHA, UDID, GSTIN, bank account, IFSC,
+UPI and disability status are all marked sensitive. They are never included in
+what is described to the engine, never filled automatically, and never filled
+during Auto-run: each one stops and waits for you to confirm that specific step.
+
+**The sample details.** A fresh install starts with an invented profile so you
+can see what form filling does before typing anything. The ID and bank fields in
+it are left **empty on purpose** — a plausible-looking but fabricated ID number
+submitted to a real portal is worse than a form that was never filled. A banner
+on the options page says the details are samples until you edit one.
+
+**Removing it.** "Clear my details" on the options page erases every field
+immediately. Resetting your other settings does *not* touch these, and clearing
+these does not touch your other settings. Uninstalling the extension removes
+everything.
 
 ---
 
@@ -113,9 +162,13 @@ device, is not derived from anything about you or your hardware, and is not
 linked to any account or profile. Resetting settings on the options page or
 reinstalling the extension replaces it.
 
-Page content captured by "Send page to my Sanctuary" is kept in local extension
-storage, capped at the 25 most recent captures, and never leaves your device
-except to the Sanctuary URL you configured.
+In local extension storage on this device only, never synced:
+
+- **Your details** — the profile the Copilot fills forms from. See the section
+  above; this is the one store that is deliberately kept off Chrome Sync.
+- Page content captured by "Send page to my Sanctuary", capped at the 25 most
+  recent captures, and never leaving your device except to the Sanctuary URL you
+  configured.
 
 **No browsing history is collected.** SETU Lens does not record which sites you
 visit, does not build a profile, and does not send anything about a page you did

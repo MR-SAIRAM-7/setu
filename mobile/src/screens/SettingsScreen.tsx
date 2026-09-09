@@ -1,41 +1,43 @@
 /**
  * SETU Mobile — Settings.
  *
- * For most apps settings are a place you visit once. Here they are part of the
- * product: the typeface, the ground colour, the tint, the language and the voice
- * are the accommodations themselves, and people change them as their day and
- * their eyes change. So everything is one screen, grouped by what it affects
- * rather than by which subsystem implements it, and every control takes effect
- * immediately rather than behind a save button.
+ * For most apps settings are somewhere you visit once. Here they *are* the
+ * product: the typeface, the ground, the tint, the language and the voice are
+ * the accommodations, and people change them as their day and their eyes
+ * change. Everything takes effect immediately; there is no save button anywhere
+ * on this screen.
+ *
+ * What changed from the previous version is the shape rather than the contents.
+ * It was one 900-line scroll of pill buttons in eleven different rows, which is
+ * a lot of screen to read to find the one control you came for. Now it is
+ * grouped, each group is a labelled list, and each control carries a sentence
+ * saying what it actually does — including, in two cases, that the evidence for
+ * it is weak.
+ *
+ * Two things that were dishonest are fixed. The typeface list offered Atkinson
+ * Hyperlegible, Lexend and OpenDyslexic; none was bundled, so all three rendered
+ * as the serif. And there was no letter-spacing control, which has better
+ * evidence behind it than any of those fonts.
  */
 
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  ScrollView,
-  StyleSheet,
-  SafeAreaView,
-  TouchableOpacity,
-  Alert,
-  ActivityIndicator,
-} from 'react-native';
-import {
-  Volume2,
-  Trash2,
-  Languages,
-  Palette as PaletteIcon,
-  TrendingUp,
-  Check,
-} from 'lucide-react-native';
-import { COLORS, RADIUS, SPACING } from '../constants/theme';
+import React, { useEffect, useState } from 'react';
+import { View, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { Volume2, Trash2, Check, TrendingUp, Info, RefreshCw } from 'lucide-react-native';
+import * as Haptics from 'expo-haptics';
+
+import { SPACING, RADIUS } from '../constants/theme';
 import { Palette } from '../constants/themes';
 import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
-import { Text, Heading, Subheading, Kicker } from '../components/Typography';
-import { Input } from '../components/Input';
-import { Button } from '../components/Button';
-import { Card, Tag } from '../components/Card';
 import { useAccessibility } from '../context/AccessibilityContext';
 import { useIdentity } from '../context/IdentityContext';
+import { Screen } from '../components/Screen';
+import { Section } from '../components/Section';
+import { Segmented } from '../components/Segmented';
+import { ListGroup, ListRow } from '../components/ListRow';
+import { Sheet } from '../components/Sheet';
+import { Text } from '../components/Typography';
+import { Input } from '../components/Input';
+import { Button } from '../components/Button';
 import { clearAllLocalData, restoreReferenceLibrary } from '../services/storage';
 import { api } from '../services/api';
 import { tts } from '../services/tts';
@@ -44,76 +46,88 @@ import {
   TextSizeOption,
   MotionOption,
   SpacingOption,
+  LetterSpacingOption,
   ThemeOption,
   SarvamVoice,
 } from '../types';
-import { LANGUAGES, languageSample } from '../constants/languages';
+import { LANGUAGES, languageSample, languageLabel } from '../constants/languages';
 import { COLOR_OVERLAYS, OVERLAY_LABELS, THEME_LABELS, paletteFor } from '../constants/themes';
-import { DEFAULT_API_URL, isCustomApiUrl } from '../constants/config';
-import * as Haptics from 'expo-haptics';
+import { DEFAULT_API_URL, isCustomApiUrl, APP_VERSION } from '../constants/config';
 
-const THEME_ORDER: ThemeOption[] = ['broadsheet', 'cream', 'pastel', 'sage', 'velvet', 'contrast'];
+const THEME_ORDER: ThemeOption[] = [
+  'broadsheet',
+  'cream',
+  'pastel',
+  'sage',
+  'velvet',
+  'contrast',
+];
 
-export const SettingsScreen: React.FC<{ navigation?: any }> = ({ navigation }) => {
+const SPEECH_RATES = [0.75, 1.0, 1.25, 1.5];
+
+export interface SettingsScreenProps {
+  navigation: any;
+}
+
+export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) => {
   const COLORS = useThemeColors();
   const styles = useThemedStyles(makeStyles);
+
   const {
     font,
     size,
     motion,
+    spacing,
+    letterSpacing,
+    theme,
     bionic,
     readingRuler,
+    speakOnTap,
+    rewards,
     speechRate,
     speechPitch,
-    customApiUrl,
-    theme,
-    spacing,
-    language,
-    voice,
-    speakOnTap,
     colorOverlay,
     colorOverlayOpacity,
+    language,
+    voice,
+    customApiUrl,
     setFont,
     setSize,
     setMotion,
+    setSpacing,
+    setLetterSpacing,
+    setTheme,
     toggleBionic,
     toggleReadingRuler,
+    toggleSpeakOnTap,
+    toggleRewards,
     setSpeechRate,
     setSpeechPitch,
-    setCustomApiUrl,
-    setTheme,
-    setSpacing,
+    setColorOverlay,
     setLanguage,
     setVoice,
-    toggleSpeakOnTap,
-    setColorOverlay,
+    setCustomApiUrl,
   } = useAccessibility();
 
-  const {
-    userId,
-    engineState,
-    isEngineReady,
-    isAiConfigured,
-    isDbConnected,
-    healthInfo,
-    checkHealth,
-    resetIdentity,
-  } = useIdentity();
+  const { userId, engineState, isDbConnected, checkHealth, resetIdentity } = useIdentity();
+
+  const [languageOpen, setLanguageOpen] = useState(false);
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [engineOpen, setEngineOpen] = useState(false);
 
   const [apiUrlInput, setApiUrlInput] = useState(customApiUrl);
-  const [isTestingAi, setIsTestingAi] = useState(false);
-  const [aiTestResult, setAiTestResult] = useState<string | null>(null);
   const [voices, setVoices] = useState<SarvamVoice[]>([]);
   const [naturalVoice, setNaturalVoice] = useState<boolean | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
 
-  useEffect(() => {
-    setApiUrlInput(customApiUrl);
-  }, [customApiUrl]);
+  useEffect(() => setApiUrlInput(customApiUrl), [customApiUrl]);
 
   // The speaker list is a property of whichever engine we are pointed at, so it
   // is re-asked whenever the address changes rather than fetched once at mount.
   useEffect(() => {
     let cancelled = false;
+    setNaturalVoice(null);
     tts.probeNaturalVoice(true).then(async (available) => {
       if (cancelled) return;
       setNaturalVoice(available);
@@ -124,69 +138,36 @@ export const SettingsScreen: React.FC<{ navigation?: any }> = ({ navigation }) =
     };
   }, [customApiUrl]);
 
-  const handleSaveApiUrl = async () => {
+  const buzz = () => {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    } catch (_) {}
-    await setCustomApiUrl(apiUrlInput.trim());
-    await checkHealth();
-    Alert.alert(
-      'Engine address saved',
-      apiUrlInput.trim()
-        ? `SETU will talk to ${apiUrlInput.trim()}.`
-        : 'SETU is back to the engine this build ships with.'
-    );
-  };
-
-  const handleTestAiConnection = async () => {
-    setIsTestingAi(true);
-    setAiTestResult(null);
-    try {
-      try {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      } catch (_) {}
-      const res = await api.healthAi();
-      if (res && res.ok) {
-        setAiTestResult(
-          `AI Probe Success! Provider: ${res.provider || 'Gemini'} · Model: ${res.model || 'active'}`
-        );
-      } else {
-        setAiTestResult(`AI Probe: ${res?.reason || 'Engine offline or fallback rule engine active.'}`);
-      }
-    } catch (err: any) {
-      setAiTestResult(`AI Probe: ${err.message || 'Offline fallback rule engine active.'}`);
-    } finally {
-      setIsTestingAi(false);
+    } catch (_) {
+      /* haptics are a nicety */
     }
   };
 
-  const handleTestVoice = () => {
-    try {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    } catch (_) {}
-    // Spoken in the chosen language, not in English, so the test actually
-    // demonstrates the thing being configured.
-    tts.speak(languageSample(language));
+  const saveEngine = async () => {
+    buzz();
+    await setCustomApiUrl(apiUrlInput.trim());
+    await checkHealth();
+    setEngineOpen(false);
   };
 
-  const handleResetUserId = async () => {
-    Alert.alert(
-      'Reset Device ID',
-      'This will generate a new anonymous identity. Your maps will stay stored locally.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Reset ID',
-          onPress: async () => {
-            try {
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            } catch (_) {}
-            await resetIdentity();
-            Alert.alert('Identity Refreshed', 'A new anonymous ID was assigned.');
-          },
-        },
-      ]
-    );
+  const testEngine = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const result = await api.healthAi();
+      setTestResult(
+        result?.ok
+          ? `Working. ${result.provider || 'Gemini'}, model ${result.model || 'active'}.`
+          : `Reachable, but the AI did not answer: ${result?.reason || 'no reason given'}.`
+      );
+    } catch (error: any) {
+      setTestResult(error?.message || 'Could not reach that address at all.');
+    } finally {
+      setTesting(false);
+    }
   };
 
   /**
@@ -232,761 +213,670 @@ export const SettingsScreen: React.FC<{ navigation?: any }> = ({ navigation }) =
     );
   };
 
+  const newIdentity = () => {
+    Alert.alert(
+      'Give this phone a new token?',
+      'Your maps and settings stay exactly where they are. Anything already stored on the engine under the old token becomes unreachable.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'New token',
+          onPress: async () => {
+            await resetIdentity();
+          },
+        },
+      ]
+    );
+  };
+
+  const currentVoice = voices.find((entry) => entry.id === voice);
+  const engineStatus =
+    engineState === 'ok'
+      ? isDbConnected
+        ? 'Working, database connected'
+        : 'Working'
+      : engineState === 'checking'
+        ? 'Checking…'
+        : engineState === 'nokey'
+          ? 'Reachable, no AI key'
+          : 'Not reachable';
+
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Screen Header */}
-        <View style={styles.header}>
-          <Kicker color={COLORS.cyan}>Make it readable for you</Kicker>
-          <Heading variant="h1" style={{ marginTop: 2 }}>
-            Settings
-          </Heading>
-          <Text variant="bodySm" color={COLORS.textMuted}>
-            Change anything here at any time. Nothing needs saving and nothing is permanent.
-          </Text>
+    <Screen
+      title="Settings"
+      subtitle="Nothing here needs saving"
+      leading="back"
+      onBack={() => navigation.goBack()}
+    >
+      {/* ------------------------------------------------------------ Reading */}
+      <Section title="How text looks" description="Changes apply everywhere, straight away" spacing="none">
+        <Text variant="bodySm" weight="semibold" style={styles.label}>
+          Typeface
+        </Text>
+        <Segmented<FontStyleOption>
+          options={[
+            { key: 'serif', label: 'Serif' },
+            { key: 'sans', label: 'Sans' },
+            { key: 'hyper', label: 'Hyperlegible' },
+            { key: 'lexend', label: 'Lexend' },
+            { key: 'system', label: 'Your phone’s' },
+          ]}
+          value={font}
+          onChange={setFont}
+        />
+        <Text variant="caption" color={COLORS.textSubtle} style={styles.hint}>
+          “Your phone’s” follows whatever you have set in the system accessibility settings,
+          including a font you installed yourself.
+        </Text>
+
+        <Text variant="bodySm" weight="semibold" style={styles.label}>
+          Text size
+        </Text>
+        <Segmented<TextSizeOption>
+          options={[
+            { key: 'normal', label: 'Normal' },
+            { key: 'comfortable', label: 'Comfortable' },
+            { key: 'large', label: 'Large' },
+          ]}
+          value={size}
+          onChange={setSize}
+        />
+
+        <Text variant="bodySm" weight="semibold" style={styles.label}>
+          Space between lines
+        </Text>
+        <Segmented<SpacingOption>
+          options={[
+            { key: 'normal', label: 'Normal' },
+            { key: 'relaxed', label: 'Relaxed' },
+            { key: 'spacious', label: 'Spacious' },
+          ]}
+          value={spacing}
+          onChange={setSpacing}
+        />
+
+        <Text variant="bodySm" weight="semibold" style={styles.label}>
+          Space between letters
+        </Text>
+        <Segmented<LetterSpacingOption>
+          options={[
+            { key: 'normal', label: 'Normal' },
+            { key: 'wide', label: 'Wide' },
+            { key: 'wider', label: 'Wider' },
+          ]}
+          value={letterSpacing}
+          onChange={setLetterSpacing}
+        />
+        <Text variant="caption" color={COLORS.textSubtle} style={styles.hint}>
+          More room between letters has better evidence behind it for dyslexic readers than any
+          particular typeface. Worth trying before anything else here.
+        </Text>
+
+        <Text variant="bodySm" weight="semibold" style={styles.label}>
+          Movement
+        </Text>
+        <Segmented<MotionOption>
+          options={[
+            { key: 'movement', label: 'Let things move' },
+            { key: 'reduced', label: 'Keep it still' },
+          ]}
+          value={motion}
+          onChange={setMotion}
+        />
+      </Section>
+
+      {/* ------------------------------------------------------------- Colour */}
+      <Section title="The colour of the page" description="Not a light and dark switch — six grounds">
+        <View style={styles.swatches}>
+          {THEME_ORDER.map((option) => {
+            const palette = paletteFor(option);
+            const selected = theme === option;
+            return (
+              <TouchableOpacity
+                key={option}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                accessibilityLabel={`${THEME_LABELS[option].name}. ${THEME_LABELS[option].blurb}`}
+                onPress={() => setTheme(option)}
+                style={[styles.swatch, selected ? styles.swatchOn : null]}
+              >
+                <View style={[styles.chip, { backgroundColor: palette.bg }]}>
+                  <View style={[styles.ink, { backgroundColor: palette.text }]} />
+                  <View style={[styles.ink, { backgroundColor: palette.cyan }]} />
+                  {selected ? <Check size={12} color={palette.text} /> : null}
+                </View>
+                <Text
+                  variant="caption"
+                  weight={selected ? 'bold' : 'normal'}
+                  color={selected ? COLORS.text : COLORS.textMuted}
+                  align="center"
+                >
+                  {THEME_LABELS[option].name}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <Text variant="caption" color={COLORS.textSubtle} style={styles.hint}>
+          {THEME_LABELS[theme].blurb}
+        </Text>
+      </Section>
+
+      {/* --------------------------------------------------------------- Tint */}
+      <Section
+        title="A tint over the screen"
+        description="If text seems to shimmer or swim, a colour film often settles it"
+      >
+        <View style={styles.swatches}>
+          {Object.keys(COLOR_OVERLAYS).map((key) => {
+            const tint = COLOR_OVERLAYS[key];
+            const selected = (colorOverlay || 'none') === key;
+            return (
+              <TouchableOpacity
+                key={key}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                accessibilityLabel={`${OVERLAY_LABELS[key]} tint`}
+                onPress={() => setColorOverlay(key)}
+                style={[styles.swatch, selected ? styles.swatchOn : null]}
+              >
+                <View
+                  style={[
+                    styles.chip,
+                    { backgroundColor: tint || COLORS.surface, justifyContent: 'center' },
+                  ]}
+                >
+                  {selected ? <Check size={12} color={COLORS.text} /> : null}
+                </View>
+                <Text
+                  variant="caption"
+                  color={selected ? COLORS.text : COLORS.textMuted}
+                  align="center"
+                >
+                  {OVERLAY_LABELS[key]}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
-        {/* 1. READING PREFERENCES */}
-        <View style={styles.section}>
-          <Kicker color={COLORS.cyan}>Accessibility Core</Kicker>
-          <Subheading variant="titleSm" style={{ marginTop: 2, marginBottom: SPACING.sm }}>
-            Reading & Typography
-          </Subheading>
-
-          {/* Typeface Selector */}
-          <Text variant="bodySm" weight="semibold" style={styles.groupLabel}>
-            Typeface
-          </Text>
-          <View style={styles.optionsRow}>
-            {(
-              [
-                { id: 'serif', label: 'Serif' },
-                { id: 'system', label: 'System sans' },
-                { id: 'hyper', label: 'Hyperlegible' },
-                { id: 'lexend', label: 'Lexend' },
-                { id: 'dyslexic', label: 'Dyslexia-friendly' },
-              ] as { id: FontStyleOption; label: string }[]
-            ).map((item) => (
-              <Button
-                key={item.id}
-                variant={font === item.id ? 'primary' : 'secondary'}
-                size="sm"
-                title={item.label}
-                onPress={() => setFont(item.id)}
-                style={styles.optionBtn}
-              />
-            ))}
-          </View>
-
-          {/* Text Size Multiplier */}
-          <Text variant="bodySm" weight="semibold" style={styles.groupLabel}>
-            Text Scaling
-          </Text>
-          <View style={styles.optionsRow}>
-            {(
-              [
-                { id: 'normal', label: 'Normal (1.0×)' },
-                { id: 'comfortable', label: 'Comfortable (1.1×)' },
-                { id: 'large', label: 'Large (1.22×)' },
-              ] as { id: TextSizeOption; label: string }[]
-            ).map((item) => (
-              <Button
-                key={item.id}
-                variant={size === item.id ? 'primary' : 'secondary'}
-                size="sm"
-                title={item.label}
-                onPress={() => setSize(item.id)}
-                style={styles.optionBtn}
-              />
-            ))}
-          </View>
-
-          {/* Motion Sensitivity */}
-          <Text variant="bodySm" weight="semibold" style={styles.groupLabel}>
-            Motion & Transitions
-          </Text>
-          <View style={styles.optionsRow}>
-            {(
-              [
-                { id: 'movement', label: 'Let things move' },
-                { id: 'reduced', label: 'Keep it still' },
-              ] as { id: MotionOption; label: string }[]
-            ).map((item) => (
-              <Button
-                key={item.id}
-                variant={motion === item.id ? 'primary' : 'secondary'}
-                size="sm"
-                title={item.label}
-                onPress={() => setMotion(item.id)}
-                style={styles.optionBtn}
-              />
-            ))}
-          </View>
-
-          {/* Ground colour. Not a light/dark switch — see constants/themes.ts. */}
-          <Text variant="bodySm" weight="semibold" style={styles.groupLabel}>
-            Page colour
-          </Text>
-          <View style={styles.swatchRow}>
-            {THEME_ORDER.map((option) => {
-              const palette = paletteFor(option);
-              const selected = theme === option;
+        {colorOverlay && colorOverlay !== 'none' ? (
+          <View style={styles.strengthRow}>
+            <Text variant="caption" color={COLORS.textMuted} style={{ marginRight: SPACING.sm }}>
+              Strength
+            </Text>
+            {[0.08, 0.12, 0.2, 0.3].map((value) => {
+              const selected = Math.abs((colorOverlayOpacity || 0.12) - value) < 0.01;
               return (
                 <TouchableOpacity
-                  key={option}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected }}
-                  accessibilityLabel={`${THEME_LABELS[option].name}. ${THEME_LABELS[option].blurb}`}
-                  onPress={() => setTheme(option)}
-                  style={[styles.swatch, selected ? styles.swatchSelected : null]}
-                >
-                  <View style={[styles.swatchChip, { backgroundColor: palette.bg }]}>
-                    <View style={[styles.swatchInk, { backgroundColor: palette.text }]} />
-                    <View style={[styles.swatchInk, { backgroundColor: palette.cyan }]} />
-                    {selected ? <Check size={12} color={palette.text} /> : null}
-                  </View>
-                  <Text
-                    variant="caption"
-                    weight={selected ? 'bold' : 'normal'}
-                    color={selected ? COLORS.text : COLORS.textMuted}
-                    align="center"
-                  >
-                    {THEME_LABELS[option].name}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          {/* Line spacing */}
-          <Text variant="bodySm" weight="semibold" style={styles.groupLabel}>
-            Line spacing
-          </Text>
-          <View style={styles.optionsRow}>
-            {(
-              [
-                { id: 'normal', label: 'Normal' },
-                { id: 'relaxed', label: 'Relaxed' },
-                { id: 'spacious', label: 'Spacious' },
-              ] as { id: SpacingOption; label: string }[]
-            ).map((item) => (
-              <Button
-                key={item.id}
-                variant={spacing === item.id ? 'primary' : 'secondary'}
-                size="sm"
-                title={item.label}
-                onPress={() => setSpacing(item.id)}
-                style={styles.optionBtn}
-              />
-            ))}
-          </View>
-
-          {/* Colour film for visual stress */}
-          <Text variant="bodySm" weight="semibold" style={styles.groupLabel}>
-            Colour tint over the screen
-          </Text>
-          <Text variant="caption" color={COLORS.textMuted} style={{ marginBottom: SPACING.xs }}>
-            If text seems to shimmer or swim on a plain background, a tint often settles it. Which
-            colour helps is personal — try a few.
-          </Text>
-          <View style={styles.swatchRow}>
-            {Object.keys(COLOR_OVERLAYS).map((key) => {
-              const tint = COLOR_OVERLAYS[key];
-              const selected = (colorOverlay || 'none') === key;
-              return (
-                <TouchableOpacity
-                  key={key}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected }}
-                  accessibilityLabel={`${OVERLAY_LABELS[key]} tint`}
-                  onPress={() => setColorOverlay(key)}
-                  style={[styles.swatch, selected ? styles.swatchSelected : null]}
-                >
-                  <View
-                    style={[
-                      styles.swatchChip,
-                      { backgroundColor: tint || COLORS.surface, justifyContent: 'center' },
-                    ]}
-                  >
-                    {selected ? <Check size={12} color={COLORS.text} /> : null}
-                  </View>
-                  <Text
-                    variant="caption"
-                    color={selected ? COLORS.text : COLORS.textMuted}
-                    align="center"
-                  >
-                    {OVERLAY_LABELS[key]}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          {colorOverlay && colorOverlay !== 'none' ? (
-            <View style={styles.optionsRow}>
-              {[0.08, 0.12, 0.2, 0.3].map((value) => (
-                <Button
                   key={`tint-${value}`}
-                  variant={
-                    Math.abs((colorOverlayOpacity || 0.12) - value) < 0.01 ? 'primary' : 'secondary'
-                  }
-                  size="sm"
-                  title={`${Math.round(value * 100)}%`}
                   onPress={() => setColorOverlay(colorOverlay, value)}
-                  style={{ flex: 1 }}
-                />
-              ))}
-            </View>
-          ) : null}
-
-          {/* Dyslexia Quick Features */}
-          <View style={styles.togglesCard}>
-            <TouchableOpacity
-              style={[styles.toggleRow, bionic ? styles.toggleRowActive : {}]}
-              onPress={toggleBionic}
-              accessible={true}
-              accessibilityRole="switch"
-              accessibilityLabel="Bionic Reading Anchors"
-              accessibilityState={{ checked: bionic }}
-            >
-              <View style={{ flex: 1 }}>
-                <Text variant="bodySm" weight="semibold">
-                  Bold the start of each word
-                </Text>
-                <Text variant="caption" color={COLORS.textMuted}>
-                  Some readers find it helps them keep their place. The evidence for it is weak, so
-                  it is off by default — try it and keep it only if it actually helps you.
-                </Text>
-              </View>
-              <Tag label={bionic ? 'Active' : 'Off'} variant={bionic ? 'cyan' : 'neutral'} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.toggleRow, readingRuler ? styles.toggleRowActive : {}]}
-              onPress={toggleReadingRuler}
-              accessible={true}
-              accessibilityRole="switch"
-              accessibilityLabel="Movable Reading Ruler"
-              accessibilityState={{ checked: readingRuler }}
-            >
-              <View style={{ flex: 1 }}>
-                <Text variant="bodySm" weight="semibold">
-                  Reading ruler
-                </Text>
-                <Text variant="caption" color={COLORS.textMuted}>
-                  A movable band that isolates one line at a time, so your eye cannot skip or repeat
-                  a line in a dense paragraph.
-                </Text>
-              </View>
-              <Tag
-                label={readingRuler ? 'Active' : 'Off'}
-                variant={readingRuler ? 'cyan' : 'neutral'}
-              />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* 2. LANGUAGE, VOICE & READING ALOUD */}
-        <View style={styles.section}>
-          <Kicker color={COLORS.cyan}>Language & voice</Kicker>
-          <Subheading variant="titleSm" style={{ marginTop: 2, marginBottom: SPACING.sm }}>
-            How SETU talks to you
-          </Subheading>
-
-          <View style={styles.noteRow}>
-            <Languages size={15} color={COLORS.cyan} />
-            <Text variant="caption" color={COLORS.textMuted} style={{ flex: 1, marginLeft: 8 }}>
-              One choice covers both halves: the language answers come back in, and the language
-              they are read aloud in. Setting only one gives you a Hindi voice reading English.
-            </Text>
-          </View>
-
-          <View style={styles.languageGrid}>
-            {LANGUAGES.map((item) => {
-              const selected = language === item.code;
-              return (
-                <TouchableOpacity
-                  key={item.code}
+                  style={[styles.strengthChip, selected ? styles.strengthChipOn : null]}
                   accessibilityRole="radio"
                   accessibilityState={{ selected }}
-                  accessibilityLabel={`${item.name}, ${item.native}`}
-                  onPress={() => setLanguage(item.code)}
-                  style={[styles.languageChip, selected ? styles.languageChipSelected : null]}
+                  accessibilityLabel={`${Math.round(value * 100)} percent`}
                 >
                   <Text
-                    variant="bodySm"
+                    variant="caption"
                     weight={selected ? 'bold' : 'normal'}
-                    color={selected ? COLORS.cyanDark : COLORS.text}
+                    color={selected ? COLORS.cyanDark : COLORS.textMuted}
                   >
-                    {item.native}
-                  </Text>
-                  <Text variant="caption" color={COLORS.textMuted}>
-                    {item.name}
+                    {Math.round(value * 100)}%
                   </Text>
                 </TouchableOpacity>
               );
             })}
           </View>
-
-          {/* Natural voice picker, only when the engine actually offers one */}
-          <Text variant="bodySm" weight="semibold" style={styles.groupLabel}>
-            Voice
+        ) : (
+          <Text variant="caption" color={COLORS.textSubtle} style={styles.hint}>
+            Which colour helps is personal, and there is no way to work it out except by trying a
+            few. Nothing bad happens if none of them do.
           </Text>
+        )}
+      </Section>
 
-          {naturalVoice === null ? (
-            <Text variant="caption" color={COLORS.textMuted}>
-              Checking which voices this engine has...
-            </Text>
-          ) : naturalVoice ? (
-            <View style={styles.voiceGrid}>
-              {voices.map((item) => {
-                const selected = voice === item.id;
-                return (
+      {/* ------------------------------------------------------- Reading aids */}
+      <Section title="Reading aids">
+        <ListGroup>
+          <ListRow
+            title="Bold the start of each word"
+            description="Some readers keep their place better with it. The evidence is weak, so it is off by default — keep it only if it genuinely helps you."
+            toggle
+            toggled={bionic}
+            onToggle={toggleBionic}
+          />
+          <ListRow
+            title="Reading ruler"
+            description="A movable band that isolates one line, so your eye cannot skip or repeat one in a dense paragraph."
+            toggle
+            toggled={readingRuler}
+            onToggle={toggleReadingRuler}
+          />
+          <ListRow
+            title="Speak a mind map branch when it opens"
+            description="A map of silent text is still a wall of words. The audio is what makes the diagram readable."
+            toggle
+            toggled={speakOnTap}
+            onToggle={toggleSpeakOnTap}
+            divider={false}
+          />
+        </ListGroup>
+      </Section>
+
+      {/* ------------------------------------------------------ Language, voice */}
+      <Section
+        title="Language and voice"
+        description="One choice covers both — what SETU writes, and what it says"
+      >
+        <ListGroup>
+          <ListRow
+            title="Language"
+            description="Setting only the voice gives you a Hindi speaker reading English sentences"
+            value={languageLabel(language)}
+            onPress={() => setLanguageOpen(true)}
+          />
+          <ListRow
+            title="Voice"
+            description={
+              naturalVoice === null
+                ? 'Checking which voices this engine has…'
+                : naturalVoice
+                  ? 'A natural voice from the engine'
+                  : 'This engine has no natural voice, so your phone’s own synthesiser is used'
+            }
+            value={
+              naturalVoice === false
+                ? 'Phone voice'
+                : currentVoice?.label || (naturalVoice ? 'Engine default' : '—')
+            }
+            onPress={naturalVoice ? () => setVoiceOpen(true) : undefined}
+            disabled={naturalVoice !== true}
+          />
+          <ListRow
+            title="Reading pace"
+            divider={false}
+            trailing={
+              <View style={styles.paceRow}>
+                {SPEECH_RATES.map((rate) => (
                   <TouchableOpacity
-                    key={item.id}
+                    key={`rate-${rate}`}
+                    onPress={() => setSpeechRate(rate)}
+                    style={[styles.paceChip, speechRate === rate ? styles.paceChipOn : null]}
                     accessibilityRole="radio"
-                    accessibilityState={{ selected }}
-                    accessibilityLabel={`${item.label}, ${item.note}`}
-                    onPress={async () => {
-                      await setVoice(item.id);
-                      tts.speak(languageSample(language));
-                    }}
-                    style={[styles.voiceChip, selected ? styles.voiceChipSelected : null]}
+                    accessibilityState={{ selected: speechRate === rate }}
+                    accessibilityLabel={`${rate} times speed`}
                   >
                     <Text
-                      variant="bodySm"
-                      weight={selected ? 'bold' : 'normal'}
-                      color={selected ? COLORS.cyanDark : COLORS.text}
+                      variant="caption"
+                      weight={speechRate === rate ? 'bold' : 'normal'}
+                      color={speechRate === rate ? COLORS.cyanDark : COLORS.textMuted}
                     >
-                      {item.label}
-                    </Text>
-                    <Text variant="caption" color={COLORS.textMuted}>
-                      {item.note}
+                      {rate}×
                     </Text>
                   </TouchableOpacity>
-                );
-              })}
-            </View>
-          ) : (
-            <Text variant="caption" color={COLORS.textMuted}>
-              This engine has no natural voice configured, so SETU is using the synthesiser built
-              into your phone. Everything still reads aloud - it just sounds more robotic.
-            </Text>
-          )}
+                ))}
+              </View>
+            }
+          />
+        </ListGroup>
 
-          <TouchableOpacity
-            accessibilityRole="switch"
-            accessibilityState={{ checked: speakOnTap }}
-            accessibilityLabel="Speak mind map branches when tapped"
-            onPress={toggleSpeakOnTap}
-            style={[styles.toggleRow, speakOnTap ? styles.toggleRowActive : null]}
-          >
-            <View style={{ flex: 1 }}>
-              <Text variant="bodySm" weight="semibold">
-                Read a branch when I tap it
-              </Text>
-              <Text variant="caption" color={COLORS.textMuted}>
-                A map of silent text is still a wall of words. Pairing each branch with audio is what
-                makes the diagram readable.
-              </Text>
-            </View>
-            <Tag label={speakOnTap ? 'On' : 'Off'} variant={speakOnTap ? 'cyan' : 'neutral'} />
-          </TouchableOpacity>
-
-          <Text variant="bodySm" weight="semibold" style={styles.groupLabel}>
-            Reading pace
-          </Text>
-          <View style={styles.optionsRow}>
-            {[0.75, 1.0, 1.25, 1.5].map((rate) => (
-              <Button
-                key={`rate-${rate}`}
-                variant={speechRate === rate ? 'primary' : 'secondary'}
-                size="sm"
-                title={`${rate}×`}
-                onPress={() => setSpeechRate(rate)}
-                style={{ flex: 1 }}
-              />
-            ))}
-          </View>
-
-          <Text variant="bodySm" weight="semibold" style={styles.groupLabel}>
+        <View style={styles.pitchRow}>
+          <Text variant="caption" color={COLORS.textMuted} style={{ marginRight: SPACING.sm }}>
             Pitch
           </Text>
-          <View style={styles.optionsRow}>
-            {[0.8, 1.0, 1.2].map((pitch) => (
-              <Button
-                key={`pitch-${pitch}`}
-                variant={speechPitch === pitch ? 'primary' : 'secondary'}
-                size="sm"
-                title={pitch === 0.8 ? 'Low' : pitch === 1.0 ? 'Natural' : 'Higher'}
-                onPress={() => setSpeechPitch(pitch)}
-                style={{ flex: 1 }}
-              />
-            ))}
-          </View>
-
-          <Button
-            title="Hear how that sounds"
-            variant="secondary"
-            size="md"
-            icon={<Volume2 size={16} color={COLORS.cyan} />}
-            onPress={handleTestVoice}
-            style={{ marginTop: SPACING.sm }}
-          />
-        </View>
-
-        {/* 3. MOMENTUM */}
-        <View style={styles.section}>
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel="Open Momentum - points, streak and milestones"
-            onPress={() => navigation?.navigate('Momentum')}
-            style={styles.linkRow}
-          >
-            <TrendingUp size={18} color={COLORS.cyan} />
-            <View style={{ flex: 1, marginLeft: SPACING.md }}>
-              <Text variant="bodySm" weight="semibold">
-                Momentum
-              </Text>
-              <Text variant="caption" color={COLORS.textMuted}>
-                Points, streak and milestones - and the switch to turn the notifications off
-              </Text>
-            </View>
-          </TouchableOpacity>
-        </View>
-
-        {/* 3. ENGINE & BACKEND CONNECTION */}
-        <View style={styles.section}>
-          <Kicker color={COLORS.cyan}>AI & Persistence</Kicker>
-          <Subheading variant="titleSm" style={{ marginTop: 2, marginBottom: SPACING.sm }}>
-            SETU Engine Connection
-          </Subheading>
-
-          <Card elevated style={styles.engineCard}>
-            <View style={styles.probeRow}>
-              <Text variant="bodySm" weight="bold">
-                Backend Engine:
-              </Text>
-              <Tag
-                label={
-                  engineState === 'ok'
-                    ? 'Online'
-                    : engineState === 'nokey'
-                    ? 'No AI Key'
-                    : engineState === 'checking'
-                    ? 'Checking…'
-                    : 'Offline Mode'
-                }
-                variant={engineState === 'ok' ? 'cyan' : engineState === 'nokey' ? 'yellow' : 'neutral'}
-              />
-            </View>
-
-            <View style={styles.probeRow}>
-              <Text variant="bodySm" weight="bold">
-                MongoDB Persistence:
-              </Text>
-              <Tag
-                label={isDbConnected ? 'Connected' : 'Local Fallback'}
-                variant={isDbConnected ? 'cyan' : 'neutral'}
-              />
-            </View>
-
-            <Input
-              label="Engine address"
-              hint={
-                isCustomApiUrl(customApiUrl)
-                  ? `Leave this empty to go back to the engine this build ships with (${DEFAULT_API_URL}).`
-                  : `Using the engine this build ships with: ${DEFAULT_API_URL}. Only change this if you are running your own.`
-              }
-              placeholder={DEFAULT_API_URL}
-              value={apiUrlInput}
-              onChangeText={setApiUrlInput}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-              containerStyle={{ marginTop: SPACING.sm }}
-            />
-
-            <View style={styles.engineBtnRow}>
-              <Button
-                title="Save URL"
-                variant="primary"
-                size="sm"
-                onPress={handleSaveApiUrl}
-                style={{ flex: 1 }}
-              />
-              <Button
-                title="Test AI Probe"
-                variant="secondary"
-                size="sm"
-                loading={isTestingAi}
-                onPress={handleTestAiConnection}
-                style={{ flex: 1 }}
-              />
-            </View>
-
-            {aiTestResult && (
-              <Text
-                variant="caption"
-                color={aiTestResult.includes('Success') ? COLORS.cyanDark : COLORS.magenta}
-                style={{ marginTop: SPACING.sm }}
+          {[
+            { value: 0.8, label: 'Lower' },
+            { value: 1.0, label: 'Natural' },
+            { value: 1.2, label: 'Higher' },
+          ].map((entry) => {
+            const selected = Math.abs(speechPitch - entry.value) < 0.01;
+            return (
+              <TouchableOpacity
+                key={`pitch-${entry.value}`}
+                onPress={() => setSpeechPitch(entry.value)}
+                style={[styles.strengthChip, selected ? styles.strengthChipOn : null]}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                accessibilityLabel={`${entry.label} pitch`}
               >
-                {aiTestResult}
-              </Text>
-            )}
-          </Card>
+                <Text
+                  variant="caption"
+                  weight={selected ? 'bold' : 'normal'}
+                  color={selected ? COLORS.cyanDark : COLORS.textMuted}
+                >
+                  {entry.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
-        {/* 4. PRIVACY & DEVICE DATA */}
-        <View style={styles.section}>
-          <Kicker color={COLORS.magenta}>Privacy & Local Data</Kicker>
-          <Subheading variant="titleSm" style={{ marginTop: 2, marginBottom: SPACING.sm }}>
-            Device Identity & Memory
-          </Subheading>
+        <Button
+          title="Hear how that sounds"
+          variant="secondary"
+          size="md"
+          fullWidth
+          icon={<Volume2 size={16} color={COLORS.text} />}
+          onPress={() => {
+            buzz();
+            // Spoken in the chosen language, so the test demonstrates the thing
+            // being configured rather than an English sentence in a Tamil voice.
+            tts.speak(languageSample(language));
+          }}
+          style={{ marginTop: SPACING.md }}
+        />
+      </Section>
 
-          <Card elevated style={styles.dataCard}>
-            <Text variant="caption" color={COLORS.textMuted}>
-              Anonymous Device ID:
-            </Text>
-            <Text variant="bodySm" weight="bold" color={COLORS.text} style={{ marginBottom: SPACING.xs }}>
-              {userId || 'Loading…'}
-            </Text>
+      {/* ----------------------------------------------------------- Momentum */}
+      <Section title="Points and streaks">
+        <ListGroup>
+          <ListRow
+            icon={<TrendingUp size={18} color={COLORS.cyan} />}
+            title="Show points and milestones"
+            description="Counting carries on either way — turning this off only hides the notifications."
+            toggle
+            toggled={rewards}
+            onToggle={toggleRewards}
+          />
+          <ListRow
+            title="Open Momentum"
+            description="Your points, streak and the milestones you have hit"
+            onPress={() => navigation.navigate('Momentum')}
+            divider={false}
+          />
+        </ListGroup>
+      </Section>
 
-            {/*
-              What this paragraph has to do is say where the data actually is.
+      {/* --------------------------------------------------------- Your data */}
+      <Section
+        title="Your data"
+        description="No accounts and no logins — just a random token made on this phone"
+      >
+        {/*
+          What this paragraph has to do is say where the data actually is.
 
-              It used to say the identity was "a local anonymous token shared
-              transparently across local engine requests", which reads as though
-              nothing leaves the phone. Maps, summaries, settings and progress
-              are all mirrored to the engine under this ID as they are written.
-              Someone deciding whether to type something into this app is
-              entitled to know that in one sentence, on this screen, rather than
-              inferring it.
-            */}
-            <Text variant="caption" color={COLORS.textMuted} style={{ marginBottom: SPACING.md }}>
-              There are no accounts and no logins — this random ID is the only thing identifying
-              you, and it is created on this phone. Your mind maps, summaries, settings and progress
-              are copied to the SETU engine under it, so they survive a reinstall. Your check-in
-              journal and parking lot are not: those stay on this device only.
-            </Text>
+          It used to say the identity was "a local anonymous token shared
+          transparently across local engine requests", which reads as though
+          nothing leaves the phone. Maps, summaries, settings and progress are
+          all mirrored to the engine under this ID as they are written. Someone
+          deciding whether to type something into this app is entitled to know
+          that in one sentence, on this screen, rather than inferring it.
+        */}
+        <Text variant="caption" color={COLORS.textMuted} style={{ marginBottom: SPACING.md }}>
+          This random ID is the only thing identifying you, and it is created on this phone. Your
+          mind maps, summaries, settings and progress are copied to the SETU engine under it, so
+          they survive a reinstall. Your check-in journal and parking lot are not: those stay on
+          this device only.
+        </Text>
 
-            <View style={styles.dataButtonsRow}>
-              <Button
-                title="Reset device ID"
-                variant="secondary"
-                size="sm"
-                onPress={handleResetUserId}
-                style={{ flex: 1 }}
-              />
-              <Button
-                title="Erase local copy"
-                variant="destructive"
-                size="sm"
-                icon={<Trash2 size={14} color={COLORS.textInverse} />}
-                onPress={handleClearAllData}
-                style={{ flex: 1 }}
-              />
-            </View>
-          </Card>
+        <Text variant="bodySm" weight="bold" style={{ marginBottom: SPACING.md }}>
+          {userId || 'loading…'}
+        </Text>
+
+        <ListGroup>
+          <ListRow
+            icon={<RefreshCw size={18} color={COLORS.textMuted} />}
+            title="Give this phone a new token"
+            description="Your maps and settings stay. Anything on the engine under the old one becomes unreachable."
+            onPress={newIdentity}
+          />
+          <ListRow
+            icon={<Trash2 size={18} color={COLORS.error} />}
+            title="Erase this phone's copy"
+            description="Maps, results, notes and preferences. The token is kept, so anything already on the engine stays reachable."
+            tone="danger"
+            onPress={handleClearAllData}
+            divider={false}
+          />
+        </ListGroup>
+
+        {/*
+          Typeface attribution.
+
+          The three faces are redistributed inside the app, and the SIL Open
+          Font Licence asks that the notice travel with them. The full text is
+          at assets/fonts/NOTICE.txt; this is the acknowledgement a user can
+          actually see. The last sentence is here for the same reason it is in
+          that file — the app offers Hyperlegible because some readers find it
+          more comfortable, not because a typeface treats anything.
+        */}
+        <Text variant="caption" color={COLORS.textSubtle} style={{ marginTop: SPACING.md }}>
+          Typefaces: Atkinson Hyperlegible (Braille Institute of America), Lexend, and Source Serif
+          4 (Adobe) — all under the SIL Open Font License 1.1. A typeface is a comfort setting here,
+          not a treatment; the accommodation with evidence behind it is the letter spacing above.
+        </Text>
+      </Section>
+
+      <Text variant="caption" color={COLORS.textSubtle} align="center" style={styles.version}>
+        SETU {APP_VERSION} · built for Hack4Positive 2026
+      </Text>
+
+      {/* ------------------------------------------------------------- Sheets */}
+      <Sheet
+        visible={languageOpen}
+        onClose={() => setLanguageOpen(false)}
+        title="Language"
+        subtitle="Answers and the read-aloud voice change together"
+      >
+        {LANGUAGES.map((entry, index) => (
+          <ListRow
+            key={entry.code}
+            title={entry.native}
+            description={entry.name}
+            selectable
+            selected={language === entry.code}
+            divider={index < LANGUAGES.length - 1}
+            onPress={async () => {
+              await setLanguage(entry.code);
+              setLanguageOpen(false);
+              tts.speak(languageSample(entry.code));
+            }}
+          />
+        ))}
+      </Sheet>
+
+      <Sheet
+        visible={voiceOpen}
+        onClose={() => setVoiceOpen(false)}
+        title="Voice"
+        subtitle="Each one speaks when you pick it, in your chosen language"
+      >
+        {voices.map((entry, index) => (
+          <ListRow
+            key={entry.id}
+            title={entry.label}
+            description={entry.note}
+            selectable
+            selected={voice === entry.id}
+            divider={index < voices.length - 1}
+            onPress={async () => {
+              await setVoice(entry.id);
+              tts.speak(languageSample(language));
+            }}
+          />
+        ))}
+      </Sheet>
+
+      <Sheet
+        visible={engineOpen}
+        onClose={() => setEngineOpen(false)}
+        title="The engine"
+        subtitle="Only change this if you are running your own"
+        footer={
+          <View style={styles.engineFooter}>
+            <Button
+              title="Check it"
+              variant="secondary"
+              size="md"
+              loading={testing}
+              onPress={testEngine}
+              style={{ flex: 1 }}
+            />
+            <Button
+              title="Save"
+              variant="primary"
+              size="md"
+              onPress={saveEngine}
+              style={{ flex: 1 }}
+            />
+          </View>
+        }
+      >
+        <View style={styles.engineStatus}>
+          <Text variant="bodySm" weight="semibold">
+            {engineStatus}
+          </Text>
+          <Text variant="caption" color={COLORS.textMuted} style={{ marginTop: 2 }}>
+            {isDbConnected
+              ? 'Your maps are mirrored to the database, so a second device can catch up.'
+              : 'Nothing is being mirrored — everything is kept on this phone only.'}
+          </Text>
         </View>
 
-        {/* 5. ABOUT SETU & HACKATHON */}
-        <View style={[styles.section, { marginBottom: SPACING.huge }]}>
-          <Kicker color={COLORS.cyan}>Hack4Positive 2026</Kicker>
-          <Text variant="bodySm" weight="bold" style={{ marginTop: 2 }}>
-            SETU — Cognitive Operating System
-          </Text>
-          <Text variant="caption" color={COLORS.textMuted} style={{ marginTop: 4 }}>
-            Built for Disability Inclusion & Accessibility. Empowering ADHD, dyslexic, and
-            neurodivergent minds with plain-language transformations, interactive visual mind
-            maps, and focus assistance.
-          </Text>
+        <Input
+          label="Address"
+          hint={
+            isCustomApiUrl(customApiUrl)
+              ? `Leave it empty to go back to ${DEFAULT_API_URL}`
+              : `Currently using ${DEFAULT_API_URL}`
+          }
+          placeholder={DEFAULT_API_URL}
+          value={apiUrlInput}
+          onChangeText={setApiUrlInput}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="url"
+          accessibilityLabel="Engine address"
+        />
 
-          {/*
-            Typeface attribution.
-
-            The three faces are redistributed inside the app, and the SIL Open
-            Font Licence asks that the notice travel with them. The full text is
-            at assets/fonts/NOTICE.txt; this is the acknowledgement a user can
-            actually see. The last sentence is here for the same reason it is in
-            that file — the app offers Hyperlegible because some readers find it
-            more comfortable, not because a typeface treats anything.
-          */}
-          <Text variant="caption" color={COLORS.textSubtle} style={{ marginTop: SPACING.md }}>
-            Typefaces: Atkinson Hyperlegible (Braille Institute of America), Lexend, and Source
-            Serif 4 (Adobe) — all under the SIL Open Font License 1.1. A typeface is a comfort
-            setting here, not a treatment; the accommodation with evidence behind it is the letter
-            spacing above.
+        {testResult ? (
+          <Text variant="bodySm" color={COLORS.textMuted} style={styles.testResult}>
+            {testResult}
           </Text>
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+        ) : null}
+
+        <Text variant="caption" color={COLORS.textSubtle} style={styles.hint}>
+          The extension, the web app and this phone all talk to the same engine by default, which
+          is how a map you make here opens there.
+        </Text>
+      </Sheet>
+    </Screen>
   );
 };
 
 const makeStyles = (t: Palette) =>
   StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: t.bg,
-  },
-  scrollContent: {
-    padding: SPACING.md,
-    paddingBottom: SPACING.huge,
-  },
-  header: {
-    marginBottom: SPACING.lg,
-  },
-  section: {
-    marginBottom: SPACING.xl,
-  },
-  groupLabel: {
-    marginBottom: SPACING.xs,
-    marginTop: SPACING.xs,
-  },
-  optionsRow: {
-    flexDirection: 'row',
-    gap: SPACING.xs,
-    marginBottom: SPACING.sm,
-  },
-  swatchRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: SPACING.sm,
-    marginBottom: SPACING.sm,
-  },
-  swatch: {
-    width: 76,
-    alignItems: 'center',
-    gap: 4,
-    padding: 6,
-    borderRadius: RADIUS.md,
-    borderWidth: 1.5,
-    borderColor: 'transparent',
-  },
-  swatchSelected: {
-    borderColor: t.cyan,
-    backgroundColor: t.cyanLight,
-  },
-  swatchChip: {
-    width: '100%',
-    height: 38,
-    borderRadius: RADIUS.sm,
-    borderWidth: 1,
-    borderColor: t.divider,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 3,
-  },
-  swatchInk: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  noteRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    padding: SPACING.md,
-    borderRadius: RADIUS.md,
-    backgroundColor: t.surface,
-    borderWidth: 1,
-    borderColor: t.divider,
-    marginBottom: SPACING.md,
-  },
-  languageGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: SPACING.sm,
-  },
-  languageChip: {
-    minWidth: 96,
-    flexGrow: 1,
-    minHeight: 56,
-    justifyContent: 'center',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
-    borderColor: t.divider,
-    backgroundColor: t.surface,
-  },
-  languageChipSelected: {
-    borderColor: t.cyan,
-    borderWidth: 1.5,
-    backgroundColor: t.cyanLight,
-  },
-  voiceGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: SPACING.sm,
-  },
-  voiceChip: {
-    minWidth: 108,
-    flexGrow: 1,
-    minHeight: 52,
-    justifyContent: 'center',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
-    borderColor: t.divider,
-    backgroundColor: t.surface,
-  },
-  voiceChipSelected: {
-    borderColor: t.cyan,
-    borderWidth: 1.5,
-    backgroundColor: t.cyanLight,
-  },
-  linkRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    minHeight: 64,
-    padding: SPACING.md,
-    borderRadius: RADIUS.md,
-    backgroundColor: t.surface,
-    borderWidth: 1,
-    borderColor: t.divider,
-  },
-  optionBtn: {
-    flex: 1,
-  },
-  togglesCard: {
-    backgroundColor: t.surface,
-    borderRadius: RADIUS.md,
-    padding: SPACING.sm,
-    borderWidth: 1,
-    borderColor: t.dividerSubtle,
-    marginTop: SPACING.xs,
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: SPACING.sm,
-    borderRadius: RADIUS.sm,
-  },
-  toggleRowActive: {
-    backgroundColor: t.cyanLight,
-  },
-  engineCard: {
-    padding: SPACING.md,
-  },
-  probeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: SPACING.xs,
-  },
-  engineBtnRow: {
-    flexDirection: 'row',
-    gap: SPACING.sm,
-  },
-  dataCard: {
-    padding: SPACING.md,
-  },
-  dataButtonsRow: {
-    flexDirection: 'row',
-    gap: SPACING.sm,
-  },
-});
+    label: {
+      marginTop: SPACING.lg,
+      marginBottom: SPACING.sm,
+      paddingHorizontal: SPACING.xs,
+    },
+    hint: {
+      marginTop: SPACING.sm,
+      paddingHorizontal: SPACING.xs,
+    },
+    swatches: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: SPACING.sm,
+    },
+    swatch: {
+      width: 92,
+      alignItems: 'center',
+      padding: SPACING.sm,
+      borderRadius: RADIUS.md,
+      borderWidth: 1.5,
+      borderColor: 'transparent',
+      minHeight: 76,
+    },
+    swatchOn: {
+      borderColor: t.cyan,
+      backgroundColor: t.surface,
+    },
+    chip: {
+      width: 52,
+      height: 34,
+      borderRadius: RADIUS.sm,
+      borderWidth: 1,
+      borderColor: t.divider,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexDirection: 'row',
+      gap: 3,
+      marginBottom: 4,
+    },
+    ink: {
+      width: 5,
+      height: 5,
+      borderRadius: 2.5,
+    },
+    strengthRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: SPACING.md,
+      gap: SPACING.xs,
+    },
+    strengthChip: {
+      paddingHorizontal: SPACING.md,
+      paddingVertical: SPACING.sm,
+      borderRadius: RADIUS.pill,
+      borderWidth: 1,
+      borderColor: t.dividerSubtle,
+      backgroundColor: t.surface,
+      minHeight: 40,
+      justifyContent: 'center',
+    },
+    strengthChipOn: {
+      backgroundColor: t.cyanLight,
+      borderColor: t.cyanBorder,
+    },
+    paceRow: {
+      flexDirection: 'row',
+      gap: 3,
+    },
+    paceChip: {
+      paddingHorizontal: SPACING.sm,
+      paddingVertical: 6,
+      borderRadius: RADIUS.sm,
+      borderWidth: 1,
+      borderColor: t.dividerSubtle,
+      backgroundColor: t.bg,
+      minWidth: 40,
+      alignItems: 'center',
+    },
+    paceChipOn: {
+      backgroundColor: t.cyanLight,
+      borderColor: t.cyanBorder,
+    },
+    pitchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: SPACING.md,
+      gap: SPACING.xs,
+    },
+    privacy: {
+      backgroundColor: t.surface,
+      borderRadius: RADIUS.lg,
+      borderWidth: 1,
+      borderColor: t.dividerSubtle,
+      padding: SPACING.lg,
+      marginBottom: SPACING.md,
+    },
+    engineStatus: {
+      backgroundColor: t.surface,
+      borderRadius: RADIUS.md,
+      padding: SPACING.md,
+      marginBottom: SPACING.lg,
+    },
+    engineFooter: {
+      flexDirection: 'row',
+      gap: SPACING.sm,
+    },
+    testResult: {
+      marginTop: SPACING.sm,
+      paddingHorizontal: SPACING.xs,
+    },
+    version: {
+      marginTop: SPACING.xxxl,
+    },
+  });

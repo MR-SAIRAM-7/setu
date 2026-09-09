@@ -50,6 +50,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
    */
   spacing: 'relaxed',
   motion: 'movement',
+  letterSpacing: 'normal',
   bionic: false,
   readingRuler: false,
   speechRate: 1.0,
@@ -79,12 +80,27 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
  * an upgraded install would keep pointing a real phone at 10.0.2.2 forever and
  * show "engine offline" with no obvious cause. An empty value now means "follow
  * the build", which is the right answer for almost everyone.
+ *
+ * Preferences are the one piece of state an upgrade must never break: they are
+ * the accommodations, and an install that comes back with the defaults after an
+ * update has effectively reset somebody's ability to use the app.
  */
 function migratePreferences(stored: Partial<UserPreferences>): Partial<UserPreferences> {
   const next = { ...stored };
+
   if (typeof next.customApiUrl === 'string' && /10\.0\.2\.2|localhost|127\.0\.0\.1/.test(next.customApiUrl)) {
     next.customApiUrl = '';
   }
+
+  // Three typefaces were offered that were never bundled — Atkinson
+  // Hyperlegible, Lexend and OpenDyslexic — and all three rendered as the
+  // serif. Anyone who picked one wanted something other than a serif, so they
+  // land on the sans rather than being silently reset to the default.
+  const legacyFonts = ['hyper', 'lexend', 'dyslexic'];
+  if (typeof next.font === 'string' && legacyFonts.includes(next.font)) {
+    next.font = 'sans';
+  }
+
   return next;
 }
 

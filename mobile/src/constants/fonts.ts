@@ -44,6 +44,8 @@
  * decision is made.
  */
 
+import { Platform } from 'react-native';
+
 import { FontStyleOption } from '../types';
 
 /**
@@ -69,6 +71,17 @@ const FAMILIES: Record<
   serif: { regular: 'SourceSerif4-Regular', bold: 'SourceSerif4-Bold' },
   hyper: { regular: 'AtkinsonHyperlegible-Regular', bold: 'AtkinsonHyperlegible-Bold' },
   lexend: { regular: 'Lexend-Regular', bold: 'Lexend-Bold' },
+
+  /**
+   * `sans` stays the PLATFORM sans rather than one of the bundled faces, so the
+   * choice keeps meaning "the ordinary sans this phone uses". iOS has no
+   * generic 'sans-serif' family, so naming one there silently falls back to the
+   * system face; undefined asks for that fallback honestly.
+   */
+  sans: {
+    regular: Platform.select({ android: 'sans-serif', default: undefined }),
+    bold: Platform.select({ android: 'sans-serif-medium', default: undefined }),
+  },
 
   /**
    * The system face, deliberately undefined so React Native uses the platform

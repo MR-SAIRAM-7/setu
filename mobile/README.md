@@ -65,25 +65,44 @@ npx tsc --noEmit
 npx expo export --platform android
 ```
 
+```bash
+npx expo-doctor
+```
+
 The export is the useful one before a build — it resolves every module, so it
-catches import mistakes that typechecking alone will not.
+catches import mistakes that typechecking alone will not. `expo-doctor` catches
+the other class: missing native peer dependencies that work in Expo Go, where
+the module is already present, and crash in the APK.
 
 ---
 
 ## What is in here
 
-### Screens
+### Getting around
 
-| Screen | What it is for |
+Four tabs for the places you *work*, and a side menu for everything you *reach
+for*. The app used to carry six tabs and no menu, which meant anything that did
+not fit in six had no home of its own — Momentum was reachable only by tapping a
+statistic on Home, the scanner only from a button inside a card.
+
+| Where | What |
 | --- | --- |
-| **Home** | Ask a question, scan a page, pick a mode, pick up a recent map. Quick reading toggles near the top. |
-| **Mind map** | Any topic drawn as a branching map. Tap a branch to open *and hear* it, go a level deeper, or ask about it — the chat turn streams. |
-| **Modes** | Eight cognitive tools: Start, Simplify, Learn, Meet, Practice, Write, Guide, Numbers. |
-| **Listen** | Reflective support with a mood check-in and a local-only journal. |
-| **Library** | Saved maps, saved mode results, and uploaded documents. |
-| **Settings** | Typeface, size, page colour, spacing, tint, language, voice, engine, data. |
-| **Momentum** | Points, streak and milestones. Reachable from Home and Settings. |
-| **Camera OCR** | Photograph a printed page and work with the text. |
+| **Tab · Home** | One question, what you were last doing, the four problems people arrive with, and the three things that look after you. |
+| **Tab · Map** | Any topic as a branching map. Open a branch and that idea is *explained* — streamed, in your language, at one of three depths, read aloud. Hold a branch to edit it. |
+| **Tab · Tools** | The eight cognitive tools plus the document ones, each named by the problem it solves. |
+| **Tab · Library** | Maps, saved results and documents, on three shelves. |
+| **+ button** | Quick actions — everything SETU can do, grouped by what you need and searchable. |
+| **Menu · Listen** | Reflective support with a mood check-in and a local-only journal. |
+| **Menu · Breathe** | Box breathing, a long-exhale pattern, and a grounding sequence that asks nothing of your breath. |
+| **Menu · Scan a page** | Photograph printed text and work with it. |
+| **Menu · Momentum** | Points, streak and milestones. |
+| **Menu · Settings** | Typeface, size, spacing, letter spacing, page colour, tint, language, voice, engine, data. |
+| **Menu** | Also the reading aids and the focus timer, because those change hour to hour rather than once. |
+
+Opening a tool gives it the whole screen, and each of the eight lays its answer
+out in the shape of the thing it is — an ignition card and a ladder for Start, a
+quiz dealt one card at a time for Learn, a real ledger for Meet, the
+conversation drawn as a conversation for Practice, a filling rail for Guide.
 
 ### Accessibility
 
@@ -94,7 +113,15 @@ catches import mistakes that typechecking alone will not.
 - **Speak-on-tap** for mind map branches, on by default.
 - **Six page colours** including two dark grounds and a high-contrast yellow.
 - **Seven colour tints** at four strengths, for visual stress.
-- **Five typefaces**, three text sizes, three line-spacing densities.
+- **Three typefaces** — a serif, a sans, and whatever your phone is set to.
+  Earlier builds listed Atkinson Hyperlegible, Lexend and OpenDyslexic; none was
+  bundled, so all three silently rendered as the serif. **Letter spacing** is
+  offered in their place, which has better evidence behind it than any
+  particular typeface and works with whatever font is installed.
+- **Three text sizes**, three line-spacing densities, three letter-spacing steps.
+- **Picture mode** for maps: strips the notes off the branches entirely and
+  moves them to the voice, which is what the clinical review asked for.
+- **Three connector styles** for maps — curves are not easier for everyone.
 - **Reading ruler**, **reduced motion**, and optional bolded word starts.
 - Every control has a screen-reader label; touch targets are at least 44pt.
 
@@ -102,8 +129,8 @@ catches import mistakes that typechecking alone will not.
 
 - **Focus sessions** run on a wall-clock deadline, so they keep counting while
   you are in another app.
-- **The parking lot** (the pin button) is a one-tap place to put an intrusive
-  thought. Notes never leave the phone.
+- **The parking lot** — in the menu and in quick actions — is a one-tap place to
+  put an intrusive thought. Notes never leave the phone.
 - **Momentum** pays out immediately for real effort, and can be silenced
   without stopping the count.
 
@@ -118,10 +145,10 @@ src/
   services/     api, identity, tts, stt, storage, progress, localStore, export
   components/   design system + feature components
   screens/      one file per screen
-  navigation/   tabs, stack, and the overlays that sit above them
+  navigation/   tabs, the side menu, and a ref for navigating from outside the tree
 ```
 
-Three things are worth knowing before changing anything:
+Four things are worth knowing before changing anything:
 
 **Styles are theme factories.** React Native evaluates `StyleSheet.create` once
 at module load, so a palette read there is frozen for the life of the process.
@@ -133,6 +160,12 @@ from `useThemeColors()`.
 language, voice, pace, rewards switch and engine address into the service
 modules whenever they change. Those modules never read storage themselves —
 that is what keeps the API, the voice and the model in the same language.
+
+**The shell is not navigation.** The side menu, quick actions and the parking
+lot are panels over the app rather than routes. Modelling a drawer as navigation
+state means opening it pushes a route, the back gesture lands you somewhere
+else, and the screen underneath is lost — so `ShellContext` owns which one is
+open, and at most one ever is.
 
 **Nothing is ever invented.** When the engine cannot be reached, screens say so
 and keep what the user typed. When the engine answers from its own offline

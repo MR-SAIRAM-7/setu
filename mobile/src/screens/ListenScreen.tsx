@@ -45,12 +45,10 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Linking,
-  ScrollView,
   StyleSheet,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   ChevronDown,
   ChevronUp,
@@ -73,7 +71,8 @@ import { addJournalEntry, clearJournal, getJournal } from '../services/localStor
 import { buildOfflineCrisisResponse, detectCrisisOffline } from '../services/crisisGuard.generated';
 import { useAccessibility } from '../context/AccessibilityContext';
 import { CrisisHelpline, JournalEntry, ListenResult } from '../types';
-import { Text, Heading, Kicker } from '../components/Typography';
+import { Text, Kicker } from '../components/Typography';
+import { Screen } from '../components/Screen';
 import { Input } from '../components/Input';
 import { Button } from '../components/Button';
 import { VoiceInputButton } from '../components/VoiceInputButton';
@@ -87,7 +86,7 @@ const MOODS = [
   { value: 5, emoji: '😌', label: 'Good' },
 ];
 
-export const ListenScreen: React.FC = () => {
+export const ListenScreen: React.FC<{ navigation?: any }> = ({ navigation }) => {
   const COLORS = useThemeColors();
   const styles = useThemedStyles(makeStyles);
   const { language } = useAccessibility();
@@ -203,14 +202,17 @@ export const ListenScreen: React.FC = () => {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+    <Screen
+      title="Listen"
+      subtitle="A quiet room"
+      leading="back"
+      onBack={() => navigation?.goBack?.()}
+      avoidKeyboard
+    >
         <View style={styles.header}>
-          <Kicker color={COLORS.magenta}>A quiet room</Kicker>
-          <Heading variant="titleLg">Say it here first</Heading>
-          <Text variant="bodySm" color={COLORS.textMuted} style={{ marginTop: 6 }}>
+          <Text variant="bodySm" color={COLORS.textMuted}>
             Somewhere to put the frustration before it follows you into the next task. Nothing you
-            write leaves this phone, and no one else can read it.
+            write leaves this phone, no one else can read it, and none of it is scored.
           </Text>
         </View>
 
@@ -452,8 +454,7 @@ export const ListenScreen: React.FC = () => {
           SETU is not a therapist and not a crisis service. If things are heavy, please talk to a
           person you trust or a helpline.
         </Text>
-      </ScrollView>
-    </SafeAreaView>
+    </Screen>
   );
 };
 
@@ -557,15 +558,6 @@ const CrisisPanel: React.FC<{ response: ListenResult }> = ({ response }) => {
 
 const makeStyles = (t: Palette) =>
   StyleSheet.create({
-    safeArea: {
-      flex: 1,
-      backgroundColor: t.bg,
-    },
-    body: {
-      padding: SPACING.lg,
-      paddingBottom: SPACING.huge * 2,
-      gap: SPACING.xl,
-    },
     header: {
       gap: 2,
     },

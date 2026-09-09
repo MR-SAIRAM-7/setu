@@ -172,10 +172,10 @@
     chunking: ['shared/setu-icons.js', 'content/task-chunker.js'],
     visual: ['shared/setu-icons.js', 'content/visual-breakdown.js'],
     sanctuary: ['content/sanctuary-bridge.js'],
-    // `setu-profile.js` joins this list when the saved-details branch merges;
-    // the agent is the only thing that reads the profile, so it belongs here
-    // rather than in the eager set.
-    commander: ['shared/setu-icons.js', 'content/agent-copilot.js']
+    // The agent is the only thing that reads the profile, so it belongs here
+    // rather than in the eager set. `setu-profile.js` must precede
+    // agent-copilot.js, which reads `window.SETU_PROFILE` as it initialises.
+    commander: ['shared/setu-icons.js', 'shared/setu-profile.js', 'content/agent-copilot.js']
   };
 
   scope.SETU_DEFAULTS = DEFAULTS;

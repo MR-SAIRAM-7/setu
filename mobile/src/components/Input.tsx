@@ -13,7 +13,7 @@ import {
 import { COLORS, RADIUS, SPACING } from '../constants/theme';
 import { Palette } from '../constants/themes';
 import { useThemeColors, useThemedStyles } from '../context/ThemeContext';
-import { Text } from './Typography';
+import { Text, fontFamilyFor } from './Typography';
 import { useAccessibility } from '../context/AccessibilityContext';
 
 export interface InputProps extends TextInputProps {
@@ -42,11 +42,6 @@ export const Input: React.FC<InputProps> = ({
   const [isFocused, setIsFocused] = useState(false);
   const { font } = useAccessibility();
 
-  const getFontFamily = () => {
-    if (font === 'hyper') return 'sans-serif';
-    if (font === 'system') return undefined;
-    return 'serif';
-  };
 
   return (
     <View style={[styles.wrapper, containerStyle]}>
@@ -69,7 +64,7 @@ export const Input: React.FC<InputProps> = ({
           placeholderTextColor={COLORS.textSubtle}
           style={[
             styles.input,
-            { fontFamily: getFontFamily() },
+            { fontFamily: fontFamilyFor(font) },
             multiline ? styles.multiline : {},
             style,
           ]}

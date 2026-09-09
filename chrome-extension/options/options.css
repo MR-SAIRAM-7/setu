@@ -768,3 +768,322 @@ kbd {
   opacity: 0.6;
   pointer-events: none;
 }
+
+/* ==========================================================================
+   YOUR DETAILS — the profile the Copilot fills forms from
+   ==========================================================================
+   Seventy-odd inputs is a lot of page for an audience that finds long forms
+   hard, which would be an unkind way to ship a feature whose whole point is
+   making long forms easier. So it is collapsed into nine named groups, each
+   carrying its own filled-count, and a search box that filters the lot — the
+   reader opens the one part they came for and never sees the other eight.
+   ========================================================================== */
+
+.notice {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 13px 16px;
+  margin-bottom: 20px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--dim);
+  border-radius: var(--radius-md);
+  background: var(--bg-soft);
+}
+
+.notice[data-show="false"] {
+  display: none;
+}
+
+.notice[data-tone="warn"] {
+  border-left-color: var(--warn);
+}
+
+.notice > span[data-icon] {
+  color: var(--warn);
+  flex-shrink: 0;
+  line-height: 0;
+  margin-top: 2px;
+}
+
+.notice div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.notice strong {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.notice span {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--dim);
+}
+
+.profile-meter {
+  margin-bottom: 20px;
+}
+
+.profile-meter-head {
+  margin-bottom: 2px;
+}
+
+.meter-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.profile-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.pgroup {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.pgroup[hidden] {
+  display: none;
+}
+
+.pgroup[data-sensitive="true"] {
+  border-left: 3px solid var(--accent-2);
+}
+
+.pgroup > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  cursor: pointer;
+  font-size: 14.5px;
+  font-weight: 700;
+  font-family: var(--font-heading);
+  color: var(--text);
+  list-style: none;
+  user-select: none;
+}
+
+.pgroup > summary::-webkit-details-marker {
+  display: none;
+}
+
+.pgroup > summary:hover {
+  background: var(--bg-soft);
+}
+
+.pgroup > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.pgroup-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pgroup-body {
+  padding: 0 16px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.pgroup-hint {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--dim);
+  margin: 12px 0 14px;
+}
+
+.pgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px 18px;
+}
+
+.pfield {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.pfield[hidden] {
+  display: none;
+}
+
+.pfield.wide {
+  grid-column: 1 / -1;
+}
+
+.pfield > span {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pfield small {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--dim);
+}
+
+.pfield input[type="text"],
+.pfield input[type="email"],
+.pfield input[type="tel"],
+.pfield input[type="url"],
+.pfield input[type="date"],
+.pfield select,
+.pfield textarea {
+  /* The base `input[type=text] { flex: 1 }` exists for the engine-URL row,
+     where the input shares a line with a button. Inherited here it made every
+     input a growing item in a column flex box, so a field whose neighbour in
+     the grid had a hint line underneath grew to twice the height of the one
+     beside it. Reset, not overridden by width alone. */
+  flex: 0 0 auto;
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 13.5px;
+  font-family: var(--font-body);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pfield textarea {
+  min-height: 68px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.pfield input:focus,
+.pfield select:focus,
+.pfield textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-100);
+}
+
+.pfield.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 9px;
+  grid-column: 1 / -1;
+}
+
+.pfield.check input {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
+/* What SETU works out for itself. Shown because a reader checking their
+   details before a submission wants to see the exact string that will land in
+   the box, not the three fields it was assembled from. */
+.pderived {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+/* Groups with nothing derived — the IDs, the emergency contact — were still
+   drawing the dashed rule and its padding above nothing at all. */
+.pderived:empty {
+  display: none;
+}
+
+.pderived-label {
+  width: 100%;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+  margin-bottom: 1px;
+}
+
+.pchip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-soft);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.pchip b {
+  font-weight: 600;
+  color: var(--dim);
+  /* Without this the label wraps to three lines to make room for a long
+     address and the pill turns into a lopsided box. The value is the part
+     allowed to be cut short, not the name of the thing. */
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.pchip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-empty {
+  padding: 16px;
+  font-size: 13px;
+  color: var(--dim);
+  text-align: center;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+}
+
+.profile-empty[hidden] {
+  display: none;
+}
+
+input[type="search"] {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-family: var(--font-body);
+}
+
+input[type="search"]:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-100);
+}
