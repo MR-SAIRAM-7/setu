@@ -484,6 +484,16 @@ export interface ListenResult {
   helplines?: CrisisHelpline[];
   immediateStep?: string;
   stayingHere?: string;
+
+  /**
+   * Set when the reply came from the on-device guard rather than the engine.
+   *
+   * The text and the helplines are identical either way — both are the same
+   * fixed reviewed script. This flag exists because the two paths differ in one
+   * respect the user is entitled to know about: an offline reply means the
+   * entry never left the phone, and the panel says so rather than guessing.
+   */
+  offline?: boolean;
 }
 
 export interface CrisisHelpline {
@@ -579,4 +589,104 @@ export interface VoiceCatalogue {
   maxCharacters: number;
   voices: SarvamVoice[];
   languages: { code: string; name: string; native: string }[];
+}
+
+/* -------------------------------------------------------------------------- */
+/* Reading Check                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The screener's vocabulary is deliberately narrow.
+ *
+ * Three bands, no percentage, no score out of anything, and the word
+ * "dyslexia" appears nowhere in a result. That is not squeamishness: a tool
+ * that outputs a diagnosis becomes regulated Medical Device Software under
+ * CDSCO's function-based guidance, and this is an educational screener. The
+ * claim it makes is "this is worth someone looking at", which is both defensible
+ * and the thing a teacher actually needs.
+ */
+export type ReadingBand = 'no-concerns' | 'worth-watching' | 'worth-assessment';
+
+export interface ReadingStimulus {
+  language: string;
+  languageName: string;
+  script: string;
+  dir: 'ltr' | 'rtl';
+  grade: number;
+  task: string;
+  stimulusId: string;
+  title?: string;
+  text?: string;
+  wordCount?: number;
+  questions?: string[];
+  instruction: string;
+  disclaimer: string;
+}
+
+export interface ReadingMissedWord {
+  expected: string;
+  read: string;
+  type: string;
+}
+
+export interface ReadingMetrics {
+  wcpm: number;
+  accuracy: number;
+  wordsCorrect: number;
+  wordsAttempted: number;
+  wordsInPassage: number;
+  notReached: number;
+  errors: number;
+  errorBreakdown?: { substitutions: number; omissions: number; insertions: number };
+  durationMs: number;
+  comprehension?: { correct: number; total: number; proportion: number } | null;
+  band: ReadingBand;
+  missedWords?: ReadingMissedWord[];
+  provisionalNorms?: boolean;
+}
+
+export interface ReadingBandCopy {
+  label: string;
+  summary: string;
+  nextStep: string;
+}
+
+export interface ReadingCheckResult {
+  id: string;
+  type: string;
+  language: string;
+  script: string;
+  grade: number | null;
+  learnerLabel: string;
+  stimulusId: string;
+  metrics: ReadingMetrics;
+  wcpm: number | null;
+  accuracy: number | null;
+  band: ReadingBand | null;
+  bandCopy: ReadingBandCopy | null;
+  provisionalNorms: boolean;
+  disclaimer: string;
+}
+
+export interface ReadingSeriesPoint {
+  at: string;
+  wcpm: number;
+  accuracy: number;
+  band: ReadingBand;
+  language: string;
+}
+
+export interface ReadingHistoryResponse {
+  history: any[];
+  series: ReadingSeriesPoint[];
+  count: number;
+  /**
+   * Whether the engine actually has a database behind it.
+   *
+   * Surfaced rather than swallowed: a run of checks that looks like a progress
+   * chart but is being dropped on every restart is worse than no chart, and the
+   * person watching a child's reading is entitled to know which one they have.
+   */
+  dbConnected: boolean;
+  disclaimer: string;
 }

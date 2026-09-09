@@ -38,6 +38,8 @@ import {
   Heart,
   TrendingUp,
   Flame,
+  BookOpenCheck,
+  ChevronRight,
 } from 'lucide-react-native';
 import { COLORS, RADIUS, SPACING, PLATE_COLORS } from '../constants/theme';
 import { Palette } from '../constants/themes';
@@ -242,7 +244,89 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
           <EngineBadge />
         </View>
 
-        {/* Quick Stats Row */}
+        {/*
+          THE ONE OBVIOUS THING TO DO.
+
+          This screen used to open with four stat tiles — maps saved, focus
+          sessions, day streak, points — and put the camera behind a secondary
+          button further down. That is backwards for both conditions this app is
+          for.
+
+          In ADHD the deficit is task initiation, not motivation: opening onto a
+          scoreboard asks the reader to choose among thirteen things before
+          doing any of them, and the rewards are supposed to be quiet by default
+          anyway. For a dyslexic reader the highest-value action is "make this
+          page speak" — read-aloud is the best-evidenced thing SETU ships,
+          because it bypasses decoding while listening comprehension is intact.
+
+          Pointing a phone at a homework page and hearing it read back is also
+          the single most-wanted action from a parent of a struggling reader,
+          and it was a sub-feature of a tab. It is now the first thing on the
+          screen, at full width, with a target nobody can miss.
+        */}
+        <TouchableOpacity
+          activeOpacity={0.85}
+          style={styles.cameraHero}
+          onPress={() => navigation.navigate('CameraOCR')}
+          accessibilityRole="button"
+          accessibilityLabel="Point your camera at a page to have it read aloud"
+          accessibilityHint="Opens the camera. Take a photo of any printed page and SETU reads it to you."
+        >
+          <View style={styles.cameraHeroIcon}>
+            <Camera size={30} color={COLORS.textInverse} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text variant="titleSm" weight="bold" color={COLORS.textInverse}>
+              Read this page to me
+            </Text>
+            <Text variant="bodySm" color={COLORS.textInverse} style={{ opacity: 0.9 }}>
+              Point your camera at any page — a book, a form, a notice
+            </Text>
+          </View>
+        </TouchableOpacity>
+
+        {/*
+          The reading check, directly under the camera.
+
+          Second rather than first: the camera is the thing somebody needs
+          today, and this is the thing worth doing once every few weeks. It sits
+          above the usage stats because it is the only number in this app that
+          is about reading rather than about app use, and burying a screener
+          three taps deep is how a screener never gets run.
+
+          The label asks a question rather than offering a test. "Take a reading
+          test" is a sentence that makes a struggling reader close the app.
+        */}
+        <TouchableOpacity
+          activeOpacity={0.85}
+          style={styles.readingCheckRow}
+          onPress={() => navigation.navigate('ReadingCheck')}
+          accessibilityRole="button"
+          accessibilityLabel="How is the reading going? Start a reading check."
+          accessibilityHint="Read one short passage out loud, about a minute, and see whether it is worth anyone taking a closer look."
+        >
+          <View style={styles.readingCheckIcon}>
+            <BookOpenCheck size={20} color={COLORS.cyanDark} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text variant="bodySm" weight="bold">
+              How is the reading going?
+            </Text>
+            <Text variant="caption" color={COLORS.textMuted}>
+              One passage out loud, about a minute
+            </Text>
+          </View>
+          <ChevronRight size={18} color={COLORS.textMuted} />
+        </TouchableOpacity>
+
+        {/*
+          Progress, kept deliberately quiet and below the primary action.
+
+          These measure app usage, not reading. A streak goes up whether or not
+          SETU is helping anyone, so it must never be the first thing a reader
+          sees or the thing the screen is organised around. Counting continues
+          either way; this is a glance, not a scoreboard.
+        */}
         <View style={styles.statsRow}>
           <View style={styles.statBlock} accessible={true} accessibilityRole="text" accessibilityLabel={`${recentMaps.length} Maps saved`}>
             <Text variant="titleSm" weight="bold" color={COLORS.text}>{recentMaps.length}</Text>
@@ -583,6 +667,54 @@ const makeStyles = (t: Palette) =>
   ribbonChipActive: {
     backgroundColor: t.cyanLight,
     borderColor: t.cyanBorder,
+  },
+  /*
+   * The primary action, sized to be unmissable.
+   *
+   * 96pt tall against a 44pt platform minimum. Touch-target guidance is a floor
+   * for people who can aim; this is the first thing a reader with attention
+   * difficulties has to land on, and making it the largest object on the screen
+   * is the cheapest way to make the choice for them.
+   */
+  cameraHero: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
+    minHeight: 96,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
+    borderRadius: RADIUS.lg,
+    backgroundColor: t.cyanDark,
+    marginBottom: SPACING.lg,
+  },
+  readingCheckRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    minHeight: 60,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: RADIUS.md,
+    backgroundColor: t.surface,
+    borderWidth: 1,
+    borderColor: t.cyanBorder,
+    marginBottom: SPACING.lg,
+  },
+  readingCheckIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: RADIUS.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: t.cyanLight,
+  },
+  cameraHeroIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.18)',
   },
   heroResearchCard: {
     padding: SPACING.lg,

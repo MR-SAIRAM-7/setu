@@ -67,13 +67,70 @@ build it.
 
 ---
 
+### Safety, honesty and measurement (2026-09-06)
+
+- [x] **Offline crisis guard.** Risk detection now runs on the device before the
+      request, not only server-side. Previously, someone typing "I want to die"
+      with no signal received "Cannot reach the SETU engine." — the guarantee
+      that detection precedes any model call evaporated exactly when the network
+      did. `src/services/crisisGuard.generated.ts` is generated from
+      `backend/services/crisisDetector.js` (`npm run generate:crisis`), so the
+      172 patterns across 23 languages cannot drift; the suite fails if the
+      checked-in copy is stale. Running before the request also means helplines
+      appear immediately rather than after a two-minute AI timeout, and the entry
+      is never transmitted — so the panel's promise that it stayed on the phone
+      is literally true. The classifier second pass is deliberately absent: it is
+      a model call, and this path exists for when model calls are impossible.
+- [x] **Reading Check.** The akshara screener now has a mobile surface — grade
+      and optional learner label, a passage from the engine, a timed one-minute
+      recording, Sarvam transcription, server-side scoring, the band with its
+      copy and the disclaimer verbatim, missed words, and a progress chart. The
+      passage is deliberately rendered outside the themed `Text` component: the
+      probe measures unaided reading, and scoring someone on widened text against
+      norms collected on ordinary text produces a flattering number that means
+      nothing. The chart carries a spoken summary and a readable table, because
+      an SVG line is invisible to a screen reader.
+- [x] **The typefaces are real.** Atkinson Hyperlegible, Lexend and Source Serif 4
+      are bundled (OFL, ~640 KB). `hyper` used to resolve to the platform sans and
+      `lexend` fell through to the *serif* default — so picking the rounded sans
+      built for reading fluency gave you newsprint. Each weight is registered as
+      its own family, because Android does not synthesise bold from a single
+      custom face and headings would otherwise flatten silently.
+- [x] **"Delete all data" no longer overclaims.** It cleared AsyncStorage only,
+      while maps, summaries, settings and progress are mirrored to the engine —
+      and it discarded the anonymous ID those copies are filed under, so pressing
+      it left the data on the server *and* made it unreachable. The ID is now
+      preserved, and the dialog says what stays behind.
+- [x] Settings and onboarding say where data actually goes. The old line — "a
+      local anonymous token shared transparently across local engine requests" —
+      read as though nothing left the phone.
+- [x] Home's camera hero used the statically imported palette inside a themed
+      style factory, so it stayed cyan on the high-contrast ground. The suite now
+      catches that class of bug across every screen and component.
+- [x] Removed `services/networkMonitor.ts` — dead code, and it hard-coded the
+      emulator bridge the config layer deliberately migrates away from.
+
+---
+
 ## Verified
 
-- `npx tsc --noEmit` clean.
-- `npx expo export --platform android` bundles all 3,277 modules.
-- Against a live backend: `/api/health`, `/api/speech/voices`, `/api/speech`
-  (base64 mp3), `/api/numbers`, `/api/listen` (both the normal and the crisis
-  path), `/api/simplify`.
+```bash
+npx tsc --noEmit                     # clean
+node scripts/mobile-test.js          # 56 assertions
+npx expo-doctor                      # 21/21
+npx expo export --platform android   # 3,300 modules
+npx expo export --platform ios       # clean
+```
+
+The crisis guard is verified behaviourally, not just structurally: it detects
+all 176 risk phrases in the backend's own fixture corpus with no network, raises
+no false alarm on 29 ordinary ones, and agrees with the engine on all 205.
+
+Reading Check verified end to end against a running engine through mobile's own
+request shapes — stimuli, submit and history, in English and Devanagari. A clean
+full reading scored 59 wcpm / 100% → *worth watching*; a reading that stopped a
+third of the way in scored 18 wcpm / 95% → *worth a professional assessment*,
+with the unread tail correctly reported separately rather than counted as errors.
 
 ---
 
@@ -84,12 +141,23 @@ build it.
       hardware in this pass. Microphone recording, audio playback and the
       camera all cross the native boundary and want a real device before
       anyone relies on them.
+- [ ] **The hosted engine is suspended.** `https://setu-37hl.onrender.com`
+      returns 503 "This service has been suspended by its owner" — not a cold
+      start. It is the compiled-in default in `constants/config.ts` and the
+      `EXPO_PUBLIC_API_URL` on both the preview and production EAS profiles, and
+      a release build blocks cleartext HTTP, so it cannot fall back to a laptop.
+      **A build shipped today reaches nothing.** Resume the Render service or
+      point those three places at a live HTTPS engine before building.
 - [ ] **`eas init`** to attach a project id, needed before the first cloud build.
-- [ ] Bundled Atkinson Hyperlegible and Lexend font files. The typeface setting
-      currently maps them onto the platform serif/sans stacks, so the choice is
-      real but the faces are not the licensed originals.
+      There is no `extra.eas.projectId` in the config; this needs an Expo account
+      and cannot be done for you.
 - [ ] Offline queue for writes made while the engine is unreachable; today they
       are kept locally and mirrored only on the next successful call.
 - [ ] Push notifications for focus session completion when the app is closed.
-- [ ] Localised interface chrome. The eleven languages cover what the model says
-      and what the voice reads; the buttons and labels are still English.
+- [ ] Localised interface chrome. The twenty-three languages cover what the model
+      says and what the voice reads; the buttons and labels are still English.
+- [ ] A crisis script reviewed in any language other than English. The structure
+      is there and gated on `reviewed: true` per language — detection is already
+      multilingual, only the wording is not.
+- [ ] The RAN, nonword and phoneme-deletion tasks. The engine serves all four;
+      mobile administers oral reading only.

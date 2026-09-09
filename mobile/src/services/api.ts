@@ -478,6 +478,67 @@ export const api = {
   speechVoices: () => get<VoiceCatalogue>('/api/speech/voices', { timeoutMs: TIMEOUTS.health }),
 
   /* Export */
+  /* -- Reading Check ------------------------------------------------------ */
+
+  /*
+   * The outcome measure, and the akshara-aware screener built on top of it.
+   *
+   * Scoring is deliberately server-side: the band boundaries, the
+   * provisional-norm caveat and the regulatory wording live in one place, so a
+   * correction reaches every surface at once instead of waiting for app-store
+   * review. This client sends a transcript and a duration and renders what
+   * comes back — it never decides a band itself.
+   */
+  readingStimuli: (params: {
+    language?: string;
+    grade?: number;
+    task?: 'oral-reading' | 'ran' | 'nonword' | 'deletion';
+    seed?: number;
+  } = {}) => {
+    const q = new URLSearchParams();
+    if (params.language) q.set('language', params.language);
+    if (params.grade != null) q.set('grade', String(params.grade));
+    if (params.task) q.set('task', params.task);
+    if (params.seed != null) q.set('seed', String(params.seed));
+    return get<any>(`/api/reading-check/stimuli?${q.toString()}`);
+  },
+
+  submitReadingCheck: (payload: {
+    task?: string;
+    type?: string;
+    language?: string;
+    grade?: number | null;
+    learnerLabel?: string;
+    stimulusId?: string;
+    passage?: string;
+    items?: string[];
+    transcript: string;
+    durationMs: number;
+    comprehensionCorrect?: number;
+    comprehensionTotal?: number;
+    keepTranscript?: boolean;
+  }) => post<any>('/api/reading-check', payload, { timeoutMs: TIMEOUTS.write }),
+
+  /** History, oldest first — the shape a progress chart wants. */
+  readingHistory: (type?: string) =>
+    get<any>(`/api/reading-check${type ? `?type=${encodeURIComponent(type)}` : ''}`),
+
+  /* -- Agent saved-details profile ---------------------------------------- */
+
+  /*
+   * The details the form-filling agent uses, held by the engine so they survive
+   * a reinstall and reach a second device rather than living in one app's
+   * storage.
+   *
+   * Government ID and bank fields are refused by the server outright, so a
+   * response never carries an Aadhaar or an account number. Those stay on the
+   * device and are entered when a form genuinely needs them.
+   */
+  getProfile: () => get<{ profile: Record<string, unknown> | null; neverStored?: string[] }>('/api/profile'),
+
+  saveProfile: (values: Record<string, unknown>) =>
+    post<any>('/api/profile', { values }, { timeoutMs: TIMEOUTS.write }),
+
   exportMarkdown: (mode: string, data: any) =>
     post<any>('/api/export', { mode, data }, { timeoutMs: TIMEOUTS.write }),
 };

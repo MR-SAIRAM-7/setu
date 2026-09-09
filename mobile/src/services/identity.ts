@@ -13,7 +13,13 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const USER_ID_KEY = 'setu.mobile.user_id.v1';
+/**
+ * Exported so a local wipe can preserve it deliberately.
+ *
+ * See `clearAllLocalData` — dropping this key does not delete the server copy,
+ * it strands it.
+ */
+export const USER_ID_KEY = 'setu.mobile.user_id.v1';
 
 let cachedUserId: string | null = null;
 

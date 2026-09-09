@@ -43,6 +43,7 @@ import { SettingsScreen } from '../screens/SettingsScreen';
 import { CameraOcrScreen } from '../screens/CameraOcrScreen';
 import { ListenScreen } from '../screens/ListenScreen';
 import { MomentumScreen } from '../screens/MomentumScreen';
+import { ReadingCheckScreen } from '../screens/ReadingCheckScreen';
 
 import { BreakDialogModal } from '../components/BreakDialogModal';
 import { ReadingRuler } from '../components/ReadingRuler';
@@ -234,6 +235,19 @@ export const RootNavigator: React.FC = () => {
             headerTintColor: COLORS.text,
             headerTitleStyle: { fontWeight: 'bold' },
           }}
+        />
+
+        {/*
+          Reading Check sits on the stack rather than in the tab bar.
+          It is the one thing here somebody does occasionally and deliberately —
+          a few minutes, every few weeks — and a seventh permanent tab would cost
+          every other screen room on a phone to advertise it. It is reachable
+          from Home.
+        */}
+        <Stack.Screen
+          name="ReadingCheck"
+          component={ReadingCheckScreen}
+          options={{ headerShown: false }}
         />
 
         <Stack.Screen

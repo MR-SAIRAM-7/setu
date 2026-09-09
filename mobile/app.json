@@ -8,12 +8,9 @@
     "scheme": "setu",
     "userInterfaceStyle": "light",
     "primaryColor": "#0088b0",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#f3f2f2"
-    },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.setu.sanctuary",
@@ -27,7 +24,6 @@
     "android": {
       "package": "com.setu.sanctuary",
       "versionCode": 1,
-      "edgeToEdgeEnabled": true,
       "adaptiveIcon": {
         "backgroundColor": "#f3f2f2",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -63,7 +59,17 @@
           "microphonePermission": "SETU records short clips so you can speak instead of type, and turns them into text."
         }
       ],
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "backgroundColor": "#f3f2f2",
+          "resizeMode": "contain",
+          "imageWidth": 200
+        }
+      ],
+      "expo-asset"
     ],
     "web": {
       "favicon": "./assets/favicon.png"

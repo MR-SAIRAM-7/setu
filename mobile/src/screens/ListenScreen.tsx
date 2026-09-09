@@ -8,12 +8,37 @@
  *
  * Two things are deliberate and load-bearing:
  *
- *  - Entries never leave the phone. They go to a local-only store with no
- *    background mirror, unlike every other artefact in the app.
- *  - The crisis path is decided on the server before any model is called, so a
- *    risk reply is fixed, reviewed text with real helplines rather than
+ *  - The journal never leaves the phone. It goes to a local-only store with no
+ *    background mirror, unlike every other artefact in the app. The entry text
+ *    itself is sent to the engine to be reflected on — except on the crisis
+ *    path, where it is not sent at all. See below.
+ *  - A risk reply is fixed, reviewed text with real helplines rather than
  *    something sampled. This screen renders that payload verbatim and makes the
  *    numbers dialable — on a phone, that is one tap to a human.
+ *
+ * THE CRISIS PATH RUNS ON THE DEVICE FIRST
+ * ----------------------------------------
+ * The engine also detects risk, and its detection is stronger — it has a
+ * classifier second pass that catches paraphrase no pattern list can adjudicate.
+ * So why check here at all?
+ *
+ * Because on a phone the network is the component most likely to be missing,
+ * and the previous behaviour when it was missing was to show "Cannot reach the
+ * SETU engine." to someone who had just typed that they wanted to die. A
+ * guarantee that evaporates on a train with no bars is not a guarantee.
+ *
+ * Running the on-device patterns before the request, rather than only in the
+ * catch, buys three things at once:
+ *
+ *   - it works with no signal, which is the case that motivated it;
+ *   - helplines appear immediately instead of after an AI-length timeout, and
+ *     two minutes is a long time to hold that sentence alone;
+ *   - the entry is never transmitted, so the panel's promise that it stayed on
+ *     the phone is literally true rather than approximately true.
+ *
+ * When the patterns do not fire, the request goes to the engine exactly as
+ * before and the server's three layers still decide. The device guard is a
+ * floor, never a ceiling.
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -45,6 +70,8 @@ import { api } from '../services/api';
 import { tts } from '../services/tts';
 import { award } from '../services/progress';
 import { addJournalEntry, clearJournal, getJournal } from '../services/localStore';
+import { buildOfflineCrisisResponse, detectCrisisOffline } from '../services/crisisGuard.generated';
+import { useAccessibility } from '../context/AccessibilityContext';
 import { CrisisHelpline, JournalEntry, ListenResult } from '../types';
 import { Text, Heading, Kicker } from '../components/Typography';
 import { Input } from '../components/Input';
@@ -63,6 +90,7 @@ const MOODS = [
 export const ListenScreen: React.FC = () => {
   const COLORS = useThemeColors();
   const styles = useThemedStyles(makeStyles);
+  const { language } = useAccessibility();
 
   const [entry, setEntry] = useState('');
   const [mood, setMood] = useState<number | null>(null);
@@ -87,34 +115,51 @@ export const ListenScreen: React.FC = () => {
       .join(' ');
   }, [response]);
 
+  /**
+   * Record the turn locally and clear the composer.
+   *
+   * A crisis turn is journalled without a reflection and never scored —
+   * attaching points to someone disclosing risk would be grotesque — but it is
+   * still journalled, because silently discarding what they wrote is its own
+   * kind of dismissal.
+   */
+  const commit = async (text: string, result: ListenResult) => {
+    if (!result.crisis) award('checkIn');
+    setJournal(
+      await addJournalEntry({
+        id: `j_${Date.now()}`,
+        text,
+        mood,
+        at: new Date().toISOString(),
+        reflection: result.crisis ? null : result.reflection || null,
+      })
+    );
+    setEntry('');
+  };
+
   const submit = async () => {
     const text = entry.trim();
     if (!text || loading) return;
 
     await tts.stop();
     setSpeaking(false);
-    setLoading(true);
     setError(null);
     setResponse(null);
 
+    // Device guard, before the network and before any model. See the file
+    // header for why this runs first rather than only as a fallback.
+    if (detectCrisisOffline(text)) {
+      const local = buildOfflineCrisisResponse(language);
+      setResponse(local);
+      await commit(text, local);
+      return;
+    }
+
+    setLoading(true);
     try {
       const result = await api.listen(text, mood);
       setResponse(result);
-
-      // A crisis turn is not a scored activity. Attaching points to someone
-      // disclosing risk would be grotesque.
-      if (!result.crisis) award('checkIn');
-
-      setJournal(
-        await addJournalEntry({
-          id: `j_${Date.now()}`,
-          text,
-          mood,
-          at: new Date().toISOString(),
-          reflection: result.crisis ? null : result.reflection || null,
-        })
-      );
-      setEntry('');
+      await commit(text, result);
     } catch (err: any) {
       setError(
         err?.message ||
@@ -491,9 +536,20 @@ const CrisisPanel: React.FC<{ response: ListenResult }> = ({ response }) => {
         </Text>
       ) : null}
 
+      {/*
+        Two different true sentences, rather than one convenient one.
+
+        When the device guard answered, the entry genuinely never left the
+        phone. When the engine answered, it did — it had to, for the engine to
+        read it. Saying "this stays on your phone" in both cases would be the
+        easy copy and a lie in half of them, and this is the last screen in the
+        product where it is acceptable to be loose with what happens to what
+        someone just told us.
+      */}
       <Text variant="caption" color={COLORS.textMuted} style={{ marginTop: SPACING.md }}>
-        You are welcome to stay on this screen. What you wrote is on this phone only, and it is not
-        sent anywhere unless you choose to.
+        {response.offline
+          ? 'You are welcome to stay on this screen. What you wrote never left this phone — it was answered here, without the engine.'
+          : 'You are welcome to stay on this screen. What you wrote was sent to the SETU engine to be read, and the reply above is fixed text, not something a model wrote.'}
       </Text>
     </View>
   );

@@ -19,6 +19,7 @@ import { syncInBackground } from './api';
 import { DEFAULT_LANGUAGE } from '../constants/languages';
 
 export { getUserId, resetUserId, initIdentity, peekUserId } from './identity';
+import { USER_ID_KEY as IDENTITY_KEY } from './identity';
 
 const MAX_MAPS = 40;
 
@@ -36,7 +37,18 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   font: 'serif',
   size: 'normal',
   theme: 'broadsheet',
-  spacing: 'normal',
+  /**
+   * Defaults to 'relaxed', not 'normal'.
+   *
+   * Extra letter spacing is the only typographic lever in this product with a
+   * controlled result behind it (Zorzi et al., PNAS 2012: ~20% faster reading,
+   * roughly half the errors, no training). Shipping it off by default meant
+   * almost nobody ever received the one intervention the evidence supports.
+   * 'normal' stays available for readers who prefer tight text.
+   *
+   * Matches DEFAULT_PREFS in the web client and the UserSettings schema.
+   */
+  spacing: 'relaxed',
   motion: 'movement',
   bionic: false,
   readingRuler: false,
@@ -272,12 +284,34 @@ export async function saveFocusSession(
 /* -------------------------------------------------------------------------- */
 
 /**
- * Wipe everything this install has stored, including the anonymous device id.
+ * Wipe what this install has stored.
  *
  * Offered in Settings because for this audience "delete it all" has to be one
  * button, not a support request — several of the people this is built for will
  * not risk using a tool they cannot fully erase.
+ *
+ * WHY THE IDENTITY IS KEPT BY DEFAULT
+ * -----------------------------------
+ * Maps, summaries, settings and progress are mirrored to the engine as they are
+ * written, filed under the anonymous device id. Clearing that id along with
+ * everything else does not delete the server copy — it makes it unreachable,
+ * which is the one outcome strictly worse than leaving it alone: the data
+ * survives and can no longer be found, by the user or by anyone acting for
+ * them.
+ *
+ * So the id survives a local wipe unless the caller explicitly asks otherwise.
+ * "Reset device ID" remains a separate, deliberate action, and it says what it
+ * does.
  */
-export async function clearAllLocalData(): Promise<void> {
+export async function clearAllLocalData(
+  { keepIdentity = true }: { keepIdentity?: boolean } = {}
+): Promise<void> {
+  if (!keepIdentity) {
+    await AsyncStorage.clear();
+    return;
+  }
+
+  const identity = await AsyncStorage.getItem(IDENTITY_KEY);
   await AsyncStorage.clear();
+  if (identity) await AsyncStorage.setItem(IDENTITY_KEY, identity);
 }

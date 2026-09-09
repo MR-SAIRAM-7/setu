@@ -189,22 +189,43 @@ export const SettingsScreen: React.FC<{ navigation?: any }> = ({ navigation }) =
     );
   };
 
+  /**
+   * Erase the copy held on this phone.
+   *
+   * The wording here is careful on purpose, and it used to be wrong. The button
+   * said "Delete all data" and the dialog said "permanently delete all stored
+   * mind maps, custom settings, and conversation logs" — but maps, summaries,
+   * settings and progress are mirrored to the engine as they are written, and
+   * this clears AsyncStorage only. So the old copy promised a purge and
+   * delivered a local wipe.
+   *
+   * Worse than the inaccuracy: `AsyncStorage.clear()` also discards the
+   * anonymous device id, which is the only handle the server copy is filed
+   * under. Pressing it left the data on the server AND made it unreachable, so
+   * a user who wanted it gone ended up in the one state where it can never be
+   * deleted. The id is therefore preserved across the wipe, and the dialog says
+   * plainly what stays behind.
+   */
   const handleClearAllData = async () => {
     Alert.alert(
-      'Wipe All Local Data',
-      'This will permanently delete all stored mind maps, custom settings, and conversation logs on this device.',
+      'Erase this phone’s copy',
+      'This clears the mind maps, summaries, settings, check-in journal and parking lot held on this device, and puts the app back to a fresh state.\n\n' +
+        'It does not delete the copies already sent to the SETU engine. Those stay filed under your anonymous device ID, which is kept so they remain reachable rather than orphaned.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Wipe Everything',
+          text: 'Erase local copy',
           style: 'destructive',
           onPress: async () => {
             try {
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             } catch (_) {}
-            await clearAllLocalData();
+            await clearAllLocalData({ keepIdentity: true });
             await restoreReferenceLibrary();
-            Alert.alert('Data Wiped', 'App storage reset to clean baseline.');
+            Alert.alert(
+              'Local copy erased',
+              'This device is back to a fresh state. Your anonymous ID was kept, so anything already on the engine is still yours.'
+            );
           },
         },
       ]
@@ -731,9 +752,22 @@ export const SettingsScreen: React.FC<{ navigation?: any }> = ({ navigation }) =
               {userId || 'Loading…'}
             </Text>
 
+            {/*
+              What this paragraph has to do is say where the data actually is.
+
+              It used to say the identity was "a local anonymous token shared
+              transparently across local engine requests", which reads as though
+              nothing leaves the phone. Maps, summaries, settings and progress
+              are all mirrored to the engine under this ID as they are written.
+              Someone deciding whether to type something into this app is
+              entitled to know that in one sentence, on this screen, rather than
+              inferring it.
+            */}
             <Text variant="caption" color={COLORS.textMuted} style={{ marginBottom: SPACING.md }}>
-              SETU does not require accounts or logins. Your identity is a local anonymous token shared
-              transparently across local engine requests.
+              There are no accounts and no logins — this random ID is the only thing identifying
+              you, and it is created on this phone. Your mind maps, summaries, settings and progress
+              are copied to the SETU engine under it, so they survive a reinstall. Your check-in
+              journal and parking lot are not: those stay on this device only.
             </Text>
 
             <View style={styles.dataButtonsRow}>
@@ -745,7 +779,7 @@ export const SettingsScreen: React.FC<{ navigation?: any }> = ({ navigation }) =
                 style={{ flex: 1 }}
               />
               <Button
-                title="Delete all data"
+                title="Erase local copy"
                 variant="destructive"
                 size="sm"
                 icon={<Trash2 size={14} color={COLORS.textInverse} />}
@@ -766,6 +800,23 @@ export const SettingsScreen: React.FC<{ navigation?: any }> = ({ navigation }) =
             Built for Disability Inclusion & Accessibility. Empowering ADHD, dyslexic, and
             neurodivergent minds with plain-language transformations, interactive visual mind
             maps, and focus assistance.
+          </Text>
+
+          {/*
+            Typeface attribution.
+
+            The three faces are redistributed inside the app, and the SIL Open
+            Font Licence asks that the notice travel with them. The full text is
+            at assets/fonts/NOTICE.txt; this is the acknowledgement a user can
+            actually see. The last sentence is here for the same reason it is in
+            that file — the app offers Hyperlegible because some readers find it
+            more comfortable, not because a typeface treats anything.
+          */}
+          <Text variant="caption" color={COLORS.textSubtle} style={{ marginTop: SPACING.md }}>
+            Typefaces: Atkinson Hyperlegible (Braille Institute of America), Lexend, and Source
+            Serif 4 (Adobe) — all under the SIL Open Font License 1.1. A typeface is a comfort
+            setting here, not a treatment; the accommodation with evidence behind it is the letter
+            spacing above.
           </Text>
         </View>
       </ScrollView>

@@ -34,6 +34,7 @@ import {
   MoreHorizontal,
   Wind,
   PauseCircle,
+  ShieldCheck,
   ArrowRight,
   ArrowLeft,
   Sparkles,
@@ -457,6 +458,28 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }
                 </TouchableOpacity>
               </View>
 
+              {/*
+                What happens to what you type, said once, before you type it.
+
+                This is not a consent gate and does not pretend to be one — there
+                is no account to attach a consent record to, and a checkbox that
+                does nothing would be worse than this paragraph. What it does is
+                make sure nobody reaches the first screen believing the app is
+                offline when it is not. It names the three things that matter:
+                there is a server, there is no account, and the check-in journal
+                is the one thing that never leaves the phone.
+              */}
+              <View style={styles.privacyNote}>
+                <ShieldCheck size={16} color={COLORS.textMuted} />
+                <Text variant="caption" color={COLORS.textMuted} style={styles.privacyText}>
+                  Before you start: SETU sends what you give it — text, photos of pages, recordings
+                  — to its engine to be worked on, and keeps a copy of your maps, summaries and
+                  settings there under a random ID made on this phone. There is no account and no
+                  name. Your check-in journal and parking lot never leave this device. All of it is
+                  in Settings, and you can erase this phone's copy there at any time.
+                </Text>
+              </View>
+
               <View style={styles.footerActionsRow}>
                 <Button
                   title="Back"
@@ -621,6 +644,20 @@ const makeStyles = (t: Palette) =>
   },
   footerActions: {
     marginTop: SPACING.md,
+  },
+  privacyNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: SPACING.sm,
+    marginTop: SPACING.lg,
+    padding: SPACING.md,
+    borderRadius: RADIUS.md,
+    backgroundColor: t.surfaceAlt,
+    borderWidth: 1,
+    borderColor: t.dividerSubtle,
+  },
+  privacyText: {
+    flex: 1,
   },
   footerActionsRow: {
     flexDirection: 'row',

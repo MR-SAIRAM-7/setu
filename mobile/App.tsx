@@ -8,13 +8,17 @@
  * user a readable screen with a way out.
  */
 
-import React from 'react';
+import React, { useCallback, useEffect } from 'react';
+import { Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
+import { useFonts } from 'expo-font';
+import * as SplashScreen from 'expo-splash-screen';
 
-import { AccessibilityProvider } from './src/context/AccessibilityContext';
+import { familyFor, FONT_ASSETS } from './src/constants/fonts';
+import { AccessibilityProvider, useAccessibility } from './src/context/AccessibilityContext';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { FocusProvider } from './src/context/FocusContext';
 import { IdentityProvider } from './src/context/IdentityContext';
@@ -30,6 +34,21 @@ import { ErrorBoundary } from './src/components/ErrorBoundary';
  */
 function Shell() {
   const { colors, isDark } = useTheme();
+  const { font } = useAccessibility();
+
+  /*
+   * Navigation's own chrome — header titles, tab labels — follows the reader's
+   * typeface too. It used to be pinned to 'serif' regardless, so someone who
+   * chose Hyperlegible got it everywhere except the tab bar they read on every
+   * screen.
+   *
+   * React Navigation's theme types require a family name rather than allowing
+   * undefined, so the "system" choice — where undefined is precisely what we
+   * want everywhere else — needs the platform's own name spelled out here.
+   */
+  const systemFamily = Platform.select({ ios: 'System', android: 'sans-serif', default: 'System' });
+  const regular = familyFor(font, 'regular') || systemFamily;
+  const bold = familyFor(font, 'bold') || systemFamily;
 
   return (
     <NavigationContainer
@@ -44,10 +63,10 @@ function Shell() {
           notification: colors.magenta,
         },
         fonts: {
-          regular: { fontFamily: 'serif', fontWeight: 'normal' },
-          medium: { fontFamily: 'serif', fontWeight: '500' },
-          bold: { fontFamily: 'serif', fontWeight: 'bold' },
-          heavy: { fontFamily: 'serif', fontWeight: '900' },
+          regular: { fontFamily: regular, fontWeight: 'normal' },
+          medium: { fontFamily: regular, fontWeight: '500' },
+          bold: { fontFamily: bold, fontWeight: 'bold' },
+          heavy: { fontFamily: bold, fontWeight: '900' },
         },
       }}
     >
@@ -57,7 +76,42 @@ function Shell() {
   );
 }
 
+/*
+ * Hold the splash until the typefaces are on disk.
+ *
+ * Without this the app paints one frame in the platform font and then reflows
+ * into the chosen face. That flash is ugly anywhere; for a reader with ADHD it
+ * is an unprompted movement on the first screen, which is the specific thing
+ * the reduced-motion setting elsewhere in the app exists to avoid. Holding the
+ * splash for the few hundred milliseconds the load takes is the cheaper trade.
+ *
+ * The catch is deliberate and load-bearing: `preventAutoHideAsync` rejects if
+ * the splash has already gone, and an unhandled rejection at module scope takes
+ * the app down before the error boundary is mounted to catch it.
+ */
+SplashScreen.preventAutoHideAsync().catch(() => {});
+
 export default function App() {
+  const [fontsLoaded, fontError] = useFonts(FONT_ASSETS);
+
+  /*
+   * A font that fails to load must not leave the user on a splash screen
+   * forever. Every family falls back to the platform face, so a failure here
+   * costs the chosen typeface and nothing else — proceeding is strictly better
+   * than blocking.
+   */
+  const ready = fontsLoaded || !!fontError;
+
+  const revealApp = useCallback(async () => {
+    if (ready) await SplashScreen.hideAsync().catch(() => {});
+  }, [ready]);
+
+  useEffect(() => {
+    revealApp();
+  }, [revealApp]);
+
+  if (!ready) return null;
+
   return (
     <ErrorBoundary>
       <GestureHandlerRootView style={{ flex: 1 }}>
