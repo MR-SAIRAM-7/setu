@@ -587,6 +587,33 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
         </ListGroup>
       </Section>
 
+      {/*
+        ------------------------------------------------------------- Engine
+
+        This row is the ONLY way to reach the engine sheet, and therefore the
+        only way to point the app at a different backend from inside the app.
+        Without it the sheet below still renders and still works — it is simply
+        unreachable, which is worse than missing, because the code reads as
+        though the feature is present.
+      */}
+      <Section title="The engine">
+        <ListGroup>
+          <ListRow
+            title="Connection"
+            description={isCustomApiUrl(customApiUrl) ? customApiUrl : 'The one this build ships with'}
+            value={engineStatus}
+            onPress={() => setEngineOpen(true)}
+          />
+          <ListRow
+            icon={<Info size={18} color={COLORS.textMuted} />}
+            title="About SETU"
+            description="What it does with your data, and what it is talking to"
+            onPress={() => navigation.navigate('About')}
+            divider={false}
+          />
+        </ListGroup>
+      </Section>
+
       {/* --------------------------------------------------------- Your data */}
       <Section
         title="Your data"
