@@ -46,6 +46,7 @@
     "ios:native": "expo run:ios",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/mobile-test.js",
+    "test:live": "node scripts/feature-check.js",
     "generate:crisis": "node scripts/generate-crisis-guard.js",
     "doctor": "expo-doctor",
     "verify": "npm run typecheck && npm test && npx expo-doctor",

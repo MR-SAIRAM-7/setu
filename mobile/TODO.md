@@ -116,15 +116,41 @@ build it.
 
 ```bash
 npx tsc --noEmit                     # clean
-node scripts/mobile-test.js          # 56 assertions
-npx expo-doctor                      # 21/21
-npx expo export --platform android   # 3,300 modules
-npx expo export --platform ios       # clean
+node scripts/mobile-test.js          # 56 assertions, static
+node scripts/feature-check.js        # 48 assertions, live against an engine
+npx expo-doctor                      # 20/21 — see below
+npx expo export --platform android   # 5.8 MB Hermes bundle, six faces bundled
 ```
+
+`feature-check.js` is the half `mobile-test.js` cannot do. Static checks caught
+every regression the shell merge introduced, but they never send a request, so
+a screen wired correctly to an endpoint whose response shape has moved reads as
+passing right up until a spinner hangs on a judge's phone. It sends the request
+each screen sends — same path, body, headers and `language` stamp — and asserts
+the exact fields that screen destructures. **48/48 in both `en-IN` and
+`hi-IN`**: mind map, all eight cognitive modes, Listen, Reading Check, progress,
+settings, the voice catalogue and summarise.
+
+It deliberately does not assert item counts. The engine runs on free model
+tiers that return three steps one minute and five the next, and a suite that
+fails for reasons nobody can fix is a suite everyone learns to ignore.
+
+`expo-doctor` is 20/21 on one patch mismatch — `expo` is 57.0.20, the SDK wants
+57.0.21. Left alone on purpose: the app bundles, typechecks and passes
+everything on the tree as it stands, and re-resolving dependencies to gain a
+patch would invalidate exactly that evidence. `npx expo install --check` fixes
+it when there is time to re-verify afterwards.
 
 The crisis guard is verified behaviourally, not just structurally: it detects
 all 176 risk phrases in the backend's own fixture corpus with no network, raises
 no false alarm on 29 ordinary ones, and agrees with the engine on all 205.
+
+Structural sweeps that found nothing, recorded so they are not redone blindly:
+every `styles.X` reference resolves to a defined key (React Native renders an
+undefined key as no style, silently); no module-scope `StyleSheet.create`
+captures a palette value, which would freeze one theme in place; all 13
+`navigate()` targets resolve to a registered route; all 14 screens are routed;
+all nine modes dispatch and render.
 
 Reading Check verified end to end against a running engine through mobile's own
 request shapes — stimuli, submit and history, in English and Devanagari. A clean
@@ -136,6 +162,14 @@ with the unread tail correctly reported separately rather than counted as errors
 
 ## Not done
 
+- [ ] **A cold mind map took 87s, against a 120s client ceiling.** Measured
+      against a local engine with grounding on (`GEMINI_WEB_SEARCH=true`); the
+      same topic came back in 0.1s once cached. `TIMEOUTS.ai` in
+      `services/api.ts` is 120000, so a cold map on a slower day — or a
+      throttled key — lands the user on "the engine took too long to answer"
+      for the app's headline feature. `StagedLoader` at least names the stage
+      rather than spinning blankly. Before a demo, either warm the exact topic
+      being shown, or turn grounding off for the session.
 - [ ] **Run on a physical device.** Everything above is typechecked, bundled and
       verified against the real backend, but no build has been installed on
       hardware in this pass. Microphone recording, audio playback and the
