@@ -87,9 +87,11 @@
       "favicon": "./assets/favicon.png"
     },
     "extra": {
+      "buildProfile": "development",
       "eas": {
-        "projectId": "70c54892-0ed3-409f-9fbc-94d6e1f929aa"
+        "projectId": "033c4f50-4e4c-4d22-82d4-334392d752e7"
       }
-    }
+    },
+    "owner": "sairam777"
   }
 }
