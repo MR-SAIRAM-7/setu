@@ -82,4 +82,104 @@ for (const file of contentFiles) {
 }
 
 console.log(problems ? `\n${problems} undefined custom propert(ies)` : '\nevery custom property resolves');
-process.exitCode = problems ? 1 : 0;
+/* -------------------------------------------------------------------------- */
+/* Reading-theme contrast                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The reading themes recolour arbitrary websites, which means they can just as
+ * easily destroy contrast as improve it — and nothing re-verified the result.
+ *
+ * The specific failure this guards: the theme applied `color: {text}` and
+ * `background-color: transparent` to essentially every element, so on a real
+ * site a primary button, a destructive button and a paragraph all collapsed to
+ * the same colour on the same background. A "Delete account" button became
+ * visually indistinguishable from body text. An accessibility feature that
+ * removes the affordance telling you what is clickable is an accessibility
+ * regression, and it lands on the users least able to absorb it.
+ *
+ * Controls are now carved out of the override and given `btnBg` / `btnBorder`.
+ * These assertions are what stop a future palette tweak from quietly
+ * reintroducing the collapse:
+ *
+ *   text on btnBg    >= 4.5:1   WCAG 2.1 SC 1.4.3 Contrast (Minimum), AA
+ *   btnBorder on bg  >= 3:1     WCAG 2.1 SC 1.4.11 Non-text Contrast, AA
+ *   text on bg       >= 4.5:1   the body copy the theme exists to make readable
+ */
+
+function relativeLuminance(hex) {
+  const value = hex.replace('#', '');
+  const channels = [0, 2, 4]
+    .map((i) => parseInt(value.slice(i, i + 2), 16) / 255)
+    .map((c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)));
+  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+}
+
+function contrastRatio(a, b) {
+  const [lighter, darker] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+console.log('\nReading-theme contrast');
+
+const themeSource = read('content/dyslexia-theme.js');
+const themeBlock = themeSource.match(/const THEMES = \{([\s\S]*?)\n  \};/);
+
+let contrastProblems = 0;
+
+if (!themeBlock) {
+  console.log('  FAIL  could not find the THEMES table in content/dyslexia-theme.js');
+  contrastProblems += 1;
+} else {
+  const entries = [...themeBlock[1].matchAll(/^\s*(\w+):\s*\{(.+)\},?\s*$/gm)];
+
+  if (!entries.length) {
+    console.log('  FAIL  THEMES table parsed but yielded no themes');
+    contrastProblems += 1;
+  }
+
+  for (const [, name, body] of entries) {
+    // Built from a literal rather than `new RegExp(key + '...')` with escapes:
+    // a single backslash inside a JS string is not an escape the regex ever
+    // sees, so ":\s*" silently becomes ":s*" and every field comes back
+    // undefined — which reads exactly like a missing colour.
+    const field = (key) => {
+      const pattern = new RegExp(`\\b${key}:\\s*'(#[0-9a-fA-F]{3,8})'`);
+      return (body.match(pattern) || [])[1];
+    };
+
+    const bg = field('bg');
+    const text = field('text');
+    const btnBg = field('btnBg');
+    const btnBorder = field('btnBorder');
+
+    if (!bg || !text || !btnBg || !btnBorder) {
+      console.log(`  FAIL  ${name} — missing a colour (bg/text/btnBg/btnBorder must all be hex)`);
+      contrastProblems += 1;
+      continue;
+    }
+
+    const assertions = [
+      ['body text on page', contrastRatio(text, bg), 4.5],
+      ['control text on control', contrastRatio(text, btnBg), 4.5],
+      ['control border on page', contrastRatio(btnBorder, bg), 3]
+    ];
+
+    for (const [label, ratio, minimum] of assertions) {
+      if (ratio >= minimum) {
+        console.log(`  ok  ${name}: ${label} ${ratio.toFixed(2)}:1 (needs ${minimum})`);
+      } else {
+        console.log(`  FAIL  ${name}: ${label} ${ratio.toFixed(2)}:1 — below ${minimum}:1`);
+        contrastProblems += 1;
+      }
+    }
+  }
+}
+
+console.log(
+  contrastProblems
+    ? `\n${contrastProblems} contrast failure(s)`
+    : '\nevery reading theme keeps controls distinguishable and text legible'
+);
+
+process.exitCode = problems || contrastProblems ? 1 : 0;

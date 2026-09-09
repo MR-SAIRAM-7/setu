@@ -17,7 +17,10 @@
     "contextMenus",
     "alarms"
   ],
-  "host_permissions": ["http://*/*", "https://*/*"],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
   "action": {
     "default_popup": "popup/popup.html",
     "default_title": "SETU",
@@ -37,25 +40,13 @@
   },
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
       "js": [
         "shared/setu-config.js",
-        "shared/setu-icons.js",
-        "shared/gaze-detector.js",
         "shared/setu-core.js",
-        "content/bionic-reading.js",
-        "content/focus-mode.js",
-        "content/line-focus.js",
-        "content/word-highlight.js",
-        "content/text-to-speech.js",
-        "content/auto-scroll.js",
-        "content/eye-tracker.js",
-        "content/dyslexia-theme.js",
-        "content/breathe-protocol.js",
-        "content/task-chunker.js",
-        "content/visual-breakdown.js",
-        "content/sanctuary-bridge.js",
-        "content/agent-copilot.js",
         "content/main.js"
       ],
       "run_at": "document_idle",
@@ -64,25 +55,38 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["icons/*", "camera/frame.html"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "icons/*",
+        "camera/frame.html"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ],
   "commands": {
     "toggle-bionic": {
-      "suggested_key": { "default": "Alt+B" },
+      "suggested_key": {
+        "default": "Alt+B"
+      },
       "description": "Toggle Bionic Reading"
     },
     "toggle-focus": {
-      "suggested_key": { "default": "Alt+F" },
+      "suggested_key": {
+        "default": "Alt+F"
+      },
       "description": "Toggle Focus Mode"
     },
     "toggle-linefocus": {
-      "suggested_key": { "default": "Alt+L" },
+      "suggested_key": {
+        "default": "Alt+L"
+      },
       "description": "Toggle Line Focus"
     },
     "open-commander": {
-      "suggested_key": { "default": "Alt+Shift+C" },
+      "suggested_key": {
+        "default": "Alt+Shift+C"
+      },
       "description": "Open SETU Commander"
     },
     "toggle-tts": {

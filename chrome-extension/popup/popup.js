@@ -392,12 +392,12 @@ class Popup {
     set('#s-bionic', Math.round((settings.bionicIntensity ?? 0.45) * 100));
     set('#s-wpm', settings.scrollWpm ?? 220);
     set('#s-rate', Math.round((settings.ttsRate ?? 1) * 10));
-    set('#s-spacing', Math.round((settings.letterSpacing ?? 0.02) * 100));
+    set('#s-spacing', Math.round((settings.letterSpacing ?? 0.12) * 100));
 
     if ($('#v-bionic')) $('#v-bionic').textContent = `${Math.round((settings.bionicIntensity ?? 0.45) * 100)}%`;
     if ($('#v-wpm')) $('#v-wpm').textContent = `${settings.scrollWpm ?? 220} wpm`;
     if ($('#v-rate')) $('#v-rate').textContent = `${(settings.ttsRate ?? 1).toFixed(1)}×`;
-    if ($('#v-spacing')) $('#v-spacing').textContent = `${(settings.letterSpacing ?? 0.02).toFixed(2)}em`;
+    if ($('#v-spacing')) $('#v-spacing').textContent = `${(settings.letterSpacing ?? 0.12).toFixed(2)}em`;
 
     this.renderActiveCount();
   }

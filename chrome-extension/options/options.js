@@ -42,7 +42,7 @@ const DEFAULT_SETTINGS = {
   gazeInvert: false,
   fontScale: 1,
   appearance: 'light',
-  letterSpacing: 0.02,
+  letterSpacing: 0.12,
   lineHeight: 1.8,
   language: 'English'
 };
@@ -271,7 +271,7 @@ class Options {
     this.renderAppearance(s.appearance);
     this.renderGazeDirection(Boolean(s.gazeInvert));
     if ($('#bionic')) $('#bionic').value = Math.round((s.bionicIntensity ?? 0.45) * 100);
-    if ($('#spacing')) $('#spacing').value = Math.round((s.letterSpacing ?? 0.02) * 100);
+    if ($('#spacing')) $('#spacing').value = Math.round((s.letterSpacing ?? 0.12) * 100);
     if ($('#line')) $('#line').value = Math.round((s.lineHeight ?? 1.8) * 10);
     if ($('#wpm')) $('#wpm').value = s.scrollWpm ?? 220;
     if ($('#rate')) $('#rate').value = Math.round((s.ttsRate ?? 1) * 10);
@@ -292,7 +292,7 @@ class Options {
       $('#v-language').textContent = self.setuResolveLanguage(s.ttsLanguage || s.language).name;
     }
     if ($('#v-bionic')) $('#v-bionic').textContent = `${Math.round((s.bionicIntensity ?? 0.45) * 100)}%`;
-    if ($('#v-spacing')) $('#v-spacing').textContent = `${(s.letterSpacing ?? 0.02).toFixed(2)}em`;
+    if ($('#v-spacing')) $('#v-spacing').textContent = `${(s.letterSpacing ?? 0.12).toFixed(2)}em`;
     if ($('#v-line')) $('#v-line').textContent = (s.lineHeight ?? 1.8).toFixed(1);
     if ($('#v-wpm')) $('#v-wpm').textContent = `${s.scrollWpm ?? 220} wpm`;
     if ($('#v-rate')) $('#v-rate').textContent = `${(s.ttsRate ?? 1).toFixed(1)}×`;
@@ -301,7 +301,7 @@ class Options {
     // Dynamic Live Sample Preview
     const preview = $('#preview');
     if (preview) {
-      preview.style.letterSpacing = `${s.letterSpacing ?? 0.02}em`;
+      preview.style.letterSpacing = `${s.letterSpacing ?? 0.12}em`;
       preview.style.lineHeight = String(s.lineHeight ?? 1.8);
 
       const intensity = s.bionicIntensity ?? 0.45;

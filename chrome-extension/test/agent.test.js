@@ -65,8 +65,28 @@ function extract(name, extras = '') {
 
 console.log('\nGoal routing');
 
-const QUESTION_INTENT = AGENT.match(/const QUESTION_INTENT =\s*([\s\S]*?);\n/)[1];
-const ACTION_INTENT = AGENT.match(/const ACTION_INTENT =\s*([\s\S]*?);\n/)[1];
+/**
+ * Pull a top-level `const NAME = <value>;` out of the source as text.
+ *
+ * The `\r?` is load-bearing on Windows. Git is configured with
+ * `core.autocrlf=true` and the repository carried no `.gitattributes`, so a
+ * Windows checkout has CRLF line endings and a pattern anchored on a bare `;\n`
+ * matches nothing at all — `match()` returns null and this file threw before
+ * a single assertion ran. The whole extension suite was red on every Windows
+ * clone and green on CI, which is the worst way for a test to fail.
+ *
+ * `.gitattributes` now normalises these files to LF, so this is belt and
+ * braces — but a test helper that only works on one platform's line endings is
+ * a trap worth closing permanently.
+ */
+function constantSource(name) {
+  const match = AGENT.match(new RegExp(`const ${name} =\\s*([\\s\\S]*?);\\r?\\n`));
+  if (!match) throw new Error(`agent-copilot.js no longer defines a top-level "${name}"`);
+  return match[1];
+}
+
+const QUESTION_INTENT = constantSource('QUESTION_INTENT');
+const ACTION_INTENT = constantSource('ACTION_INTENT');
 const wantsAnswer = extract(
   'wantsAnswer',
   `const QUESTION_INTENT = ${QUESTION_INTENT};\nconst ACTION_INTENT = ${ACTION_INTENT};`

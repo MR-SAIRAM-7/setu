@@ -92,28 +92,95 @@
    * *explanation* is a model decision, not a voice-service one, so it must
    * never depend on the voice service answering.
    *
-   * Kept in step with `backend/config/languages.js`, which is bounded by what
-   * Sarvam Bulbul can actually speak — offering a language the voice cannot
-   * pronounce would give this audience text they cannot use.
+   * Kept in step with `backend/config/languages.js`, which is the source of
+   * truth. The table is split in two: Sarvam Bulbul voices the eleven Indian
+   * languages, ElevenLabs voices the international ones, and neither covers the
+   * other's half — Bulbul rejects a Japanese request outright rather than
+   * degrading. A language whose provider has no key still works for *text*, and
+   * read-aloud falls back to the browser's own synthesiser.
    */
   const LANGUAGES = [
-    { code: 'en-IN', name: 'English', native: 'English' },
-    { code: 'hi-IN', name: 'Hindi', native: 'हिन्दी' },
-    { code: 'bn-IN', name: 'Bengali', native: 'বাংলা' },
-    { code: 'gu-IN', name: 'Gujarati', native: 'ગુજરાતી' },
-    { code: 'kn-IN', name: 'Kannada', native: 'ಕನ್ನಡ' },
-    { code: 'ml-IN', name: 'Malayalam', native: 'മലയാളം' },
-    { code: 'mr-IN', name: 'Marathi', native: 'मराठी' },
-    { code: 'od-IN', name: 'Odia', native: 'ଓଡ଼ିଆ' },
-    { code: 'pa-IN', name: 'Punjabi', native: 'ਪੰਜਾਬੀ' },
-    { code: 'ta-IN', name: 'Tamil', native: 'தமிழ்' },
-    { code: 'te-IN', name: 'Telugu', native: 'తెలుగు' }
+    // Indian languages — Sarvam Bulbul / Saaras.
+    { code: 'en-IN', bcp47: 'en-IN', name: 'English',   native: 'English',   dir: 'ltr', region: 'india' },
+    { code: 'hi-IN', bcp47: 'hi-IN', name: 'Hindi',     native: 'हिन्दी', dir: 'ltr', region: 'india' },
+    { code: 'bn-IN', bcp47: 'bn-IN', name: 'Bengali',   native: 'বাংলা', dir: 'ltr', region: 'india' },
+    { code: 'gu-IN', bcp47: 'gu-IN', name: 'Gujarati',  native: 'ગુજરાતી', dir: 'ltr', region: 'india' },
+    { code: 'kn-IN', bcp47: 'kn-IN', name: 'Kannada',   native: 'ಕನ್ನಡ', dir: 'ltr', region: 'india' },
+    { code: 'ml-IN', bcp47: 'ml-IN', name: 'Malayalam', native: 'മലയാളം', dir: 'ltr', region: 'india' },
+    { code: 'mr-IN', bcp47: 'mr-IN', name: 'Marathi',   native: 'मराठी', dir: 'ltr', region: 'india' },
+    // Sarvam spells Odia 'od-IN'; the tag browsers and screen readers accept is
+    // 'or-IN'. Both are carried — see `bcp47` usage in text-to-speech.js.
+    { code: 'od-IN', bcp47: 'or-IN', name: 'Odia',      native: 'ଓଡ଼ିଆ', dir: 'ltr', region: 'india' },
+    { code: 'pa-IN', bcp47: 'pa-IN', name: 'Punjabi',   native: 'ਪੰਜਾਬੀ', dir: 'ltr', region: 'india' },
+    { code: 'ta-IN', bcp47: 'ta-IN', name: 'Tamil',     native: 'தமிழ்', dir: 'ltr', region: 'india' },
+    { code: 'te-IN', bcp47: 'te-IN', name: 'Telugu',    native: 'తెలుగు', dir: 'ltr', region: 'india' },
+
+    // International — ElevenLabs Multilingual v2 / Scribe. Sarvam cannot voice
+    // any of these at all, so a deployment without an ElevenLabs key falls back
+    // to the browser's own synthesiser for this half of the table.
+    { code: 'es-ES', bcp47: 'es-ES', name: 'Spanish',    native: 'Español',  dir: 'ltr', region: 'international' },
+    { code: 'fr-FR', bcp47: 'fr-FR', name: 'French',     native: 'Français', dir: 'ltr', region: 'international' },
+    { code: 'de-DE', bcp47: 'de-DE', name: 'German',     native: 'Deutsch',    dir: 'ltr', region: 'international' },
+    { code: 'pt-BR', bcp47: 'pt-BR', name: 'Portuguese', native: 'Português', dir: 'ltr', region: 'international' },
+    { code: 'it-IT', bcp47: 'it-IT', name: 'Italian',    native: 'Italiano',   dir: 'ltr', region: 'international' },
+    { code: 'ar-SA', bcp47: 'ar-SA', name: 'Arabic',     native: 'العربية', dir: 'rtl', region: 'international' },
+    { code: 'zh-CN', bcp47: 'zh-CN', name: 'Chinese',    native: '中文', dir: 'ltr', region: 'international' },
+    { code: 'ja-JP', bcp47: 'ja-JP', name: 'Japanese',   native: '日本語', dir: 'ltr', region: 'international' },
+    { code: 'ko-KR', bcp47: 'ko-KR', name: 'Korean',     native: '한국어', dir: 'ltr', region: 'international' },
+    { code: 'ru-RU', bcp47: 'ru-RU', name: 'Russian',    native: 'Русский', dir: 'ltr', region: 'international' },
+    { code: 'id-ID', bcp47: 'id-ID', name: 'Indonesian', native: 'Bahasa Indonesia', dir: 'ltr', region: 'international' },
+    { code: 'tr-TR', bcp47: 'tr-TR', name: 'Turkish',    native: 'Türkçe', dir: 'ltr', region: 'international' }
   ];
 
   // Works in a service worker (self), a page (window), and a content script.
   const scope = typeof self !== 'undefined' ? self : globalThis;
+  /**
+   * Which files each feature needs, for on-demand injection.
+   *
+   * WHY THIS EXISTS
+   * ---------------
+   * All nineteen content scripts used to be declared in the manifest matching
+   * every http and https URL, so roughly 473 KB of JavaScript was fetched,
+   * parsed and executed on every navigation to every site — whether or not the
+   * user had a single feature turned on. On a mid-range Android phone on 3G,
+   * which is the stated audience, that is a measurable delay added to every
+   * page by an accessibility tool. The manifest now declares only
+   * `setu-config`, `setu-core` and `main` (~113 KB), and everything below is
+   * injected the first time it is actually needed.
+   *
+   * ORDER IS LOAD-BEARING within each array. Two dependencies bind at load
+   * time and break silently or loudly if the order is wrong:
+   *
+   *   shared/setu-icons.js   must precede any feature that draws an icon.
+   *   shared/gaze-detector.js must precede eye-tracker.js, which destructures
+   *                           `self.SETU_GAZE` at the top of its IIFE and
+   *                           throws immediately if it is absent.
+   *
+   * Files already present are skipped by the injector, so listing a shared
+   * dependency against several features costs nothing.
+   */
+  const FEATURE_MODULES = {
+    bionic: ['content/bionic-reading.js'],
+    focus: ['shared/setu-icons.js', 'content/focus-mode.js'],
+    lineFocus: ['shared/setu-icons.js', 'content/line-focus.js'],
+    highlight: ['content/word-highlight.js'],
+    scroll: ['shared/setu-icons.js', 'content/auto-scroll.js'],
+    tts: ['shared/setu-icons.js', 'content/text-to-speech.js'],
+    eye: ['shared/setu-icons.js', 'shared/gaze-detector.js', 'content/eye-tracker.js'],
+    theme: ['content/dyslexia-theme.js'],
+    breathe: ['content/breathe-protocol.js'],
+    chunking: ['shared/setu-icons.js', 'content/task-chunker.js'],
+    visual: ['shared/setu-icons.js', 'content/visual-breakdown.js'],
+    sanctuary: ['content/sanctuary-bridge.js'],
+    // `setu-profile.js` joins this list when the saved-details branch merges;
+    // the agent is the only thing that reads the profile, so it belongs here
+    // rather than in the eager set.
+    commander: ['shared/setu-icons.js', 'content/agent-copilot.js']
+  };
+
   scope.SETU_DEFAULTS = DEFAULTS;
   scope.SETU_LANGUAGES = LANGUAGES;
+  scope.SETU_FEATURE_MODULES = FEATURE_MODULES;
 
   /**
    * Normalise anything language-shaped to one entry in the table.
@@ -131,9 +198,11 @@
     const lower = raw.toLowerCase();
     return (
       LANGUAGES.find((entry) => entry.code.toLowerCase() === lower) ||
+      LANGUAGES.find((entry) => entry.bcp47.toLowerCase() === lower) ||
       LANGUAGES.find((entry) => entry.name.toLowerCase() === lower) ||
       LANGUAGES.find((entry) => entry.native.toLowerCase() === lower) ||
       LANGUAGES.find((entry) => entry.code.split('-')[0] === lower.split(/[-_]/)[0]) ||
+      LANGUAGES.find((entry) => entry.bcp47.split('-')[0] === lower.split(/[-_]/)[0]) ||
       LANGUAGES[0]
     );
   };

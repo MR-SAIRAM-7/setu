@@ -15,6 +15,14 @@ importScripts('shared/setu-config.js');
 
 const DEFAULTS = self.SETU_DEFAULTS;
 
+/**
+ * Feature -> module files, shared with the content script through setu-config.
+ *
+ * Used here only as an allow-list for `injectModules`: it is the set of paths a
+ * page-world caller may ask the worker to inject.
+ */
+const FEATURE_MODULES = self.SETU_FEATURE_MODULES || {};
+
 /** In-flight engine requests, so the agent's Cancel button can abort for real. */
 const inFlight = new Map();
 
@@ -170,7 +178,7 @@ function freshState() {
       gazeInvert: false,
       fontScale: 1,
       appearance: 'light',
-      letterSpacing: 0.02,
+      letterSpacing: 0.12,
       lineHeight: 1.8,
       language: 'English'
     }
@@ -402,6 +410,45 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'cancelRequest': {
           inFlight.get(request.requestId)?.abort();
           return sendResponse({ ok: true });
+        }
+
+        /**
+         * Inject a feature's modules into the tab that asked for them.
+         *
+         * The content script cannot call `chrome.scripting` itself — that API
+         * exists only in the worker — so on-demand loading has to round-trip
+         * through here. `main.js` decides *what* to load and this decides
+         * *whether it is allowed*.
+         *
+         * The file list is validated against the manifest's own module table
+         * rather than trusted. A content script runs in a page's world and a
+         * compromised or hostile page that reached this channel could otherwise
+         * name any path in the extension bundle; restricting it to files the
+         * extension already ships as feature modules keeps the blast radius at
+         * "load a feature the user could have loaded anyway".
+         */
+        case 'injectModules': {
+          const tabId = sender.tab?.id;
+          if (!tabId) return sendResponse({ ok: false, error: 'No tab to inject into.' });
+
+          const allowed = new Set(Object.values(FEATURE_MODULES).flat());
+          const files = (request.files || []).filter((file) => allowed.has(file));
+
+          if (!files.length) {
+            return sendResponse({ ok: false, error: 'No injectable modules named.' });
+          }
+
+          try {
+            await chrome.scripting.executeScript({
+              target: { tabId, allFrames: false },
+              files
+            });
+            return sendResponse({ ok: true, files });
+          } catch (error) {
+            // Restricted pages (the Web Store, other extensions, some PDFs)
+            // reject injection. The caller degrades rather than throwing.
+            return sendResponse({ ok: false, error: error.message });
+          }
         }
 
         case 'captureTab': {

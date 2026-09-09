@@ -15,25 +15,57 @@ order. `node build.js` verifies and zips; `node test/run.js` runs the suites.
 
 ---
 
-## Load order
+## Load order — three eager files, everything else on demand
 
-Manifest order is load order and it is load-bearing. `setu-config.js` defines
-`SETU_LANGUAGES` before `setu-core.js` re-exports it; `gaze-detector.js` defines
-`SETU_GAZE` before `eye-tracker.js` destructures it; `main.js` is last because
-it reads the finished `SETU.features` registry.
+The manifest declares **only three** content scripts. All nineteen used to be
+declared against every http/https URL, so ~473 KB was fetched, parsed and
+executed on every navigation to every site whether or not a single feature was
+switched on — a measurable delay added to every page, by an accessibility tool,
+on the low-end Android hardware this product targets. The eager set is now
+**~118 KB**, and a feature's code arrives the first time it is actually used.
 
 ```
-shared/setu-config.js     deployment constants, LANGUAGES, appearance
-shared/setu-icons.js      generated Phosphor duotone set
-shared/gaze-detector.js   head-tracking maths (no DOM, no permissions)
+shared/setu-config.js     deployment constants, LANGUAGES, FEATURE_MODULES
 shared/setu-core.js       the runtime — everything below depends on it
-content/*.js              one file per feature, each self-registering
 content/main.js           orchestrator: registry, messages, shortcuts, state
 ```
 
-The service worker loads `shared/setu-config.js` via `importScripts`. The popup
-and options page load `setu-config.js` + `setu-icons.js` as ordinary scripts —
-they do **not** get `setu-core.js`, so they use `self.setuResolveLanguage(...)`
+Everything else is listed in **`FEATURE_MODULES`** in `setu-config.js`, keyed by
+feature. `main.js` calls `ensureFeature(key)`, which asks the worker
+(`injectModules`) to `chrome.scripting.executeScript` the files, waits for the
+feature to self-register, then constructs it. In-flight loads are de-duplicated,
+so a keyboard shortcut racing a popup toggle injects once.
+
+**Array order inside `FEATURE_MODULES` is load-bearing**, for the same reasons
+manifest order used to be:
+
+- `shared/gaze-detector.js` defines `SETU_GAZE`, and `eye-tracker.js`
+  destructures it at the top of its IIFE — it throws immediately if absent.
+- `shared/setu-icons.js` must precede any feature that draws an icon.
+
+`memory.test.js` asserts both, against the table rather than the manifest.
+
+**Shared files are sent once per document, and the de-duplication is per FILE,
+not per feature.** Six features list `shared/setu-icons.js`; restoring stored
+state enables them in the same tick, so all six read `injectedFiles` before any
+had finished and all six asked for the icon set — 41 KB six times. `injectFiles`
+in `main.js` registers an in-flight promise **per file, synchronously before its
+first await**, and a caller that needs a file another caller is already fetching
+waits for that injection rather than sending its own. The wait also preserves
+ordering: without it `eye-tracker.js` could run before `gaze-detector.js` had
+defined `SETU_GAZE`. `parallel.test.js` covers this.
+
+**`setu-core.js` resolves `icon()` per call, not at load.** It used to capture
+`self.SETU_ICONS?.icon || (() => '')` once. With the icon set no longer eager,
+that would have bound the empty-string fallback permanently and blanked every
+icon in the product, silently.
+
+The service worker loads `shared/setu-config.js` via `importScripts` — it needs
+`FEATURE_MODULES` as the allow-list for `injectModules`, so a page-world caller
+cannot name arbitrary bundle paths. The popup and options page load
+`setu-config.js` + `setu-icons.js` as ordinary scripts.
+
+They do **not** get `setu-core.js`, so they use `self.setuResolveLanguage(...)`
 and `self.SETU_LANGUAGES` directly rather than the `SETU.*` namespace.
 
 ---
@@ -159,9 +191,22 @@ off" and the reconciler stripped it a frame later.
 
 ## Languages — one setting, two stored fields
 
-Ten Indian languages plus English (11 total), bounded by what Sarvam Bulbul can
-voice. Defined **once** in `shared/setu-config.js` as `SETU_LANGUAGES`, mirrored
-in `backend/config/languages.js`.
+Eleven Indian languages on Sarvam plus twelve international ones on ElevenLabs (23 total).
+Defined **once** in `shared/setu-config.js` as `SETU_LANGUAGES`, mirrored in
+`backend/config/languages.js`, which is the source of truth.
+
+The two halves are **disjoint, not redundant**. Sarvam Bulbul voices the eleven
+Indian codes and rejects anything else with a hard 400; ElevenLabs Multilingual
+v2 voices the international set. So substitution runs one way only: an Indian
+language can fall back to ElevenLabs when no Sarvam key is set, but an
+international language can never fall back to Sarvam. `pickTtsProvider` in
+`backend/services/speechService.js` encodes exactly that.
+
+Every entry carries `bcp47` alongside `code`, and they differ for Odia: Sarvam
+spells it `od-IN`, which is not a valid language tag. Anything that reaches a
+`lang=` attribute must use `bcp47` — emitting `od-IN` makes a screen reader fall
+back to the document language and read Odia with an English voice engine.
+Entries also carry `dir`, which is `rtl` for Arabic.
 
 Two fields exist for historical reasons and **must never be written
 separately**:
@@ -348,6 +393,8 @@ engine end-to-end suite that skips cleanly with no backend.
 | `core.test.js` | Store echo suppression, Feature lifecycle, Scroll arbiter, Dock, languages, layer ordering, `isOurs` |
 | `gaze.test.js` | control law, detector under dim/small/absent faces, calibration retry, camera-silence watchdog |
 | `agent.test.js` | goal routing, `setNativeValue` against a framework-controlled input |
+| `modules.test.js` | on-demand loading: every feature reachable through `FEATURE_MODULES`, no eager/lazy overlap, eager set under 150 KB, worker allow-list, per-call `icon()` |
+| `parallel.test.js` | several features at once: per-feature and per-FILE de-duplication, shared dependencies sent once, a refused injection not poisoning the rest, retry after failure |
 | `memory.test.js` | verifies MEMORY.md accuracy against manifest, runtime, and backend budgets |
 
 Backend: `npm test` in `../backend` → `scripts/test-ai-service.js`, 30 cases, no

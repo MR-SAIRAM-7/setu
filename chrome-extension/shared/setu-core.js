@@ -715,7 +715,7 @@
       gazeInvert: false,
       fontScale: 1,
       appearance: 'light',
-      letterSpacing: 0.02,
+      letterSpacing: 0.12,
       lineHeight: 1.8,
       language: 'English'
     }
@@ -2176,8 +2176,19 @@
    * The design system mandates Phosphor and forbids hand-drawn SVG. Falls back
    * to an empty string if the set failed to load: an icon is decoration, and a
    * missing one must never take its control with it.
+   *
+   * Resolved on every CALL rather than captured once at load.
+   *
+   * That distinction became load-bearing when the content scripts moved to
+   * on-demand injection. `setu-icons.js` is no longer in the manifest's eager
+   * set — it arrives with the first feature that needs it, which is strictly
+   * after this file has run. The previous form,
+   * `const icon = self.SETU_ICONS?.icon || (() => '')`, bound the empty-string
+   * fallback permanently at that moment, so every icon in the product would
+   * have rendered as nothing, forever, with no error anywhere. Looking the set
+   * up per call costs an optional-chain and removes the ordering trap.
    */
-  const icon = self.SETU_ICONS?.icon || (() => '');
+  const icon = (...args) => (self.SETU_ICONS?.icon || (() => ''))(...args);
 
   /**
    * Storage key for the agent's session mirror, scoped to this tab.

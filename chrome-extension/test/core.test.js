@@ -439,13 +439,40 @@ function testText() {
 function testLanguages() {
   console.log('\nLanguages');
 
-  // Ten Indian languages plus English — the set Sarvam Bulbul can voice.
-  check('the shipped table is not a stub', LANGUAGES.length === 11, `count=${LANGUAGES.length}`);
+  // Eleven Indian languages on Sarvam plus twelve international ones on
+  // ElevenLabs. Asserted by region rather than as one total, so adding an
+  // international language cannot silently mask the loss of an Indian one.
+  const indian = LANGUAGES.filter((entry) => entry.region === 'india');
+  const international = LANGUAGES.filter((entry) => entry.region === 'international');
+
+  check('the shipped table is not a stub', LANGUAGES.length >= 23, `count=${LANGUAGES.length}`);
+  check('eleven Indian languages', indian.length === 11, `count=${indian.length}`);
+  check('twelve international languages', international.length === 12, `count=${international.length}`);
   check('English is first, so it is the default', LANGUAGES[0].code === 'en-IN');
   check(
     'every entry carries a code, a name and a native name',
     LANGUAGES.every((entry) => entry.code && entry.name && entry.native)
   );
+  check(
+    'every entry declares a region',
+    LANGUAGES.every((entry) => entry.region === 'india' || entry.region === 'international')
+  );
+
+  /*
+   * `bcp47` is what reaches a `lang=` attribute, and it is not always the same
+   * string as `code`. Sarvam spells Odia 'od-IN', which is not a valid language
+   * tag — emitting it means a screen reader ignores it and reads Odia with an
+   * English voice engine, a WCAG 3.1.2 failure on the feature this product
+   * leads with. The tag is asserted separately from the code for that reason.
+   */
+  check(
+    'every entry carries a bcp47 tag and a direction',
+    LANGUAGES.every((entry) => entry.bcp47 && (entry.dir === 'ltr' || entry.dir === 'rtl'))
+  );
+  check("Odia's bcp47 tag is 'or-IN', not Sarvam's 'od-IN'",
+    LANGUAGES.find((entry) => entry.code === 'od-IN')?.bcp47 === 'or-IN');
+  check('Arabic is marked right-to-left',
+    LANGUAGES.find((entry) => entry.code === 'ar-SA')?.dir === 'rtl');
   check(
     'codes are unique',
     new Set(LANGUAGES.map((entry) => entry.code)).size === LANGUAGES.length
@@ -457,7 +484,11 @@ function testLanguages() {
   check('resolves a native name', resolveLanguage('বাংলা').code === 'bn-IN');
   check('is case-insensitive', resolveLanguage('MARATHI').code === 'mr-IN');
 
-  // Anything unknown has to become English rather than reach Sarvam, which
+  check('resolves a bcp47 tag back to the internal code', resolveLanguage('or-IN').code === 'od-IN');
+  check('resolves an international bare tag', resolveLanguage('ja').code === 'ja-JP');
+  check('resolves an international name', resolveLanguage('Turkish').code === 'tr-TR');
+
+  // Anything unknown has to become English rather than reach a provider, which
   // rejects a language code it does not publish.
   check('an unknown language falls back to English', resolveLanguage('Klingon').code === 'en-IN');
   check('empty falls back to English', resolveLanguage('').code === 'en-IN');

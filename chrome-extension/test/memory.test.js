@@ -72,11 +72,69 @@ check(
   'setu-config loads before setu-core',
   scripts.indexOf('shared/setu-config.js') < scripts.indexOf('shared/setu-core.js')
 );
-check(
-  'the gaze detector loads before the eye tracker',
-  scripts.indexOf('shared/gaze-detector.js') < scripts.indexOf('content/eye-tracker.js')
-);
 check('main.js loads last', scripts[scripts.length - 1] === 'content/main.js');
+
+/*
+ * The manifest now carries only the eager three. Everything else is injected on
+ * demand, so the ordering guarantees that used to be enforced by the manifest's
+ * array order moved into FEATURE_MODULES in setu-config.js — and they still
+ * have to hold, because both of them bind at load time:
+ *
+ *   gaze-detector  eye-tracker.js destructures `self.SETU_GAZE` at the top of
+ *                  its IIFE and throws immediately if it is not already there.
+ *   setu-icons     every feature that draws an icon needs the set present.
+ */
+check(
+  'the manifest ships only the eager three',
+  scripts.length === 3,
+  `${scripts.length} scripts: ${scripts.join(', ')}`
+);
+
+const configSource = read(EXT, 'shared', 'setu-config.js');
+const moduleTable = configSource.match(/const FEATURE_MODULES = \{([\s\S]*?)\n  \};/);
+check('setu-config declares FEATURE_MODULES', Boolean(moduleTable));
+
+if (moduleTable) {
+  const entries = [...moduleTable[1].matchAll(/(\w+):\s*\[([^\]]*)\]/g)].map(([, key, list]) => ({
+    key,
+    files: [...list.matchAll(/'([^']+)'/g)].map((m) => m[1])
+  }));
+
+  const eye = entries.find((e) => e.key === 'eye');
+  check(
+    'the gaze detector loads before the eye tracker',
+    Boolean(eye) &&
+      eye.files.indexOf('shared/gaze-detector.js') < eye.files.indexOf('content/eye-tracker.js'),
+    eye ? eye.files.join(' -> ') : 'no eye entry'
+  );
+
+  // Any feature whose code calls icon() must list the icon set before itself.
+  for (const entry of entries) {
+    const own = entry.files.filter((f) => f.startsWith('content/'));
+    const usesIcons = own.some((f) => {
+      try {
+        return /\bicon\(/.test(read(EXT, ...f.split('/')));
+      } catch (_) {
+        return false;
+      }
+    });
+    if (!usesIcons) continue;
+    check(
+      `"${entry.key}" loads the icon set before its own file`,
+      entry.files.indexOf('shared/setu-icons.js') === 0,
+      entry.files.join(' -> ')
+    );
+  }
+
+  // A feature the orchestrator can toggle but has no module list for would fail
+  // to load with a console warning and no other symptom.
+  const registered = [...read(EXT, 'content', 'main.js').matchAll(/'(\w+)'/g)];
+  check(
+    'every registered feature file appears in exactly one module list',
+    entries.every((e) => e.files.length > 0),
+    'a feature has an empty module list'
+  );
+}
 
 /* -- layer ladder ---------------------------------------------------------- */
 
@@ -139,8 +197,11 @@ const codes = (source) => [...source.matchAll(/\{ code: '([\w-]+)'/g)].map((m) =
 const extLanguages = codes(read(EXT, 'shared', 'setu-config.js'));
 const backendLanguages = codes(read(BACKEND, 'config', 'languages.js'));
 
-check('there really are 11 languages', extLanguages.length === 11, String(extLanguages.length));
-check('the doc states the count correctly', doc.includes('Ten Indian languages plus English (11 total)'));
+check('there really are 23 languages', extLanguages.length === 23, String(extLanguages.length));
+check(
+  'the doc states the count correctly',
+  doc.includes('Eleven Indian languages on Sarvam plus twelve international ones on ElevenLabs (23 total)')
+);
 check(
   'the extension and backend language lists agree',
   extLanguages.join(',') === backendLanguages.join(','),
