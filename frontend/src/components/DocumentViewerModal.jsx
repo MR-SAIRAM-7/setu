@@ -5,6 +5,7 @@ import { tts } from '../lib/tts';
 import { api } from '../lib/api';
 import { getPrefs } from '../lib/storage';
 import VoiceInputButton from './VoiceInputButton';
+import { useDialog } from '../lib/useDialog';
 
 export default function DocumentViewerModal({
   isOpen,
@@ -61,14 +62,7 @@ export default function DocumentViewerModal({
    * the one a user is most likely to want out of quickly — and it was the only
    * dialog with no keyboard exit at all.
    */
-  useEffect(() => {
-    if (!isOpen) return undefined;
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape') onClose?.();
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [isOpen, onClose]);
+  useDialog({ isOpen, onClose, containerRef: readerRef });
 
   // Subscribe to TTS changes
   useEffect(() => {

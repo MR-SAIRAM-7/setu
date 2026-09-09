@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { streamExplain } from '../lib/api';
 import { pathTo } from '../lib/layout';
 import { BionicText } from '../lib/bionic';
-import { resolveLanguage } from '../lib/languages';
+import { resolveLanguage , langAttr, langDir } from '../lib/languages';
 import { tts } from '../lib/tts';
 
 /**
@@ -247,7 +247,7 @@ export default function NodeInsightPanel({
           title={`Explanations are written and spoken in ${lang.name}. Change this in Settings.`}
         >
           <i className="ph-duotone ph-translate"></i>
-          <span lang={lang.code}>{lang.native}</span>
+          <span lang={langAttr(lang.code)}>{lang.native}</span>
         </span>
 
         <div
@@ -275,8 +275,31 @@ export default function NodeInsightPanel({
         </div>
       </div>
 
-      {/* ------------------------------- Explanation ------------------------------- */}
-      <div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3.5 text-left">
+      {/*
+        ------------------------------- Explanation -------------------------------
+
+        The live region wraps the WHOLE explanation area, not just the loading
+        skeleton. It used to sit on the skeleton alone, which meant a screen
+        reader announced "Explaining X in Hindi…" and then went permanently
+        silent: the moment the first token arrived React swapped the skeleton for
+        a plain <p>, the live region unmounted with it, and the text that
+        actually mattered was never announced at all. A user selected a branch,
+        heard a promise, and got nothing.
+
+        `aria-busy` carries the in-flight state so assistive technology can hold
+        its announcement until the stream settles rather than re-reading a
+        growing paragraph on every token. `aria-live="polite"` waits for a pause
+        in speech instead of interrupting — this panel opens while the user is
+        still navigating the map, and "assertive" would talk over them.
+      */}
+      <div
+        ref={bodyRef}
+        className="min-h-0 flex-1 overflow-y-auto px-4 py-3.5 text-left"
+        role="region"
+        aria-label={`Explanation of ${node.label}`}
+        aria-live="polite"
+        aria-busy={streaming}
+      >
         {error && !text ? (
           <div className="space-y-2.5">
             <p className="rounded-[var(--radius-md)] border border-[var(--color-accent-2)] bg-[var(--color-accent-2-100)] p-3 text-[13px] leading-snug text-[var(--color-accent-2-900)]">
@@ -288,7 +311,7 @@ export default function NodeInsightPanel({
             </button>
           </div>
         ) : !text && streaming ? (
-          <div className="space-y-2.5" role="status" aria-live="polite">
+          <div className="space-y-2.5">
             <span className="flex items-center gap-2 text-[12.5px] font-semibold text-[var(--color-accent-700)]">
               <i className="ph-duotone ph-sparkle animate-spin"></i>
               Explaining “{node.label}” in {lang.name}…
@@ -303,7 +326,8 @@ export default function NodeInsightPanel({
           </div>
         ) : (
           <p
-            lang={lang.code}
+            lang={langAttr(lang.code)}
+            dir={langDir(lang.code)}
             className="max-w-[62ch] whitespace-pre-wrap text-[15px] leading-[1.65] text-[var(--color-text)]"
           >
             <BionicText text={text} enabled={bionicEnabled && lang.code === 'en-IN'} />

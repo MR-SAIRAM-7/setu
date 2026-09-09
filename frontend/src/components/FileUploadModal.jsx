@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { api } from '../lib/api';
+import { useDialog } from '../lib/useDialog';
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
@@ -29,16 +30,19 @@ export default function FileUploadModal({
   const fileInputRef = useRef(null);
   const dialogRef = useRef(null);
 
-  // Escape closes; focus moves into the dialog so keyboard users are not stranded.
-  useEffect(() => {
-    if (!isOpen) return undefined;
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape' && !uploading) onClose?.();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    dialogRef.current?.focus();
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isOpen, uploading, onClose]);
+  /*
+   * Focus trap, Escape, focus restore and scroll lock.
+   *
+   * `closeOnEscape` is false while an upload is in flight, preserving the
+   * previous behaviour: a stray Escape must not abandon a file the user has
+   * already committed to sending.
+   */
+  useDialog({
+    isOpen,
+    onClose,
+    containerRef: dialogRef,
+    closeOnEscape: !uploading
+  });
 
   // Reset transient state whenever the dialog is reopened.
   useEffect(() => {

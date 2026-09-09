@@ -4,6 +4,7 @@ import { getUserId } from '../lib/identity';
 import { api, setApiLanguage } from '../lib/api';
 import { tts } from '../lib/tts';
 import VoiceInputButton from '../components/VoiceInputButton';
+import { langAttr, langDir } from '../lib/languages';
 
 /**
  * Audition line, per language.
@@ -85,7 +86,10 @@ export default function Settings() {
     update({ language: code });
     setApiLanguage(code);
     tts.setLanguage(code);
-    document.documentElement.lang = code;
+    // langAttr, not `code` — see App.jsx. 'od-IN' is Sarvam's spelling of Odia
+    // and is not a language tag any assistive technology accepts.
+    document.documentElement.lang = langAttr(code);
+    document.documentElement.dir = langDir(code);
     setAuditioning(`lang_${code}`);
     tts.speak(sampleFor(code), { onEnd: () => setAuditioning(null) }).catch(() =>
       setAuditioning(null)
@@ -395,7 +399,7 @@ export default function Settings() {
                       key={language.code}
                       onClick={() => chooseLanguage(language.code)}
                       aria-pressed={selected}
-                      lang={language.code}
+                      lang={langAttr(language.code)}
                       className={`rounded-[var(--radius-md)] border p-2.5 text-left transition-all ${
                         selected
                           ? 'border-[var(--color-accent)] bg-[var(--color-accent-100)] shadow-[var(--shadow-sm)]'

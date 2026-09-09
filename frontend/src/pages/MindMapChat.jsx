@@ -604,6 +604,10 @@ export default function MindMapChat() {
               className="flex-1 overflow-y-auto px-5 py-4 space-y-4 text-left"
               role="log"
               aria-live="polite"
+              // Held while a turn is streaming so a screen reader announces the
+              // finished reply once, rather than re-reading a growing paragraph
+              // on every token that arrives.
+              aria-busy={busy}
             >
               {messages.length === 0 && !busy && (
                 <div className="space-y-4 py-2">

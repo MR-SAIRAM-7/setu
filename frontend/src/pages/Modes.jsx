@@ -260,7 +260,12 @@ export default function Modes() {
             />
 
             {/* -------------------------------- Result -------------------------------- */}
-            <section ref={resultRef} className="space-y-4 pt-1" aria-live="polite">
+            <section
+              ref={resultRef}
+              className="space-y-4 pt-1"
+              aria-live="polite"
+              aria-busy={loading}
+            >
               <div
                 className="flex flex-wrap items-center justify-between gap-3 border-t pt-4"
                 style={{ borderColor: `color-mix(in srgb, ${mode.accent} 25%, transparent)` }}

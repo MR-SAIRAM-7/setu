@@ -18,6 +18,7 @@ import { api, setApiLanguage } from './lib/api';
 import { applyPrefs, getPrefs, savePrefs } from './lib/storage';
 import { award, mergeServerProgress } from './lib/progress';
 import { tts } from './lib/tts';
+import { langAttr, langDir } from './lib/languages';
 
 const FOCUS_SECONDS = 25 * 60;
 const BREAK_SECONDS = 5 * 60;
@@ -34,7 +35,14 @@ export default function App() {
     tts.setRate(prefs.speechRate || 1);
     tts.setLanguage(prefs.language || 'en-IN');
     setApiLanguage(prefs.language || 'en-IN');
-    document.documentElement.lang = prefs.language || 'en-IN';
+    // Via langAttr, not the raw code. SETU stores Odia as 'od-IN' because that
+    // is what Sarvam's API wants, but it is not a valid BCP-47 tag — setting it
+    // here leaves a screen reader with nothing it recognises, so it falls back
+    // to the document default and reads Odia with an English voice engine.
+    // applyPrefs() sets the same pair; this runs at boot before prefs are
+    // applied, and the two must not disagree.
+    document.documentElement.lang = langAttr(prefs.language);
+    document.documentElement.dir = langDir(prefs.language);
 
     // Top up local progress from the server copy once at boot, so a streak
     // built on another device is not silently restarted here.

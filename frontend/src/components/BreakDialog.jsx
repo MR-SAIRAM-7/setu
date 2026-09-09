@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
+import { useDialog } from '../lib/useDialog';
 
 /**
  * End-of-session prompt.
@@ -12,18 +13,34 @@ import { useEffect, useRef } from 'react';
  */
 export default function BreakDialog({ isOpen, onKeepGoing, onTakeFive }) {
   const primaryRef = useRef(null);
+  const dialogRef = useRef(null);
 
-  useEffect(() => {
-    if (isOpen) primaryRef.current?.focus();
-  }, [isOpen]);
+  /*
+   * `closeOnEscape: false` preserves the deliberate decision documented above —
+   * this dialog marks the end of a focus session and must not vanish on a stray
+   * keypress. Everything else the hook provides still applies, and the focus
+   * trap matters more here than elsewhere: with only two buttons and no exit,
+   * Tab previously walked straight out into the page behind a dialog that
+   * cannot be dismissed, which is the worst version of this bug.
+   */
+  useDialog({
+    isOpen,
+    onClose: () => {},
+    containerRef: dialogRef,
+    closeOnEscape: false,
+    initialFocusRef: primaryRef
+  });
 
   if (!isOpen) return null;
 
   return (
     <div className="dialog-backdrop items-center p-4">
       <div
-        className="dialog w-full max-w-[480px] p-6 text-left border border-[var(--color-divider)]"
+        ref={dialogRef}
+        tabIndex={-1}
+        className="dialog w-full max-w-[480px] p-6 text-left border border-[var(--color-divider)] outline-none"
         role="alertdialog"
+        aria-modal="true"
         aria-labelledby="break-dialog-title"
         aria-describedby="break-dialog-desc"
       >

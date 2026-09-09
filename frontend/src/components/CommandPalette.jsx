@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useDialog } from '../lib/useDialog';
 import { useNavigate } from 'react-router-dom';
 import { savePrefs, listMaps } from '../lib/storage';
 import { exportMindMapToPDF } from '../lib/exportUtils';
@@ -10,6 +11,7 @@ export default function CommandPalette({ isOpen, onClose, onStartFocus }) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [notice, setNotice] = useState(null);
   const inputRef = useRef(null);
+  const dialogRef = useRef(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -17,9 +19,21 @@ export default function CommandPalette({ isOpen, onClose, onStartFocus }) {
       setQuery('');
       setSelectedIndex(0);
       setNotice(null);
-      setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [isOpen]);
+
+  /*
+   * The palette had no dialog role and no trap at all — it was the one dialog
+   * the audit counted correctly. `initialFocusRef` points at the search field,
+   * which is also what the old `setTimeout(..., 50)` was reaching for; the hook
+   * waits a frame for mount instead of guessing at a delay.
+   */
+  useDialog({
+    isOpen,
+    onClose,
+    containerRef: dialogRef,
+    initialFocusRef: inputRef
+  });
 
   /**
    * Export the most recently updated map. The palette is global and has no map
@@ -213,9 +227,14 @@ export default function CommandPalette({ isOpen, onClose, onStartFocus }) {
       className="dialog-backdrop items-start pt-[14vh] px-4"
       onClick={onClose}
       onKeyDown={handleKeyDown}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Command palette"
     >
       <div
-        className="dialog w-full max-w-[560px] p-0 shadow-lg border border-[var(--color-divider)]"
+        ref={dialogRef}
+        tabIndex={-1}
+        className="dialog w-full max-w-[560px] p-0 shadow-lg border border-[var(--color-divider)] outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Search header */}

@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { COLOR_PALETTES } from '../lib/layout';
+import { useDialog } from '../lib/useDialog';
 import { getPrefs } from '../lib/storage';
 
 const GRID_PATTERNS = [
@@ -42,6 +43,10 @@ export default function MindMapCustomizerModal({
 }) {
   const [activeTab, setActiveTab] = useState('palette');
   const [localPrefs, setLocalPrefs] = useState(() => currentPrefs || getPrefs());
+  const dialogRef = useRef(null);
+
+  // Above the `if (!isOpen)` early return below — hooks cannot be conditional.
+  useDialog({ isOpen, onClose, containerRef: dialogRef });
 
   useEffect(() => {
     if (isOpen) {
@@ -81,7 +86,9 @@ export default function MindMapCustomizerModal({
       aria-labelledby="customizer-modal-title"
     >
       <div
-        className="dialog w-full max-w-2xl max-h-[88vh] flex flex-col p-0 overflow-hidden shadow-2xl border border-[var(--color-divider)]"
+        ref={dialogRef}
+        tabIndex={-1}
+        className="dialog w-full max-w-2xl max-h-[88vh] flex flex-col p-0 overflow-hidden shadow-2xl border border-[var(--color-divider)] outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

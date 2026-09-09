@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import VoiceInputButton from './VoiceInputButton';
+import { useDialog } from '../lib/useDialog';
 import { COLOR_PALETTES } from '../lib/layout';
 
 const COMMON_EMOJIS = ['💡', '🧠', '🔬', '📊', '⚡', '🎯', '📚', '🚀', '🛠️', '✨', '⚠️', '🔍', '🌿', '💎'];
@@ -18,6 +19,11 @@ export default function NodeEditorModal({
   const [detail, setDetail] = useState('');
   const [emoji, setEmoji] = useState(null);
   const [customColor, setCustomColor] = useState(null);
+  const dialogRef = useRef(null);
+
+  // Above the `if (!isOpen)` early return below: hooks cannot be called
+  // conditionally, and the hook handles the closed state itself.
+  useDialog({ isOpen, onClose, containerRef: dialogRef });
 
   const colors = (COLOR_PALETTES[paletteKey] || COLOR_PALETTES.broadsheet).colors;
 
@@ -64,7 +70,9 @@ export default function NodeEditorModal({
       aria-labelledby="node-editor-title"
     >
       <div
-        className="dialog w-full max-w-lg p-0 overflow-hidden shadow-2xl border border-[var(--color-divider)]"
+        ref={dialogRef}
+        tabIndex={-1}
+        className="dialog w-full max-w-lg p-0 overflow-hidden shadow-2xl border border-[var(--color-divider)] outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

@@ -190,15 +190,35 @@ html.theme-contrast {
     font-size: 19.5px;
   }
 
-  /* Spacing Classes */
+  /*
+    Spacing Classes
+
+    Extra letter spacing is the one typographic manipulation in this product
+    with a controlled result behind it. Zorzi et al. (PNAS 2012) widened letter
+    spacing for dyslexic children and measured a ~20% reading-speed gain and
+    roughly half the errors, with no training at all — it works by reducing
+    visual crowding, which is elevated in dyslexia. That is a larger effect than
+    most reading interventions produce after weeks of work.
+
+    These steps used to be 0.035em and 0.06em, roughly a fifth of the magnitude
+    that study tested, which is a cosmetic nudge rather than the intervention.
+    `relaxed` is now the evidence-backed dose and is the default in
+    DEFAULT_PREFS; `spacious` reaches the full tested magnitude. Nothing is
+    forced — a reader who prefers tight text still has "Standard", which is the
+    unstyled base.
+
+    Word spacing rises with letter spacing deliberately: widening letters alone
+    makes word boundaries harder to see, which trades one crowding problem for
+    another.
+  */
   html.spacing-relaxed {
-    letter-spacing: 0.035em;
-    word-spacing: 0.08em;
-    line-height: 1.75;
+    letter-spacing: 0.12em;
+    word-spacing: 0.16em;
+    line-height: 1.8;
   }
   html.spacing-spacious {
-    letter-spacing: 0.06em;
-    word-spacing: 0.14em;
+    letter-spacing: 0.18em;
+    word-spacing: 0.24em;
     line-height: 2.0;
   }
 

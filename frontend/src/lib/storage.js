@@ -13,6 +13,7 @@
 
 import { syncInBackground } from './api';
 import { SEED_MAPS } from './seedData';
+import { resolveLanguage, langAttr, langDir } from './languages';
 
 const MAPS_KEY = 'setu.maps.v1';
 const PREFS_KEY = 'setu.prefs.v1';
@@ -226,7 +227,17 @@ export const DEFAULT_PREFS = {
   theme: 'broadsheet', // 'broadsheet' | 'cream' | 'pastel' | 'sage' | 'velvet' | 'contrast'
   font: 'serif', // 'serif' | 'system' | 'hyper' | 'lexend' | 'dyslexic'
   textSize: 'normal', // 'normal' | 'comfortable' | 'large'
-  spacing: 'normal', // 'normal' | 'relaxed' | 'spacious'
+  /**
+   * Letter and word spacing.
+   *
+   * Defaults to 'relaxed', not 'normal'. Extra letter spacing is the only
+   * typographic lever here with a controlled result behind it — Zorzi et al.
+   * (PNAS 2012) found ~20% faster reading and roughly half the errors in
+   * dyslexic children, with no training — and shipping it off by default meant
+   * almost nobody ever received the one intervention the evidence supports.
+   * 'normal' remains available for readers who prefer tight text.
+   */
+  spacing: 'relaxed', // 'normal' | 'relaxed' | 'spacious'
   motion: 'move', // 'move' | 'still'
   readingRuler: false,
   bionicReading: false,
@@ -305,6 +316,29 @@ export function savePrefs(patch) {
 export function applyPrefs(prefs = getPrefs()) {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
+
+  /*
+   * Declare the document's language, and its direction.
+   *
+   * index.html hardcodes lang="en" and nothing used to change it, so when SETU
+   * did the thing it is proudest of — explaining a branch in Hindi, or Tamil, or
+   * Odia — a screen reader received Devanagari or Tamil script inside an
+   * English-declared document and pronounced it with an English voice engine.
+   * The output is not merely accented, it is unintelligible. That is a WCAG 2.1
+   * 3.1.2 (Language of Parts, AA) failure, and it broke the headline feature for
+   * exactly the users who most need it.
+   *
+   * `langAttr` rather than the raw code: SETU's internal code for Odia is
+   * 'od-IN', which is what Sarvam wants but is not a valid BCP-47 tag. Setting
+   * it here would leave assistive technology with nothing usable and it would
+   * fall back to the document default — the same bug, one layer down.
+   *
+   * Per-element `lang` is still set on generated content, because a mixed page
+   * needs both: this establishes the default, and the panels override it.
+   */
+  const language = resolveLanguage(prefs.language);
+  root.setAttribute('lang', langAttr(language.code));
+  root.setAttribute('dir', langDir(language.code));
 
   // Theme classes
   root.classList.remove(
