@@ -15,6 +15,9 @@ const dbCtrl = require('../controllers/databaseController');
 const fileCtrl = require('../controllers/fileController');
 const convCtrl = require('../controllers/conversationController');
 const speechCtrl = require('../controllers/speechController');
+const speechService = require('../services/speechService');
+const readingCtrl = require('../controllers/readingCheckController');
+const profileCtrl = require('../controllers/profileController');
 
 const { validateInputMiddleware } = require('../middleware/validator');
 const { checkHealth } = require('../services/aiService');
@@ -63,7 +66,14 @@ router.get('/health', (_req, res) => {
       model: config.speechEnabled ? config.sarvamTtsModel : null,
       sttProvider: config.sttEnabled ? 'sarvam' : 'browser',
       sttConfigured: config.sttEnabled,
-      sttModel: config.sttEnabled ? config.sarvamSttModel : null
+      sttModel: config.sttEnabled ? config.sarvamSttModel : null,
+      /*
+       * Per-provider liveness, not just "is a key set".
+       * An exhausted account still has a key, and the difference between
+       * "configured" and "available" is the difference between read-aloud
+       * working and read-aloud silently dropping to the browser voice.
+       */
+      providers: speechService.providerHealth()
     },
     database: {
       provider: 'MongoDB',
@@ -146,6 +156,41 @@ router.put('/settings', dbCtrl.handleSaveSettings);
 
 router.get('/progress', dbCtrl.handleGetProgress);
 router.post('/progress', dbCtrl.handleSaveProgress);
+
+/* -------------------------------------------------------------------------- */
+/* Agent saved-details profile                                                */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * What the page agent fills government forms from. Held here so it survives a
+ * reinstall and reaches a second machine, rather than existing only in one
+ * browser's local storage.
+ *
+ * The privacy rule that matters is unchanged: values never enter a prompt. The
+ * planner is told which keys exist and writes {{profile.pincode}}; the
+ * substitution happens in the page. Government ID and bank keys are refused
+ * outright by the controller — see NEVER_STORED.
+ */
+router.get('/profile', profileCtrl.handleGetProfile);
+router.post('/profile', profileCtrl.handleSaveProfile);
+router.delete('/profile', profileCtrl.handleDeleteProfile);
+
+/* -------------------------------------------------------------------------- */
+/* Reading Check — the outcome measure and the akshara-aware screener         */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * The only endpoints in SETU that measure a person rather than record a
+ * preference. Scoring is server-side on purpose: the band boundaries, the
+ * provisional-norm caveat and the regulatory copy live in one place, so a
+ * correction reaches every client at once rather than waiting for caches to
+ * expire. See services/readingAssessment.js for why the vocabulary is
+ * "band" and never "probability".
+ */
+router.get('/reading-check/stimuli', readingCtrl.handleGetStimuli);
+router.get('/reading-check/class', readingCtrl.handleClassRoster);
+router.get('/reading-check', readingCtrl.handleHistory);
+router.post('/reading-check', readingCtrl.handleSubmit);
 
 /* -------------------------------------------------------------------------- */
 /* Conversational AI & Research Streaming                                     */

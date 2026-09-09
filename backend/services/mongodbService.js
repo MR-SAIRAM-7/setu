@@ -11,6 +11,7 @@ const MindMap = require('../models/MindMap');
 const SavedSummary = require('../models/SavedSummary');
 const UserSettings = require('../models/UserSettings');
 const UserProgress = require('../models/UserProgress');
+const ReadingCheck = require('../models/ReadingCheck');
 const SessionLog = require('../models/SessionLog');
 
 function isDbActive() {
@@ -557,6 +558,60 @@ async function saveUserProgress(userId = 'anonymous_user', progress = {}) {
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/* Reading Check                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Store one completed reading task.
+ *
+ * Unlike the reward mirror, this is an append-only log rather than a snapshot:
+ * every reading is its own document because the whole value is the sequence.
+ * Overwriting a previous result would destroy the only chart this product can
+ * honestly draw.
+ */
+async function saveReadingCheck(record) {
+  if (!isDbActive() || !record?.id || !record?.userId) return null;
+  try {
+    return await ReadingCheck.create(record);
+  } catch (err) {
+    console.warn('[MongoDB Service] Error saving reading check:', err.message);
+    return null;
+  }
+}
+
+/**
+ * A user's readings, oldest first.
+ *
+ * Ascending because every caller plots these as a line over time, and a
+ * descending list is one reverse away from a chart drawn backwards.
+ */
+async function listReadingChecks({ userId = 'anonymous_user', type = null, limit = 60 }) {
+  if (!isDbActive()) return [];
+  try {
+    const query = { userId };
+    if (type) query.type = type;
+    return await ReadingCheck.find(query, { transcript: 0 })
+      .sort({ createdAt: 1 })
+      .limit(limit)
+      .lean();
+  } catch (err) {
+    console.warn('[MongoDB Service] Error listing reading checks:', err.message);
+    return [];
+  }
+}
+
+async function deleteReadingChecks(userId) {
+  if (!isDbActive() || !userId) return false;
+  try {
+    await ReadingCheck.deleteMany({ userId });
+    return true;
+  } catch (err) {
+    console.warn('[MongoDB Service] Error clearing reading checks:', err.message);
+    return false;
+  }
+}
+
 module.exports = {
   isConfigured: () => getStatus().configured,
   isDbActive,
@@ -585,6 +640,10 @@ module.exports = {
   // User Settings & Session
   getUserSettings,
   saveUserSettings,
+  // Reading Check
+  saveReadingCheck,
+  listReadingChecks,
+  deleteReadingChecks,
   // Reward progress
   getUserProgress,
   saveUserProgress,

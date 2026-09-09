@@ -9,6 +9,7 @@
 
 const { requestStructuredAI } = require('../services/aiService');
 const fallbacks = require('../services/fallbackEngine');
+const { assessCrisisRisk, buildCrisisResponse } = require('../services/crisisDetector');
 const config = require('../config');
 const schemas = require('./modeSchemas');
 const { languageDirective, resolveLanguage, DEFAULT_CODE } = require('../config/languages');
@@ -238,6 +239,14 @@ function handleNumbersMode(req, res, next) {
  * script, so a crisis reply can never be a sampled one, never depends on the AI
  * being reachable, and never varies between runs. Only once that check passes
  * does the turn go to the normal mode runner.
+ *
+ * The check has two stages. Patterns run first, cover all twenty-three
+ * languages including romanised and code-mixed input, and are synchronous and
+ * network-free — so the guarantee holds in the offline deployment and cannot be
+ * taken out by a provider outage. Only when the patterns find nothing does a
+ * bounded yes/no classifier get a look, to catch the paraphrase no list can
+ * enumerate. Either way the reply is the same fixed script: the classifier
+ * chooses *whether* to show it and never writes a word of it.
  */
 const listenRunner = runMode('listen');
 
@@ -246,9 +255,20 @@ async function handleListenMode(req, res, next) {
     const entry = String(req.body.entry || '').trim();
     if (!entry) return res.status(400).json({ error: 'Write something first — anything at all.' });
 
-    if (fallbacks.detectCrisisLanguage(entry)) {
+    const risk = await assessCrisisRisk(entry, {
+      // The classifier is skipped when no provider is configured — there is
+      // nothing to ask — and the pattern layer carries the whole guarantee.
+      useClassifier: config.aiEnabled
+    });
+
+    if (risk.crisis) {
+      // Logged without the message itself: knowing that the Tamil patterns
+      // fired is operationally useful, keeping what someone wrote at 2am is
+      // not, and this is the most sensitive text the product ever receives.
+      console.log(`[SETU crisis] short-circuit via ${risk.via}${risk.language ? ` (${risk.language})` : ''}`);
+
       return res.json({
-        ...fallbacks.buildCrisisResponse(resolveLanguage(req.body.language).code),
+        ...buildCrisisResponse(resolveLanguage(req.body.language).code),
         fallback: false
       });
     }

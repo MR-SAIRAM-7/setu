@@ -30,9 +30,16 @@ const UserSettingsSchema = new mongoose.Schema(
       default: 'normal',
       enum: ['normal', 'comfortable', 'large']
     },
+    // Mirrors DEFAULT_PREFS in the web client, which defaults to 'relaxed'
+    // rather than 'normal': extra letter spacing is the only typographic lever
+    // in this product with a controlled result behind it (Zorzi et al., PNAS
+    // 2012 — ~20% faster reading, roughly half the errors, no training), and a
+    // default of 'normal' meant almost nobody ever received it. A server
+    // default that disagrees with the client's would hand a new browser the old
+    // dose on its first settings fetch.
     spacing: {
       type: String,
-      default: 'normal',
+      default: 'relaxed',
       enum: ['normal', 'relaxed', 'spacious']
     },
     motion: {

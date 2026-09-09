@@ -278,6 +278,52 @@ module.exports = {
   sarvamTimeoutMs: Number(process.env.SARVAM_TIMEOUT_MS || 30000),
 
   // ---------------------------------------------------------------------------
+  // Speech - ElevenLabs (international languages)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * ElevenLabs covers the languages Sarvam cannot speak at all.
+   *
+   * Bulbul is bounded to eleven Indian codes, and sending it 'ja-JP' is a hard
+   * 400 rather than a graceful miss — so the two providers are not alternatives
+   * to each other, they are disjoint halves of one catalogue. Which half a
+   * language belongs to is declared in config/languages.js, not decided here.
+   *
+   * Sarvam stays primary for Indian languages even though ElevenLabs nominally
+   * covers several of them: Saaras is materially better on Indic audio and on
+   * Hinglish code-mixing, which is how this audience actually speaks.
+   *
+   * Without a key the international languages degrade to browser speech, the
+   * same way the Indian ones do without a Sarvam key.
+   */
+  elevenLabsApiKey: clean(process.env.ELEVENLABS_API_KEY),
+
+  elevenLabsBaseUrl: clean(process.env.ELEVENLABS_BASE_URL) || 'https://api.elevenlabs.io/v1',
+
+  /**
+   * eleven_multilingual_v2 is the quality tier; eleven_flash_v2_5 is roughly
+   * three times faster at some cost in prosody.
+   *
+   * Quality is the default because read-aloud is the best-evidenced thing SETU
+   * ships and an abandoned accommodation has an effect size of zero — people
+   * stop using robotic voices. Deployments that care more about latency than
+   * warmth can set ELEVENLABS_TTS_MODEL=eleven_flash_v2_5.
+   */
+  elevenLabsTtsModel: clean(process.env.ELEVENLABS_TTS_MODEL) || 'eleven_multilingual_v2',
+
+  /** Scribe. Handles 99 languages and returns per-word timings we do not use yet. */
+  elevenLabsSttModel: clean(process.env.ELEVENLABS_STT_MODEL) || 'scribe_v1',
+
+  /**
+   * Default voice id. 'Rachel' is ElevenLabs' longest-standing public voice and
+   * is stable across account tiers, which matters because a voice id that does
+   * not exist on the key's plan fails the request rather than substituting.
+   */
+  elevenLabsVoiceId: clean(process.env.ELEVENLABS_VOICE_ID) || '21m00Tcm4TlvDq8ikWAM',
+
+  elevenLabsTimeoutMs: Number(process.env.ELEVENLABS_TIMEOUT_MS || 30000),
+
+  // ---------------------------------------------------------------------------
   // Request shaping & limits
   // ---------------------------------------------------------------------------
 
@@ -315,7 +361,20 @@ module.exports = {
    * The API can still run in degraded/offline mode when MongoDB
    * is unavailable.
    */
-  mongoUri: normalizeMongoUri(process.env.MONGODB_URI),
+  /**
+   * The connection string used to reach the cluster.
+   *
+   * `MONGODB_DIRECT_URI` wins when set. It is the seed-list form of the same
+   * Atlas cluster — `mongodb://shard-00-00...,shard-00-01...,shard-00-02.../db`
+   * — which is exactly what `mongodb+srv://` resolves to, minus the SRV and TXT
+   * lookups the driver otherwise performs on every connect.
+   *
+   * That matters on networks whose resolver refuses SRV records: the failure is
+   * reported as `querySrv ECONNREFUSED`, the fallback path costs several
+   * seconds of startup, and both are avoidable by naming the hosts directly.
+   * `config/db.js` derives and logs this URI at boot so it can be pinned here.
+   */
+  mongoUri: normalizeMongoUri(process.env.MONGODB_DIRECT_URI || process.env.MONGODB_URI),
 
   mongoDbName: MONGO_DB_NAME,
 
@@ -437,18 +496,29 @@ module.exports = {
   },
 
   /**
-   * Natural-voice read-aloud.
-   * False = browser speech fallback.
+   * Natural-voice read-aloud is available *somewhere*.
+   *
+   * True when either provider has a key, because the two cover disjoint halves
+   * of the catalogue: a Sarvam-only deployment speaks eleven Indian languages
+   * and falls back to the browser for the rest, and an ElevenLabs-only one does
+   * the reverse. `speechEnabledFor(code)` is the question that actually matters
+   * at request time; this one only decides whether to advertise the feature.
    */
   get speechEnabled() {
+    return Boolean(this.sarvamApiKey || this.elevenLabsApiKey);
+  },
+
+  /** Speech-to-text is available somewhere. Same disjoint-halves reasoning. */
+  get sttEnabled() {
+    return Boolean(this.sarvamApiKey || this.elevenLabsApiKey);
+  },
+
+  get sarvamEnabled() {
     return Boolean(this.sarvamApiKey);
   },
 
-  /**
-   * Speech-to-Text transcription.
-   */
-  get sttEnabled() {
-    return Boolean(this.sarvamApiKey);
+  get elevenLabsEnabled() {
+    return Boolean(this.elevenLabsApiKey);
   },
 
   /** Determine primary AI provider. */

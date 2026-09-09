@@ -19,14 +19,46 @@ function handleListVoices(_req, res) {
   res.json({
     enabled: config.speechEnabled,
     sttEnabled: config.sttEnabled,
+
+    // Which engines are actually reachable, so the client can explain a gap
+    // rather than just failing quietly. A deployment with only one key still
+    // works — for half the catalogue — and the picker should say which half.
+    providers: {
+      sarvam: {
+        ...speech.providerHealth().sarvam,
+        ttsModel: config.sarvamTtsModel,
+        sttModel: config.sarvamSttModel
+      },
+      elevenlabs: {
+        ...speech.providerHealth().elevenlabs,
+        ttsModel: config.elevenLabsTtsModel,
+        sttModel: config.elevenLabsSttModel
+      }
+    },
+
+    // Retained for older clients that read these flat fields.
     provider: 'sarvam',
     model: config.sarvamTtsModel,
     sttModel: config.sarvamSttModel,
+
     language: resolveLanguage(config.sarvamTtsLanguage).code,
     defaultSpeaker: speech.resolveVoice(null, config.sarvamTtsModel).speaker,
     maxCharacters: speech.MAX_CHARS,
-    voices: speech.listVoices(),
-    languages: LANGUAGES
+
+    // Both catalogues, each entry tagged with its provider.
+    voices: speech.listAllVoices(),
+
+    /**
+     * The catalogue, annotated with what the server can currently do for each
+     * language. `ttsProvider: null` means no configured engine speaks it, and
+     * the client should offer the browser voice and say so — which is a
+     * materially different message from "read-aloud is off".
+     */
+    languages: LANGUAGES.map((language) => ({
+      ...language,
+      ttsProvider: speech.pickTtsProvider(language.code),
+      sttProvider: speech.pickSttProvider(language.code)
+    }))
   });
 }
 
@@ -41,9 +73,16 @@ async function handleSynthesize(req, res, next) {
       return res.status(400).json({ error: 'Nothing to say.' });
     }
 
-    if (!config.speechEnabled) {
+    // Availability is per-language, not global: a Sarvam-only deployment can
+    // speak Hindi and not Japanese, and answering "read-aloud is off" for the
+    // second would be wrong. The router raises a SpeechError naming the gap.
+    if (!speech.pickTtsProvider(language)) {
+      const lang = resolveLanguage(language);
       return res.status(503).json({
-        error: 'Natural voice is not configured. Set SARVAM_API_KEY to enable it.',
+        error:
+          lang.region === 'international'
+            ? `Natural voice is not configured for ${lang.name}. Set ELEVENLABS_API_KEY to enable it.`
+            : 'Natural voice is not configured. Set SARVAM_API_KEY to enable it.',
         fallbackToBrowser: true
       });
     }
@@ -69,7 +108,8 @@ async function handleTranscribe(req, res, next) {
   try {
     if (!config.sttEnabled) {
       return res.status(503).json({
-        error: 'Speech-to-text is not configured. Set SARVAM_API_KEY to enable it.',
+        error:
+          'Speech-to-text is not configured. Set SARVAM_API_KEY for Indian languages or ELEVENLABS_API_KEY for the rest.',
         fallbackToBrowser: true
       });
     }

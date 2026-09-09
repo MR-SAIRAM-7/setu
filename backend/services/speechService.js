@@ -12,7 +12,8 @@
 
 const crypto = require('crypto');
 const config = require('../config');
-const { resolveLanguage, LANGUAGES } = require('../config/languages');
+const { resolveLanguage, LANGUAGES, ttsProviderFor, sttProviderFor } = require('../config/languages');
+const elevenLabs = require('./elevenLabsService');
 
 /**
  * Speaker catalogues, per model version.
@@ -158,10 +159,14 @@ class SpeechError extends Error {
 
 /**
  * Synthesise one clip with Sarvam Bulbul TTS.
+ *
+ * Called through `synthesize` below rather than directly: this function assumes
+ * the language is one of the eleven Bulbul can actually speak, and sending it
+ * anything else is a hard 400.
  */
-async function synthesize({ text, speaker, model, pace = 1, language }) {
-  if (!config.speechEnabled) {
-    throw new SpeechError('No speech provider is configured on the server.', 503);
+async function synthesizeWithSarvam({ text, speaker, model, pace = 1, language }) {
+  if (!config.sarvamEnabled) {
+    throw new SpeechError('Sarvam is not configured on the server.', 503);
   }
 
   const cleaned = cleanForSpeech(text);
@@ -216,6 +221,10 @@ async function synthesize({ text, speaker, model, pace = 1, language }) {
     const detail =
       payload?.error?.message || payload?.message || payload?.detail || `HTTP ${response.status}`;
     const status = response.status === 401 || response.status === 403 ? 502 : response.status;
+    // 402 (out of credits) and 429 (rate limited) take Sarvam out of routing
+    // for a cooldown, so the next request fails over instead of repeating a
+    // call we already know will be refused.
+    markProviderDown('sarvam', response.status, detail);
     throw new SpeechError(`Voice engine rejected the request: ${detail}`, status);
   }
 
@@ -228,7 +237,8 @@ async function synthesize({ text, speaker, model, pace = 1, language }) {
     speaker: voice.speaker,
     model: voice.model,
     language: lang.code,
-    characters: cleaned.length
+    characters: cleaned.length,
+    provider: 'sarvam'
   };
 
   writeCache(key, result);
@@ -251,7 +261,7 @@ async function synthesize({ text, speaker, model, pace = 1, language }) {
  * @param {string} [options.mode='transcribe'] - 'transcribe' | 'translate' | 'verbatim' | 'codemix'
  * @param {string} [options.prompt=''] - Optional context prompt
  */
-async function transcribe({
+async function transcribeWithSarvam({
   audioBuffer,
   mimeType = 'audio/webm',
   filename = 'audio.webm',
@@ -260,8 +270,8 @@ async function transcribe({
   mode = 'transcribe',
   prompt = ''
 }) {
-  if (!config.sttEnabled) {
-    throw new SpeechError('Speech-to-text is not configured on the server.', 503);
+  if (!config.sarvamEnabled) {
+    throw new SpeechError('Sarvam speech-to-text is not configured on the server.', 503);
   }
 
   if (!audioBuffer || (Buffer.isBuffer(audioBuffer) && audioBuffer.length === 0)) {
@@ -317,6 +327,10 @@ async function transcribe({
     const detail =
       payload?.error?.message || payload?.message || payload?.detail || `HTTP ${response.status}`;
     const status = response.status === 401 || response.status === 403 ? 502 : response.status;
+    // 402 (out of credits) and 429 (rate limited) take Sarvam out of routing
+    // for a cooldown, so the next request fails over instead of repeating a
+    // call we already know will be refused.
+    markProviderDown('sarvam', response.status, detail);
     throw new SpeechError(`Transcription engine error: ${detail}`, status);
   }
 
@@ -331,9 +345,264 @@ async function transcribe({
   };
 }
 
+/* -------------------------------------------------------------------------- */
+/* Provider routing                                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The asymmetry that shapes every function below.
+ *
+ * Sarvam Bulbul speaks eleven Indian languages and nothing else — it does not
+ * degrade on a Japanese request, it rejects it. ElevenLabs Multilingual v2
+ * speaks the international set *and* most of the Indian ones, at lower quality
+ * on Indic prosody and noticeably worse on Hinglish code-mixing.
+ *
+ * So substitution is one-directional:
+ *
+ *   Indian language, no Sarvam key        -> ElevenLabs is an acceptable stand-in
+ *   International language, no EL key     -> nothing on the server can speak it
+ *
+ * The second case is not a failure to handle gracefully by picking the other
+ * provider; it is a case where the honest answer is "the server cannot do this,
+ * use the browser's own voice", which is what `fallbackToBrowser` on the error
+ * response tells the client to do.
+ */
+/* -------------------------------------------------------------------------- */
+/* Provider health                                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Providers that are configured but currently refusing work.
+ *
+ * A key existing is not the same thing as a key working, and conflating the two
+ * produced a real failure: with an exhausted Sarvam account the key is present,
+ * so routing sent every Hindi and Tamil request to Sarvam, which answered
+ * `402 insufficient_quota_error` every time — and it would have kept doing so
+ * even with an ElevenLabs key configured, because the fallback only triggered
+ * on a *missing* key.
+ *
+ * So a provider that answers "I cannot serve you" is marked down for a while
+ * and routing skips it. Same shape as the model cooldowns in aiService: learn
+ * from the failure rather than repeating it once per request.
+ *
+ * Only two statuses trip this, and they mean different things:
+ *
+ *   402  out of credits. Will not fix itself; someone has to top up. Long
+ *        cooldown, because retrying is guaranteed to fail and each attempt
+ *        costs the user a visible delay before the browser voice takes over.
+ *   429  rate limited. Transient by definition. Short cooldown.
+ *
+ * 401/403 are deliberately absent: a bad key is a deployment error, not a
+ * runtime condition, and silently routing around it would hide a broken
+ * configuration that the operator needs to see.
+ */
+const providerOutages = new Map();
+
+const OUTAGE_MS = {
+  402: 30 * 60 * 1000,
+  429: 60 * 1000
+};
+
+function markProviderDown(provider, status, detail = '') {
+  const cooldown = OUTAGE_MS[status];
+  if (!cooldown) return;
+
+  const until = Date.now() + cooldown;
+  const existing = providerOutages.get(provider);
+  if (existing && existing.until >= until) return;
+
+  providerOutages.set(provider, { until, status, detail });
+  console.warn(
+    `[SETU speech] ${provider} marked unavailable for ${Math.round(cooldown / 60000)}m ` +
+      `(HTTP ${status}${detail ? `: ${detail}` : ''}). Routing around it.`
+  );
+}
+
+function isProviderDown(provider) {
+  const outage = providerOutages.get(provider);
+  if (!outage) return false;
+  if (Date.now() >= outage.until) {
+    providerOutages.delete(provider);
+    return false;
+  }
+  return true;
+}
+
+/** A provider is usable when it has a key AND is not in a cooldown. */
+function providerUsable(provider) {
+  const configured = provider === 'sarvam' ? config.sarvamEnabled : config.elevenLabsEnabled;
+  return configured && !isProviderDown(provider);
+}
+
+/** Outage state, for /api/health and the voice catalogue. */
+function providerHealth() {
+  const describe = (provider) => {
+    const outage = providerOutages.get(provider);
+    return {
+      configured: provider === 'sarvam' ? config.sarvamEnabled : config.elevenLabsEnabled,
+      available: providerUsable(provider),
+      outage: outage && Date.now() < outage.until
+        ? {
+            status: outage.status,
+            reason:
+              outage.status === 402
+                ? 'Out of credits — top up the account.'
+                : 'Rate limited — this clears on its own.',
+            retryAfterMs: outage.until - Date.now()
+          }
+        : null
+    };
+  };
+  return { sarvam: describe('sarvam'), elevenlabs: describe('elevenlabs') };
+}
+
+/** Exposed so a redeploy or a manual top-up takes effect without a restart. */
+function clearProviderOutages() {
+  providerOutages.clear();
+}
+
+/* -------------------------------------------------------------------------- */
+
+function pickTtsProvider(language) {
+  const preferred = ttsProviderFor(language);
+
+  if (preferred === 'sarvam') {
+    if (providerUsable('sarvam')) return 'sarvam';
+    // ElevenLabs Multilingual v2 covers most Indian languages too — worse on
+    // Indic prosody and Hinglish code-mixing, which is why it is second, but
+    // far better than dropping to the browser's synthesiser.
+    if (providerUsable('elevenlabs')) return 'elevenlabs';
+    return null;
+  }
+
+  // International. Sarvam cannot voice these at any point, key or no key.
+  return providerUsable('elevenlabs') ? 'elevenlabs' : null;
+}
+
+function pickSttProvider(language) {
+  const preferred = sttProviderFor(language);
+
+  if (preferred === 'sarvam') {
+    if (providerUsable('sarvam')) return 'sarvam';
+    if (providerUsable('elevenlabs')) return 'elevenlabs';
+    return null;
+  }
+
+  return providerUsable('elevenlabs') ? 'elevenlabs' : null;
+}
+
+/**
+ * Synthesise one clip, from whichever engine can speak this language.
+ *
+ * Public entry point for every caller. `speaker` and `model` are
+ * provider-specific and are simply handed to whichever engine is chosen —
+ * a Sarvam speaker id reaching ElevenLabs resolves to that provider's default
+ * rather than failing, which is what makes switching language mid-session safe
+ * even though the saved voice preference no longer applies.
+ */
+async function synthesize({ text, speaker, model, pace = 1, language }) {
+  const provider = pickTtsProvider(language);
+
+  if (!provider) {
+    const lang = resolveLanguage(language);
+    throw new SpeechError(
+      lang.region === 'international'
+        ? `No natural voice is configured for ${lang.name}. Set ELEVENLABS_API_KEY to enable it.`
+        : 'No speech provider is configured on the server.',
+      503
+    );
+  }
+
+  if (provider === 'elevenlabs') {
+    try {
+      return await elevenLabs.synthesize({ text, speaker, pace, language });
+    } catch (error) {
+      // ElevenLabs reports quota failures through its own module; surface them
+      // into the shared breaker so routing stops choosing it too.
+      const status = elevenLabs.takeLastFailureStatus();
+      if (status) markProviderDown('elevenlabs', status, error.message);
+      throw error;
+    }
+  }
+  return synthesizeWithSarvam({ text, speaker, model, pace, language });
+}
+
+/**
+ * Transcribe audio with whichever engine handles this language best.
+ *
+ * `mode` and `prompt` are Sarvam-only concepts (verbatim/codemix transcription
+ * and context priming). They are accepted here regardless and ignored on the
+ * ElevenLabs path rather than rejected, because the caller does not know which
+ * provider will answer and should not have to.
+ */
+async function transcribe({
+  audioBuffer,
+  mimeType = 'audio/webm',
+  filename = 'audio.webm',
+  language,
+  model,
+  mode = 'transcribe',
+  prompt = ''
+}) {
+  // 'auto' has to resolve before routing, and it cannot: nobody knows the
+  // language yet. Scribe detects it natively, so auto-detect goes to
+  // ElevenLabs when available and to Sarvam's 'unknown' handling otherwise.
+  const wantsAutoDetect = !language || language === 'auto' || language === 'unknown';
+
+  const provider = wantsAutoDetect
+    ? (config.elevenLabsEnabled && 'elevenlabs') || (config.sarvamEnabled && 'sarvam') || null
+    : pickSttProvider(language);
+
+  if (!provider) {
+    const lang = resolveLanguage(language);
+    throw new SpeechError(
+      lang.region === 'international'
+        ? `Speech-to-text is not configured for ${lang.name}. Set ELEVENLABS_API_KEY to enable it.`
+        : 'Speech-to-text is not configured on the server.',
+      503
+    );
+  }
+
+  if (provider === 'elevenlabs') {
+    try {
+      return await elevenLabs.transcribe({ audioBuffer, mimeType, filename, language, model });
+    } catch (error) {
+      const status = elevenLabs.takeLastFailureStatus();
+      if (status) markProviderDown('elevenlabs', status, error.message);
+      throw error;
+    }
+  }
+  return transcribeWithSarvam({ audioBuffer, mimeType, filename, language, model, mode, prompt });
+}
+
+/**
+ * Every voice the server can offer, tagged with the provider that owns it.
+ *
+ * Both catalogues are returned whether or not both keys are set, because the
+ * picker also has to render voices for a language the user has not selected
+ * yet. Each entry carries `provider`, and the client filters by the active
+ * language's provider so a Sarvam speaker is never offered for Japanese.
+ */
+function listAllVoices() {
+  return [
+    ...listVoices().map((voice) => ({ ...voice, provider: 'sarvam' })),
+    ...elevenLabs.listVoices()
+  ];
+}
+
 module.exports = {
+  // Routed entry points — use these.
   synthesize,
   transcribe,
+  listAllVoices,
+  pickTtsProvider,
+  pickSttProvider,
+  providerHealth,
+  clearProviderOutages,
+  markProviderDown,
+  // Sarvam specifics, still exported for the voice catalogue and the tests.
+  synthesizeWithSarvam,
+  transcribeWithSarvam,
   listVoices,
   resolveVoice,
   cleanForSpeech,

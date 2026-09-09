@@ -277,12 +277,39 @@ thousand years.`;
     async () => {
       const data = await fetch(`${BASE}/api/speech/voices`).then((r) => r.json());
       expect(Array.isArray(data.languages), 'no languages exposed');
-      expect(data.languages.length >= 11, `expected 11 languages, got ${data.languages.length}`);
+
+      /*
+       * The catalogue is two disjoint tiers, not one list: eleven Indian
+       * languages on Sarvam plus the international set on ElevenLabs. This
+       * assertion used to be `/^[a-z]{2}-IN$/` on every code, which was true
+       * when Bulbul bounded the whole product and became wrong the moment
+       * international languages existed — it failed on es-ES and ja-JP while
+       * the endpoint was working perfectly.
+       */
+      const indian = data.languages.filter((l) => l.region === 'india');
+      const international = data.languages.filter((l) => l.region === 'international');
+
+      expect(indian.length === 11, `expected 11 Indian languages, got ${indian.length}`);
+      expect(international.length >= 1, 'no international languages exposed');
       expect(
-        data.languages.every((l) => /^[a-z]{2}-IN$/.test(l.code) && l.native && l.name),
-        'a language is missing its code, name, or native label'
+        indian.every((l) => /^[a-z]{2}-IN$/.test(l.code)),
+        'an Indian language has a non -IN code'
       );
-      return data.languages.map((l) => l.code.split('-')[0]).join(' ');
+      expect(
+        data.languages.every((l) => l.code && l.name && l.native && l.bcp47),
+        'a language is missing its code, name, native label, or bcp47 tag'
+      );
+      /*
+       * bcp47 is what reaches a `lang=` attribute and it is NOT always `code`:
+       * Sarvam spells Odia 'od-IN', which is not a valid language tag, so a
+       * screen reader ignores it and reads Odia with an English voice engine.
+       */
+      expect(
+        data.languages.find((l) => l.code === 'od-IN')?.bcp47 === 'or-IN',
+        "Odia's bcp47 tag must be or-IN, not Sarvam's od-IN"
+      );
+
+      return `${indian.length} Indian + ${international.length} international`;
     },
     { usesAI: false }
   );

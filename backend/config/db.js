@@ -12,6 +12,93 @@ let lastError = null;
 /* -------------------------------------------------------------------------- */
 
 /**
+ * Split a `mongodb+srv://` URI into the parts needed to rebuild it as a direct
+ * seed list.
+ *
+ * Deliberately regex rather than `new URL()`. The URL parser percent-decodes
+ * `username:password`, and a password containing `%40` or `%2F` — which Atlas
+ * requires for `@` and `/` — comes back decoded and then re-encodes wrongly on
+ * the way out, producing an authentication failure that looks like a bad
+ * credential rather than a mangled one.
+ */
+function splitSrvUri(uri) {
+  const match = uri.match(/^mongodb\+srv:\/\/(?:([^@]*)@)?([^/?]+)(?:\/([^?]*))?(?:\?(.*))?$/);
+  if (!match) return null;
+  const [, credentials = '', hostname, database = '', query = ''] = match;
+  return { credentials, hostname, database, query };
+}
+
+/**
+ * Rebuild an SRV URI as a direct seed list, so the driver needs no DNS at all.
+ *
+ * WHY
+ * ---
+ * `mongodb+srv://` is a convenience: the driver does an SRV lookup to discover
+ * the shard hostnames and a TXT lookup to discover the connection options,
+ * every time it connects. On a network whose resolver refuses SRV — which this
+ * one does, with ECONNREFUSED — that costs a failed system lookup, a fallback
+ * lookup against a public resolver, and then the driver's own repeat of both.
+ * It is the whole of the ~15s cold start.
+ *
+ * The seed-list form (`mongodb://host1,host2,host3/db?replicaSet=...`) is what
+ * SRV resolves *to*. Connecting with it directly is not a workaround or a
+ * downgrade — it is the same cluster, the same replica set, the same TLS — it
+ * simply skips the discovery step.
+ *
+ * The hosts are still discovered dynamically here rather than hardcoded,
+ * because Atlas can move a cluster's shards. Set `MONGODB_DIRECT_URI` to pin
+ * them and skip DNS entirely; the derived URI is logged at boot for that
+ * purpose. If the pinned hosts ever go stale, the driver reports a plain
+ * connection failure and the fix is to drop the variable.
+ */
+async function deriveDirectUri(uri, resolver) {
+  const parts = splitSrvUri(uri);
+  if (!parts) return null;
+
+  const [srvRecords, txtRecords] = await Promise.all([
+    resolver.resolveSrv(`_mongodb._tcp.${parts.hostname}`),
+    // A cluster without a TXT record is legal; its options just come from the
+    // URI alone, so a failure here is not fatal.
+    resolver.resolveTxt(parts.hostname).catch(() => [])
+  ]);
+
+  if (!srvRecords.length) return null;
+
+  const seeds = srvRecords
+    .map((record) => `${record.name}:${record.port}`)
+    .sort()
+    .join(',');
+
+  /*
+   * Option precedence: TXT record first, then whatever the URI already carried,
+   * so an explicit choice in MONGODB_URI still wins over the cluster default.
+   */
+  const options = new Map();
+  for (const pair of txtRecords.flat().join('&').split('&')) {
+    const [key, value] = pair.split('=');
+    if (key && value) options.set(key.trim(), value.trim());
+  }
+  for (const pair of parts.query.split('&')) {
+    const [key, value] = pair.split('=');
+    if (key && value) options.set(key.trim(), value.trim());
+  }
+
+  // `mongodb+srv://` implies TLS. The seed-list form does not, so it has to be
+  // stated — without it Atlas rejects the handshake.
+  if (!options.has('ssl') && !options.has('tls')) options.set('tls', 'true');
+
+  const query = [...options].map(([key, value]) => `${key}=${value}`).join('&');
+  const auth = parts.credentials ? `${parts.credentials}@` : '';
+
+  return `mongodb://${auth}${seeds}/${parts.database}?${query}`;
+}
+
+/** Hide the password in anything we log. */
+function maskUri(uri) {
+  return String(uri || '').replace(/\/\/([^:]*):([^@]*)@/, '//$1:***@');
+}
+
+/**
  * `mongodb+srv://` needs SRV and TXT lookups before the driver can reach a
  * single node. Plenty of networks answer A records but refuse those two record
  * types, and the driver reports it as `querySrv ECONNREFUSED` — which reads like
@@ -22,48 +109,81 @@ let lastError = null;
  * so the driver's own lookup succeeds too. `dns.lookup` (used for the actual
  * socket connections) still goes through the OS, so nothing else changes.
  */
-async function ensureSrvResolvable(uri) {
-  if (!uri.startsWith('mongodb+srv://')) return true;
+/**
+ * Work out the URI to actually hand the driver.
+ *
+ * Returns `{ uri }` on success, or `null` when the cluster cannot be reached at
+ * all. The returned URI is a direct seed list wherever we managed to resolve
+ * one, so the driver performs no DNS of its own.
+ */
+async function resolveConnectionUri(uri) {
+  // Already a seed list, or explicitly pinned: nothing to discover.
+  if (!uri.startsWith('mongodb+srv://')) return { uri };
 
   let hostname;
   try {
     hostname = new URL(uri).hostname;
   } catch {
-    return true; // Let the driver produce the parse error itself.
+    return { uri }; // Let the driver produce the parse error itself.
   }
 
   const srvName = `_mongodb._tcp.${hostname}`;
+  const systemResolver = dns.promises;
 
+  /*
+   * Try the system resolver first. When it works this is one lookup and we
+   * still convert to a seed list, because the driver would otherwise repeat
+   * both lookups itself on connect.
+   */
   try {
-    await dns.promises.resolveSrv(srvName);
-    return true;
+    await systemResolver.resolveSrv(srvName);
+    const direct = await deriveDirectUri(uri, systemResolver).catch(() => null);
+    if (direct) {
+      console.log(`  [MongoDB] Resolved ${hostname} to a direct seed list; skipping SRV on connect.`);
+      return { uri: direct, derived: true };
+    }
+    return { uri };
   } catch (systemError) {
     const servers = config.dnsFallbackServers;
     if (!servers.length) {
-      console.warn(`  [MongoDB] SRV lookup for ${hostname} failed (${systemError.code || systemError.message}).`);
-      return false;
+      console.warn(
+        `  [MongoDB] SRV lookup for ${hostname} failed (${systemError.code || systemError.message}).`
+      );
+      return null;
     }
 
     const resolver = new dns.promises.Resolver();
     resolver.setServers(servers);
 
+    let direct;
     try {
-      await resolver.resolveSrv(srvName);
+      direct = await deriveDirectUri(uri, resolver);
     } catch (fallbackError) {
       console.warn(
         `  [MongoDB] SRV lookup for ${hostname} failed on both the system resolver ` +
           `(${systemError.code || systemError.message}) and ${servers.join(', ')} ` +
           `(${fallbackError.code || fallbackError.message}).`
       );
-      return false;
+      return null;
     }
 
-    dns.setServers(servers);
+    if (!direct) return null;
+
     console.log(
-      `  [MongoDB] System DNS cannot resolve SRV records (${systemError.code || systemError.message}); ` +
-        `using ${servers.join(', ')} for this process.`
+      `  [MongoDB] System DNS refuses SRV records (${systemError.code || systemError.message}); ` +
+        `resolved ${hostname} via ${servers.join(', ')} instead.`
     );
-    return true;
+
+    /*
+     * Deliberately NOT calling `dns.setServers(servers)` any more.
+     *
+     * That was here so the driver's own SRV lookup would succeed, which meant
+     * repeating the work we just did — and it redirected every other DNS query
+     * in the process to a public resolver as a side effect, including the
+     * engine's outbound calls. Handing the driver a seed list removes the need
+     * for both.
+     */
+    return { uri: direct, derived: true };
   }
 }
 
@@ -110,19 +230,29 @@ async function connectDB() {
   bindListeners();
 
   connectionPromise = (async () => {
-    const resolvable = await ensureSrvResolvable(mongoUri);
-    if (!resolvable) {
+    const resolved = await resolveConnectionUri(mongoUri);
+    if (!resolved) {
       lastError = 'SRV DNS lookup failed';
       console.log(
         '  [MongoDB] Continuing with client-side/local fallback storage. ' +
-          'Set DNS_SERVERS to a resolver that answers SRV records, or use the non-SRV ' +
-          '(mongodb://host1,host2,host3/db) form of the connection string.'
+          'Set DNS_SERVERS to a resolver that answers SRV records, or set ' +
+          'MONGODB_DIRECT_URI to the seed-list form of the connection string.'
       );
       return null;
     }
 
+    /*
+     * Printed once at boot so it can be pinned in .env as MONGODB_DIRECT_URI,
+     * which removes DNS from startup entirely — worth doing before a live demo
+     * on an unfamiliar network. Credentials are masked; the shape is what
+     * matters, and the password is already in the operator's own .env.
+     */
+    if (resolved.derived) {
+      console.log(`  [MongoDB] Direct URI: ${maskUri(resolved.uri)}`);
+    }
+
     try {
-      const conn = await mongoose.connect(mongoUri, {
+      const conn = await mongoose.connect(resolved.uri, {
         serverSelectionTimeoutMS: Number(process.env.MONGODB_TIMEOUT_MS || 15000),
         socketTimeoutMS: 45000,
         retryWrites: true,
