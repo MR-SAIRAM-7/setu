@@ -307,4 +307,4 @@ Point it at a non-default port with `SETU_API=http://127.0.0.1:3999 npm run smok
 
 ## License
 
-Built for Capgemini Hack4Positive 2026.
+Built for Capgemini Tech4Positive Futures 2026.
